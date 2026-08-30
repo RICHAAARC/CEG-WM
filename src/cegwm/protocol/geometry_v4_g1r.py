@@ -12,14 +12,14 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "89dc5d156c72a342cf32fb986fb3280ecfd1591a2038616411a9853c40601822"
+CONFIG_SHA256 = "318509ef39d693f8e961413832cb75a048efc3d156176fafc8218756cf973e1f"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
-WRITER_ID = "geometry_v4_g1r_generated_writer_v1"
+WRITER_ID = "geometry_v4_g1r_vae_decoder_output_writer_v2"
 STAGE = "V4-G1R"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
-PLACEMENT = "20_step_callback_step_19_final_latent_before_VAE_decode"
-CALLBACK_STEP_INDEX = 19
+PLACEMENT = "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess"
+DECODER_HOOK_CALLS_REQUIRED = 1
 LUMA_RMS_CAP = 2.0 / 255.0
 LUMA_PEAK_CAP = 8.0 / 255.0
 ENERGY_SHARES = (0.40, 0.36, 0.24)
@@ -92,7 +92,7 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
         raise ValueError("V4-G1R development runner differs")
     runtime = value.get("runtime", {})
-    if runtime.get("model_id") != MODEL_ID or runtime.get("placement") != PLACEMENT or runtime.get("callback_step_index_zero_based") != CALLBACK_STEP_INDEX or runtime.get("single_fixed_update") is not True:
+    if runtime.get("model_id") != MODEL_ID or runtime.get("placement") != PLACEMENT or runtime.get("hook_module") != "AutoencoderKL.decoder" or runtime.get("decoder_output_hook_calls_required") != DECODER_HOOK_CALLS_REQUIRED or runtime.get("single_fixed_update") is not True:
         raise ValueError("V4-G1R runtime identity differs")
     return value
 

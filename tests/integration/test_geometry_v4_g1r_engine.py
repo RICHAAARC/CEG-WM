@@ -11,7 +11,7 @@ from PIL import Image
 
 from experiments import geometry_v4_g1r_engine as engine
 from cegwm.method.geometry_v4_g1r import G1RFinalRGBObservability
-from cegwm.protocol.geometry_v4_g1r import ATTACKS
+from cegwm.protocol.geometry_v4_g1r import ATTACKS, PLACEMENT, WRITER_ID
 from cegwm.runtime.geometry_v4_g1r_sd35 import G1RGeneratedPair
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,14 +93,16 @@ def test_real_three_arms_are_independent_and_use_the_required_current_rgb(monkey
 
     def fake_detect(rgb, key):
         calls.append((rgb, key))
-        return _unreliable_arm()
+        return _unreliable_arm(), {"search_top_k": (), "selected_fit": {"support": 0}, "holdout": {}}
 
-    monkeypatch.setattr(engine, "detect_g1r", fake_detect)
+    monkeypatch.setattr(engine, "_detect_g1r_engineering", fake_detect)
     arms = engine._blind_arms_for_keys(marked, negative, correct_key, wrong_key)
     assert arms.correct is not arms.wrong and arms.wrong is not arms.negative
     assert calls[0][0] is marked and calls[0][1] == correct_key
     assert calls[1][0] is marked and calls[1][1] == wrong_key
     assert calls[2][0] is negative and calls[2][1] == correct_key
+    assert all("engineering_diagnostics" in getattr(arms, name) for name in ("correct", "wrong", "negative"))
+    assert json.dumps(arms.correct, allow_nan=False)
 
 
 @pytest.mark.integration
@@ -192,6 +194,7 @@ def test_artifacts_are_create_only_hashed_and_secret_free(tmp_path: Path, monkey
     assert manifest["source_exact"] == "a" * 40 and manifest["stage"] == "development" and manifest["units"] == 20
     assert manifest["seeds"] == [6201, 6202, 6203, 6204] and manifest["attacks"] == list(ATTACKS)
     assert manifest["config_sha256"] and manifest["notebook_identity"] == "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
+    assert manifest["placement"] == PLACEMENT and manifest["writer_id"] == WRITER_ID
     joined = b"".join(path.read_bytes() for path in root.iterdir())
     assert b"root-secret-value" not in joined and b"hf-secret-value" not in joined
     with pytest.raises(FileExistsError):

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
+from PIL import Image
 
 from cegwm.method import geometry_v4_g1r as method
 from cegwm.protocol.geometry_v4_g1r import (
@@ -25,25 +27,36 @@ from cegwm.protocol.geometry_v4_g1r import (
     load_contract,
     require_split,
 )
-from cegwm.runtime.geometry_v4_g1r_sd35 import G1RFinalLatentCallback
+from cegwm.runtime.geometry_v4_g1r_sd35 import G1RDecoderOutputHook, run_g1r_sd35_pair
 
 ROOT = Path(__file__).resolve().parents[2]
 KEY = b"0123456789abcdef"
 
 
-class _VAE(torch.nn.Module):
-    config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
+class _Decoder(torch.nn.Module):
+    def forward(self, value):
+        return value
 
+
+class _VAE:
     def __init__(self) -> None:
-        super().__init__()
-        self.weight = torch.nn.Parameter(torch.ones((), dtype=torch.float16))
-
-    def decode(self, value, return_dict=True):
-        return SimpleNamespace(sample=value[:, :3] * self.weight)
+        self.decoder = _Decoder()
 
 
 class _Pipeline:
-    vae = _VAE()
+    def __init__(self) -> None:
+        self.vae = _VAE()
+        self.calls = 0
+        self.fail_on_call = None
+
+    def __call__(self, **kwargs):
+        self.calls += 1
+        decoded = self.vae.decoder(torch.zeros((1, 3, kwargs["height"], kwargs["width"]), dtype=torch.float32))
+        if self.calls == self.fail_on_call:
+            raise RuntimeError("synthetic marked generation failure")
+        rgb = ((decoded[0].permute(1, 2, 0) + 1.0) / 2.0).clamp(0.0, 1.0)
+        image = Image.fromarray((rgb.numpy() * 255.0).round().astype(np.uint8), mode="RGB")
+        return SimpleNamespace(images=[image])
 
 
 @pytest.mark.unit
@@ -83,20 +96,34 @@ def test_key_domains_and_anchor_energy_are_separate_and_deterministic() -> None:
 
 
 @pytest.mark.unit
-def test_rgb_and_fake_vae_writers_keep_frozen_budget_and_single_update() -> None:
+def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> None:
     ordinary = np.full((64, 64, 3), .5)
     marked, budget = method.write_g1r_rgb(ordinary, KEY)
     assert not np.array_equal(marked, ordinary)
     assert budget["luma_rms"] <= budget["luma_rms_cap"] == 2 / 255
     assert budget["luma_peak"] <= budget["luma_peak_cap"] == 8 / 255
-    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
-    callback = G1RFinalLatentCallback(KEY)
-    state = {"latents": latents}
-    assert callback(_Pipeline(), 18, None, state) is state
-    updated = callback(_Pipeline(), 19, None, state)
-    assert callback.called and not torch.equal(updated["latents"], latents)
+    decoded = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
+    updated = method.write_g1r_decoder_output(decoded, KEY)
+    final_luma_delta = updated[0, 0].numpy() / 2.0
+    assert float(np.sqrt(np.mean(final_luma_delta**2))) <= 2 / 255
+    assert float(np.max(np.abs(final_luma_delta))) <= 8 / 255
+
+    hook = G1RDecoderOutputHook(KEY)
+    assert not torch.equal(hook(None, (), decoded), decoded)
     with pytest.raises(RuntimeError, match="more than once"):
-        callback(_Pipeline(), 19, None, state)
+        hook(None, (), decoded)
+
+    pipeline = _Pipeline()
+    pair = run_g1r_sd35_pair(pipeline, "an ordinary test scene", KEY, height=256, width=256, generator=torch.Generator().manual_seed(6201))
+    assert pipeline.calls == 2 and pair.clean.tobytes() != pair.marked.tobytes()
+    assert len(pipeline.vae.decoder._forward_hooks) == 0
+    assert torch.equal(pipeline.vae.decoder(decoded), decoded)
+
+    failing_pipeline = _Pipeline()
+    failing_pipeline.fail_on_call = 2
+    with pytest.raises(RuntimeError, match="marked generation failure"):
+        run_g1r_sd35_pair(failing_pipeline, "an ordinary test scene", KEY, height=256, width=256, generator=torch.Generator().manual_seed(6201))
+    assert len(failing_pipeline.vae.decoder._forward_hooks) == 0
 
 
 @pytest.mark.unit
@@ -111,6 +138,7 @@ def test_final_rgb_observability_uses_all_three_domains_and_frozen_quality_limit
     assert observation.luma_rms <= 2 / 255 and observation.luma_peak <= 8 / 255
     assert observation.content_score_drift == 0.0
     assert observation.passed
+    assert all(observation.correct_domain_scores[name] > observation.wrong_domain_scores[name] for name in ("search", "fit", "validate"))
     assert DEVELOPMENT_ARTIFACT_FILES == ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json")
     assert DEVELOPMENT_NOTEBOOK_ID == "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
 
@@ -137,6 +165,12 @@ def test_detector_has_no_oracle_surface_and_preserves_original_fit_gates() -> No
     assert tuple(inspect.signature(method.detect_g1r).parameters) == ("attacked_rgb", "detection_key")
     output = method.detect_g1r(np.full((64, 64, 3), .5), KEY)
     assert set(output) == {"H_hat", "corners_hat", "support", "reliability", "status"}
+    _, diagnostics = method._detect_g1r_engineering(np.full((64, 64, 3), .5), KEY)
+    assert set(diagnostics) == {"search_top_k", "selected_fit", "holdout"}
+    assert len(diagnostics["search_top_k"]) <= 5
+    serialized = json.dumps(diagnostics, allow_nan=False, sort_keys=True)
+    assert "H_hat" not in diagnostics and "key" not in serialized.lower()
+    assert KEY.hex() not in serialized and KEY.decode("ascii") not in serialized
     forbidden = {"truth", "original", "clean", "residual", "latent", "attack"}
     assert not forbidden & set(inspect.signature(method._search_candidates).parameters)
     assert FIT_GATES["support"] == 6 and FIT_GATES["coverage"] == .75 and FIT_GATES["macro_regions"] == 3

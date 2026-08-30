@@ -132,7 +132,7 @@
     "protocol_id": "cegwm-geometry-v4-g1r-v1",
     "stage": "V4-G1R",
     "status": "G1_METHOD_PARTIAL_NOT_PASSED",
-    "writer_id": "geometry_v4_g1r_generated_writer_v1"
+    "writer_id": "geometry_v4_g1r_vae_decoder_output_writer_v2"
   },
   "key_domains": {
     "fit": "CEG-WM/geometry-v4/g1r/fit/v1",
@@ -185,9 +185,10 @@
     "units_per_split": 20
   },
   "runtime": {
-    "callback_step_index_zero_based": 19,
+    "decoder_output_hook_calls_required": 1,
+    "hook_module": "AutoencoderKL.decoder",
     "model_id": "stabilityai/stable-diffusion-3.5-medium",
-    "placement": "20_step_callback_step_19_final_latent_before_VAE_decode",
+    "placement": "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess",
     "single_fixed_update": true
   },
   "schema_version": "cegwm_geometry_v4_g1r_v1",

@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from cegwm.method.geometry_v4_g1r import detect_g1r, measure_g1r_final_rgb, write_g1r_rgb
+from cegwm.method.geometry_v4_g1r import _detect_g1r_engineering, measure_g1r_final_rgb, write_g1r_rgb
 from cegwm.method.geometry_v4_generative import build_reused_weighted_joint_content_adapter
 from cegwm.method.geometry_v4_proxy import _sample_h, _similarity_h
 from cegwm.protocol.geometry_v4_g1r import (
@@ -29,6 +29,7 @@ from cegwm.protocol.geometry_v4_g1r import (
     DEVELOPMENT_SOURCE_REQUIRED,
     MODEL_ID,
     PLACEMENT,
+    WRITER_ID,
     contract_sha256,
     load_contract,
     require_split,
@@ -115,10 +116,13 @@ def _truth_for_attack(attack: str) -> np.ndarray:
 
 def _blind_arms_for_keys(attacked_marked: np.ndarray, attacked_negative: np.ndarray, correct_key: object, wrong_key: object) -> BlindArms:
     """Freeze three independent attacked-RGB/key-only arms before truth exists."""
+    correct, correct_diagnostics = _detect_g1r_engineering(attacked_marked, correct_key)
+    wrong, wrong_diagnostics = _detect_g1r_engineering(attacked_marked, wrong_key)
+    negative, negative_diagnostics = _detect_g1r_engineering(attacked_negative, correct_key)
     return BlindArms(
-        correct=detect_g1r(attacked_marked, correct_key),
-        wrong=detect_g1r(attacked_marked, wrong_key),
-        negative=detect_g1r(attacked_negative, correct_key),
+        correct={**correct, "engineering_diagnostics": correct_diagnostics},
+        wrong={**wrong, "engineering_diagnostics": wrong_diagnostics},
+        negative={**negative, "engineering_diagnostics": negative_diagnostics},
     )
 
 
@@ -382,6 +386,7 @@ def write_development_artifacts(
         "config_sha256": digest,
         "model_id": MODEL_ID,
         "placement": PLACEMENT,
+        "writer_id": WRITER_ID,
         "notebook_identity": DEVELOPMENT_NOTEBOOK_ID,
         "seeds": [seed for seed, _, _ in require_split(load_contract(repo_root), "development")[:: len(ATTACKS)]],
         "prompts": [prompt for _, prompt, _ in require_split(load_contract(repo_root), "development")[:: len(ATTACKS)]],

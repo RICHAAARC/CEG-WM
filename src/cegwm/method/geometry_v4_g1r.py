@@ -6,7 +6,7 @@ import hmac
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping
 
 import numpy as np
 import torch
@@ -41,7 +41,6 @@ from cegwm.protocol.geometry_v4_g1r import (
 from cegwm.shared.keys import normalize_detection_key
 
 _REC709 = np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float64)
-_LATENT_AMPLITUDE = 0.001
 _SEARCH_SIZE = 96
 _COARSE_ANGLES = (-8.0, -6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0)
 _COARSE_SCALES = (0.86, 0.9, 0.95, 1.0, 1.05, 1.1, 1.14)
@@ -174,13 +173,23 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
     return np.asarray(rgb, dtype=np.float64) @ _REC709
 
 
+def _g1r_luma_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
+    """Return the single fixed luma-space update shared by both writer placements."""
+    anchor = g1r_anchor_fields(shape, detection_key).combined
+    target = 0.75 * LUMA_RMS_CAP
+    scale = min(target * math.sqrt(anchor.size), LUMA_PEAK_CAP / max(1e-12, float(np.max(np.abs(anchor)))))
+    delta = scale * anchor
+    rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))
+    if rms > LUMA_RMS_CAP + 1e-12 or peak > LUMA_PEAK_CAP + 1e-12:
+        raise RuntimeError("V4-G1R writer exceeded the frozen luma budget")
+    return delta
+
+
 def write_g1r_rgb(rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> tuple[np.ndarray, Mapping[str, float]]:
     """Synthetic-only ordinary-RGB writer using the same frozen total budget."""
     image = _require_rgb(rgb)
-    anchor = g1r_anchor_fields(image.shape[:2], detection_key).combined
-    target = 0.75 * LUMA_RMS_CAP
-    scale = min(target * math.sqrt(anchor.size), LUMA_PEAK_CAP / max(1e-12, float(np.max(np.abs(anchor)))))
-    marked = np.clip(image + (scale * anchor)[..., None], 0.0, 1.0)
+    delta_luma = _g1r_luma_delta(image.shape[:2], detection_key)
+    marked = np.clip(image + delta_luma[..., None], 0.0, 1.0)
     delta = _luma(marked) - _luma(image)
     rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))
     if rms > LUMA_RMS_CAP + 1e-12 or peak > LUMA_PEAK_CAP + 1e-12:
@@ -188,8 +197,10 @@ def write_g1r_rgb(rgb: np.ndarray, detection_key: str | bytes | bytearray | memo
     return marked, {"luma_rms": rms, "luma_peak": peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP}
 
 
-def _field_score(rgb: np.ndarray, field: np.ndarray) -> float:
-    luma = _luma(rgb)
+def _field_score(luma: np.ndarray, field: np.ndarray) -> float:
+    luma = np.asarray(luma, dtype=np.float64)
+    if luma.ndim != 2 or luma.shape != field.shape or not np.isfinite(luma).all():
+        raise ValueError("V4-G1R field score requires finite aligned luma residual")
     luma = luma - float(np.mean(luma))
     denominator = float(np.linalg.norm(luma) * np.linalg.norm(field))
     return -1.0 if denominator <= 1e-12 else float(np.sum(luma * field) / denominator)
@@ -220,8 +231,8 @@ def measure_g1r_final_rgb(
     correct_fields = g1r_anchor_fields(clean.shape[:2], normalized)
     wrong_fields = g1r_anchor_fields(clean.shape[:2], normalized_wrong)
     names = ("search", "fit", "validate")
-    correct_scores = {name: _field_score(marked, getattr(correct_fields, name)) for name in names}
-    wrong_scores = {name: _field_score(marked, getattr(wrong_fields, name)) for name in names}
+    correct_scores = {name: _field_score(delta_luma, getattr(correct_fields, name)) for name in names}
+    wrong_scores = {name: _field_score(delta_luma, getattr(wrong_fields, name)) for name in names}
     drift = abs(float(content_detector(clean, normalized)) - float(content_detector(marked, normalized)))
     values = (psnr, ssim, float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma))), drift, *correct_scores.values(), *wrong_scores.values())
     if any(not math.isfinite(value) for value in values):
@@ -229,43 +240,15 @@ def measure_g1r_final_rgb(
     return G1RFinalRGBObservability(values[0], values[1], values[2], values[3], values[4], correct_scores, wrong_scores)
 
 
-def _torch_anchor(shape: tuple[int, int], detection_key: object, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    field = g1r_anchor_fields(shape, detection_key).combined
-    return torch.as_tensor(field, device=device, dtype=dtype)[None, None]
-
-
-def _vae_rgb(pipeline: Any, latents: torch.Tensor) -> torch.Tensor:
-    vae, config = getattr(pipeline, "vae", None), getattr(getattr(pipeline, "vae", None), "config", None)
-    scaling, shift = getattr(config, "scaling_factor", None), getattr(config, "shift_factor", None)
-    if not callable(getattr(vae, "decode", None)) or not isinstance(scaling, (int, float)) or not isinstance(shift, (int, float)) or scaling <= 0 or not math.isfinite(float(scaling)) or not math.isfinite(float(shift)):
-        raise RuntimeError("V4-G1R requires a differentiable SD3 VAE")
-    try:
-        parameter = next(vae.parameters())
-    except (AttributeError, StopIteration, TypeError) as error:
-        raise RuntimeError("V4-G1R cannot resolve VAE dtype/device") from error
-    coordinate = (latents.to(torch.float32) / float(scaling) + float(shift)).to(parameter.device, parameter.dtype)
-    sample = getattr(vae.decode(coordinate, return_dict=True), "sample", None)
-    if not isinstance(sample, torch.Tensor) or sample.ndim != 4 or sample.shape[:2] != (1, 3) or not bool(torch.isfinite(sample).all()):
-        raise RuntimeError("V4-G1R VAE decode is invalid")
-    return (sample + 1.0) / 2.0
-
-
-def write_g1r_final_latent(latents: torch.Tensor, detection_key: object, pipeline: Any) -> torch.Tensor:
-    """One fixed G1R VAE-adjoint update; no final-RGB feedback or search."""
-    if not isinstance(latents, torch.Tensor) or latents.ndim != 4 or not latents.dtype.is_floating_point or not bool(torch.isfinite(latents).all()):
-        raise ValueError("V4-G1R final callback latents must be finite floating NCHW")
-    with torch.enable_grad():
-        current = latents.detach().to(torch.float32).requires_grad_(True)
-        rgb = _vae_rgb(pipeline, current)
-        basis = _torch_anchor(tuple(rgb.shape[-2:]), detection_key, device=rgb.device, dtype=rgb.dtype)
-        weights = torch.as_tensor(_REC709, device=rgb.device, dtype=rgb.dtype)[None, :, None, None]
-        objective = ((rgb * weights).sum(1, keepdim=True) * basis).sum()
-        gradient = torch.autograd.grad(objective, current, allow_unused=False)[0]
-    gradient = gradient - gradient.mean(dim=(-2, -1), keepdim=True)
-    norm = torch.linalg.vector_norm(gradient)
-    if not bool(torch.isfinite(gradient).all()) or not bool(torch.isfinite(norm)) or float(norm) <= 0.0:
-        raise RuntimeError("V4-G1R VAE-adjoint gradient is invalid")
-    return latents + (gradient / norm).to(latents.dtype) * _LATENT_AMPLITUDE
+def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> torch.Tensor:
+    """Apply one fixed update to the real VAE decoder output before RGB postprocess."""
+    if not isinstance(decoded, torch.Tensor) or decoded.ndim != 4 or decoded.shape[0] != 1 or decoded.shape[1] != 3 or not decoded.dtype.is_floating_point or not bool(torch.isfinite(decoded).all()):
+        raise ValueError("V4-G1R decoder output must be finite floating 1x3xHxW")
+    delta_luma = _g1r_luma_delta((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
+    # Diffusers maps the decoder's nominal [-1,1] sample to [0,1], so a 2x
+    # decoder-space update is exactly the frozen final-RGB luma update pre-clip.
+    delta = torch.as_tensor(2.0 * delta_luma, device=decoded.device, dtype=decoded.dtype)[None, None]
+    return decoded + delta
 
 
 def _valid_warp(image: np.ndarray, output_to_input: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -504,12 +487,12 @@ def _holdout_metrics(image: np.ndarray, canonical_to_attacked: np.ndarray, valid
 def _detect_domains(image: np.ndarray, domain_keys: Mapping[str, bytes]) -> dict[str, object]:
     candidates = _search_candidates(image, domain_keys["search"])
     if not candidates:
-        return {"observation": GeometryV4Observation(None, (), 0, 0.0, "UNRELIABLE"), "frozen_h": None, "search_identity": (), "fit": {}, "holdout": {}}
+        return {"observation": GeometryV4Observation(None, (), 0, 0.0, "UNRELIABLE"), "frozen_h": None, "search_identity": (), "search_candidates": (), "fit": {}, "holdout": {}}
     fitted = tuple(_fit_candidate(image, candidate, domain_keys["fit"]) for candidate in candidates)
     selected = max(fitted, key=lambda item: item["rank"])
     search_identity = tuple((float(item["angle"]), float(item["scale"]), tuple(float(value) for value in np.asarray(item["canonical_to_attacked"]).reshape(-1))) for item in candidates)
     if not selected["valid"] or selected["canonical_to_attacked"] is None:
-        return {"observation": GeometryV4Observation(None, (), int(selected["support"]), 0.0, "UNRELIABLE"), "frozen_h": None, "search_identity": search_identity, "fit": selected, "holdout": {}}
+        return {"observation": GeometryV4Observation(None, (), int(selected["support"]), 0.0, "UNRELIABLE"), "frozen_h": None, "search_identity": search_identity, "search_candidates": candidates, "fit": selected, "holdout": {}}
     canonical_to_attacked = np.asarray(selected["canonical_to_attacked"], dtype=np.float64)
     attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
     attacked_to_canonical /= attacked_to_canonical[2, 2]
@@ -518,13 +501,70 @@ def _detect_domains(image: np.ndarray, domain_keys: Mapping[str, bytes]) -> dict
     holdout = _holdout_metrics(image, canonical_to_attacked, domain_keys["validate"])
     reliable = bool(holdout["passed"] and _valid_corners(corners))
     observation = GeometryV4Observation(frozen_h, corners, int(selected["support"]), 1.0, "RELIABLE") if reliable else GeometryV4Observation(None, (), int(selected["support"]), 0.0, "UNRELIABLE")
-    return {"observation": observation, "frozen_h": frozen_h, "search_identity": search_identity, "fit": selected, "holdout": holdout}
+    return {"observation": observation, "frozen_h": frozen_h, "search_identity": search_identity, "search_candidates": candidates, "fit": selected, "holdout": holdout}
 
 
 def detect_g1r(attacked_rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> Mapping[str, object]:
     """Attacked-RGB plus normalized-key-only public fail-closed detector."""
     image = _require_rgb(attacked_rgb)
-    result = _detect_domains(image, derive_g1r_keys(detection_key))
+    return _public_detection(_detect_domains(image, derive_g1r_keys(detection_key)))
+
+
+def _public_detection(result: Mapping[str, object]) -> Mapping[str, object]:
     observation = result["observation"]
     assert isinstance(observation, GeometryV4Observation)
     return {"H_hat": observation.H_hat, "corners_hat": observation.corners_hat, "support": observation.support, "reliability": observation.reliability, "status": observation.status}
+
+
+def _detect_g1r_engineering(attacked_rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    """Private runner path returning sanitized diagnostics from the same blind pass."""
+    return _detect_g1r_engineering_from_image(_require_rgb(attacked_rgb), detection_key)
+
+
+def _detect_g1r_engineering_from_image(image: np.ndarray, detection_key: object) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    result = _detect_domains(image, derive_g1r_keys(detection_key))
+    public = _public_detection(result)
+    fit = result.get("fit") if isinstance(result.get("fit"), Mapping) else {}
+    search = fit.get("search") if isinstance(fit.get("search"), Mapping) else {}
+
+    def finite(value: object) -> float | None:
+        number = float(value)
+        return number if math.isfinite(number) else None
+
+    search_summary = []
+    for item in result.get("search_candidates", ()):
+        matrix = np.asarray(item["canonical_to_attacked"], dtype=np.float64).reshape(3, 3)
+        search_summary.append({
+            "angle_degrees": finite(item["angle"]),
+            "scale": finite(item["scale"]),
+            "translation_x": finite(matrix[0, 2]),
+            "translation_y": finite(matrix[1, 2]),
+            "translation_psr": finite(item["translation_psr"]),
+            "ncc": finite(item["ncc"]),
+        })
+    fit_summary = {
+        "valid": bool(fit.get("valid", False)),
+        "support": int(fit.get("support", 0)),
+        "coverage": finite(fit.get("coverage", 0.0)),
+        "macro_regions": int(fit.get("macro_regions", 0)),
+        "inlier_ratio": finite(fit.get("inlier_ratio", 0.0)),
+        "reprojection": finite(fit.get("reprojection", math.inf)),
+        "condition": finite(fit.get("condition", math.inf)),
+        "translation_psr": finite(search.get("translation_psr", 0.0)),
+        "ncc": finite(search.get("ncc", -1.0)),
+    }
+    holdout = result.get("holdout") if isinstance(result.get("holdout"), Mapping) else {}
+    holdout_names = (
+        "passed", "support", "secondary_window_support", "coverage", "macro_regions",
+        "median_correlation", "fixed_h_narrow_band_correlation", "median_margin",
+        "holdout_psr", "median_tile_psr", "rotation_spread_degrees",
+        "log_scale_spread", "frozen_h_corner_consistency", "corner_validity",
+    )
+    holdout_summary = {}
+    for name in holdout_names:
+        if name not in holdout:
+            continue
+        value = holdout[name]
+        holdout_summary[name] = bool(value) if isinstance(value, (bool, np.bool_)) else int(value) if name in {"support", "secondary_window_support", "macro_regions"} else finite(value)
+    diagnostics = {"search_top_k": tuple(search_summary), "selected_fit": fit_summary, "holdout": holdout_summary}
+    return public, diagnostics

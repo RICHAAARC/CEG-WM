@@ -36,11 +36,13 @@ spatially disjoint local partitions are constructed independently: each field
 reads only its own derived domain key, so changing one key cannot change either
 of the other two fields. Tile identity and coordinates never depend on RGB.
 
-The versioned G1R writer remains one fixed update at step 19 of the 20-step
-SD3.5 run, immediately before final VAE decode. It may not exceed luma RMS
-2/255 or peak 8/255, search per image, retry, or increase the old budget. CPU
-tests use only a fake differentiable VAE; real final-RGB observability requires
-separate GPU authorization.
+The versioned G1R writer is one forward hook on the real `AutoencoderKL.decoder`
+output, immediately before ordinary RGB postprocess. The clean arm has no hook;
+the marked arm registers it only for its final decode, requires exactly one
+invocation, and removes it in a `finally` block. There is no latent-adjoint
+writer, final-RGB feedback, search, retry, fallback, or budget increase. The
+update may not exceed luma RMS 2/255 or peak 8/255. CPU tests use only a fake
+decoder module; real final-RGB observability requires separate GPU authorization.
 
 ## Blind detector
 
@@ -67,8 +69,11 @@ holdout gates must both pass. Changing validation bytes may therefore change
 only `RELIABLE`/`UNRELIABLE`, never the selected candidate or H.
 
 The public detector returns exactly `(H_hat, corners_hat, support, reliability,
-status)`. Search, fit, and holdout diagnostics remain private engineering
-records and cannot enlarge that public geometry interface.
+status)`. Each blind arm's fixed top-K search summary, selected fit gates, and
+holdout gates are captured once from that same detector execution as private,
+JSON-safe engineering records. They contain no key material, field patterns,
+truth, clean/original RGB, or writer residual and cannot enlarge that public
+geometry interface.
 
 ## Rosters and evidence ceiling
 
@@ -83,8 +88,10 @@ sources once as a clean/marked G1R pair and applies all five attacks afterward,
 retaining correct-key, wrong-key, and unwatermarked-negative blind arms for all
 20 units. Confirmation is rejected by this CLI. Its create-only artifact
 directory contains full records, summary, and manifest JSON files, each with
-an independent SHA-256 sidecar. Source observability requires all three G1R
-domain scores to beat their corresponding wrong-key scores, PSNR above 40,
+an independent SHA-256 sidecar. Source observability measures all three G1R
+domain scores only on the final-RGB luma residual `(marked-clean)`; this paired
+writer evaluator is forbidden from the blind detector. It requires every
+correct domain score to beat its corresponding wrong-key score, PSNR above 40,
 SSIM above .98, luma RMS and peak within 2/255 and 8/255, and unchanged-content
 score drift below .05. The real gate requires 4/4 observable sources, 20/20
 safe correct-key recoveries, zero unsafe result in every arm, and zero retained
