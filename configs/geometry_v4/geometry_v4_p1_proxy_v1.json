@@ -30,7 +30,7 @@
       1.55
     ],
     "cross_scale_estimation": "independent_keyed_band_log_polar_normalized_phase_then_quality_weighted_consensus",
-    "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_only",
+    "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_relative_to_consensus",
     "local_match_min_correlation": 0.42,
     "local_match_min_margin": 0.025,
     "local_search_radius_pixels_at_64": 4,

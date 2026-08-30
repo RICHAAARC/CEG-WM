@@ -141,11 +141,11 @@ def test_multiscale_raw_rotation_scale_evidence_is_periodic_and_not_clamped() ->
     assert scale == pytest.approx(math.sqrt(0.99))
 
     raw_rotation_spread, raw_log_scale_spread = proxy._raw_cross_scale_spreads(
-        ((89.0, math.log(0.1)), (-89.0, math.log(10.0)), (0.0, 0.0))
+        ((89.0, math.log(0.1)), (-89.0, math.log(10.0)), (0.0, 0.0)), 0.0, 1.0
     )
     bounded_log_scale_spread = math.log(1.55) - math.log(0.65)
     assert raw_rotation_spread == pytest.approx(89.0)
-    assert raw_log_scale_spread > 4.0 > bounded_log_scale_spread
+    assert raw_log_scale_spread > 2.0 > bounded_log_scale_spread
     assert raw_log_scale_spread > 0.03  # frozen gate must see disagreement before search clipping
 
     rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)

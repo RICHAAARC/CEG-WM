@@ -360,15 +360,24 @@ def _periodic_rotation_spread_180(rotations_deg: Iterable[float]) -> float:
     )
 
 
-def _raw_cross_scale_spreads(raw_estimates: Iterable[tuple[float, float]]) -> tuple[float, float]:
-    """Return gate evidence from unbounded log-polar estimates, never search values."""
+def _raw_cross_scale_spreads(
+    raw_estimates: Iterable[tuple[float, float]], consensus_angle: float, consensus_scale: float
+) -> tuple[float, float]:
+    """Return raw candidate distances to consensus, never clamped search values."""
 
     material = tuple((float(angle), float(log_scale)) for angle, log_scale in raw_estimates)
-    if not material or not all(math.isfinite(value) for pair in material for value in pair):
+    if (
+        not material
+        or not all(math.isfinite(value) for pair in material for value in pair)
+        or not math.isfinite(consensus_angle)
+        or not math.isfinite(consensus_scale)
+        or consensus_scale <= 0.0
+    ):
         return math.inf, math.inf
+    consensus_log_scale = math.log(consensus_scale)
     return (
-        _periodic_rotation_spread_180(angle for angle, _ in material),
-        float(max(log_scale for _, log_scale in material) - min(log_scale for _, log_scale in material)),
+        float(max(abs(_wrap_rotation_180(angle - consensus_angle)) for angle, _ in material)),
+        float(max(abs(log_scale - consensus_log_scale) for _, log_scale in material)),
     )
 
 
@@ -758,7 +767,7 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     reprojection = float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0
     macro_regions = _macro_regions(inlier_matches)
     spatial_coverage = _spatial_coverage(inlier_matches)
-    rotation_spread, log_scale_spread = _raw_cross_scale_spreads(raw_per_scale)
+    rotation_spread, log_scale_spread = _raw_cross_scale_spreads(raw_per_scale, angle, scale)
     mean_tile_correlation = (
         float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0
     )

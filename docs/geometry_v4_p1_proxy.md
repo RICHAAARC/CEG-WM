@@ -36,8 +36,9 @@ computed from those inliers. Each scale obtains its own keyed-band log-polar
 normalized-phase R/S estimate and fixed-neighbourhood refinement. A
 quality-weighted circular/log-scale consensus uses bounded search/refinement
 estimates only to form the coarse rectification. Separately recorded, unclipped
-raw log-polar rotations and raw log-scales alone enter the frozen spread gates;
-rotation spread uses 180-degree periodic distances. The rectified valid-overlap
+raw log-polar rotations and raw log-scales enter the frozen spread gates only as
+their distances from that deterministic consensus; rotation distance uses the
+180-degree periodic metric. The rectified valid-overlap
 mask excludes fill-only samples. The top-level PSR supplied to the frozen
 reliability gate is the valid-masked Cartesian phase-correlation translation
 PSR. Tile matching uses zero-mean normalized correlation and records a real
