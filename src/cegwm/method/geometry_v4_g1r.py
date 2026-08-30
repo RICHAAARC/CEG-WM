@@ -6,7 +6,7 @@ import hmac
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import numpy as np
 import torch
@@ -25,6 +25,9 @@ from cegwm.method.geometry_v4_proxy import (
 from cegwm.protocol.geometry_v4 import GeometryV4Observation
 from cegwm.protocol.geometry_v4_g1r import (
     ENERGY_SHARES,
+    CONTENT_SCORE_DRIFT_MAX,
+    FINAL_RGB_PSNR_MIN,
+    FINAL_RGB_SSIM_MIN,
     FIT_GATES,
     FIT_TILE_IDS,
     HOLDOUT_GATES,
@@ -35,6 +38,7 @@ from cegwm.protocol.geometry_v4_g1r import (
     VALIDATE_TILE_IDS,
     derive_g1r_keys,
 )
+from cegwm.shared.keys import normalize_detection_key
 
 _REC709 = np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float64)
 _LATENT_AMPLITUDE = 0.001
@@ -51,6 +55,30 @@ class G1RAnchorFields:
     search: np.ndarray
     fit: np.ndarray
     validate: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class G1RFinalRGBObservability:
+    psnr: float
+    ssim: float
+    luma_rms: float
+    luma_peak: float
+    content_score_drift: float
+    correct_domain_scores: Mapping[str, float]
+    wrong_domain_scores: Mapping[str, float]
+
+    @property
+    def passed(self) -> bool:
+        return bool(
+            self.psnr > FINAL_RGB_PSNR_MIN
+            and self.ssim > FINAL_RGB_SSIM_MIN
+            and self.luma_rms <= LUMA_RMS_CAP
+            and self.luma_peak <= LUMA_PEAK_CAP
+            and self.content_score_drift < CONTENT_SCORE_DRIFT_MAX
+            and set(self.correct_domain_scores) == {"search", "fit", "validate"}
+            and set(self.wrong_domain_scores) == {"search", "fit", "validate"}
+            and all(self.correct_domain_scores[name] > self.wrong_domain_scores[name] for name in ("search", "fit", "validate"))
+        )
 
 
 def _seed(key: bytes, label: bytes) -> int:
@@ -158,6 +186,47 @@ def write_g1r_rgb(rgb: np.ndarray, detection_key: str | bytes | bytearray | memo
     if rms > LUMA_RMS_CAP + 1e-12 or peak > LUMA_PEAK_CAP + 1e-12:
         raise RuntimeError("V4-G1R RGB writer exceeded the frozen luma budget")
     return marked, {"luma_rms": rms, "luma_peak": peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP}
+
+
+def _field_score(rgb: np.ndarray, field: np.ndarray) -> float:
+    luma = _luma(rgb)
+    luma = luma - float(np.mean(luma))
+    denominator = float(np.linalg.norm(luma) * np.linalg.norm(field))
+    return -1.0 if denominator <= 1e-12 else float(np.sum(luma * field) / denominator)
+
+
+def measure_g1r_final_rgb(
+    clean_rgb: np.ndarray,
+    marked_rgb: np.ndarray,
+    detection_key: object,
+    wrong_key: object,
+    content_detector: Callable[[np.ndarray, bytes], float],
+) -> G1RFinalRGBObservability:
+    """Final-RGB-only quality, content drift, and all three G1R domain scores."""
+    clean, marked = _require_rgb(clean_rgb), _require_rgb(marked_rgb)
+    if clean.shape != marked.shape:
+        raise ValueError("V4-G1R final RGB pair shape differs")
+    normalized = normalize_detection_key(detection_key)
+    normalized_wrong = normalize_detection_key(wrong_key)
+    if normalized == normalized_wrong:
+        raise ValueError("V4-G1R correct and wrong keys collide")
+    delta_luma = _luma(marked) - _luma(clean)
+    mse = float(np.mean((marked - clean) ** 2))
+    psnr = 300.0 if mse == 0.0 else 10.0 * math.log10(1.0 / mse)
+    mx, my = float(clean.mean()), float(marked.mean())
+    vx, vy = float(clean.var()), float(marked.var())
+    covariance = float(((clean - mx) * (marked - my)).mean())
+    ssim = ((2 * mx * my + 1e-4) * (2 * covariance + 9e-4)) / ((mx * mx + my * my + 1e-4) * (vx + vy + 9e-4))
+    correct_fields = g1r_anchor_fields(clean.shape[:2], normalized)
+    wrong_fields = g1r_anchor_fields(clean.shape[:2], normalized_wrong)
+    names = ("search", "fit", "validate")
+    correct_scores = {name: _field_score(marked, getattr(correct_fields, name)) for name in names}
+    wrong_scores = {name: _field_score(marked, getattr(wrong_fields, name)) for name in names}
+    drift = abs(float(content_detector(clean, normalized)) - float(content_detector(marked, normalized)))
+    values = (psnr, ssim, float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma))), drift, *correct_scores.values(), *wrong_scores.values())
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError("V4-G1R final RGB observation is non-finite")
+    return G1RFinalRGBObservability(values[0], values[1], values[2], values[3], values[4], correct_scores, wrong_scores)
 
 
 def _torch_anchor(shape: tuple[int, int], detection_key: object, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:

@@ -56,6 +56,27 @@
     "ordinary_rgb_carriers": 4,
     "wrong_unsafe_max": 0
   },
+  "development_runner": {
+    "artifact_files": [
+      "g1r-development-records.json",
+      "g1r-development-summary.json",
+      "g1r-development-manifest.json"
+    ],
+    "confirmation_allowed": false,
+    "content_score_drift_max_exclusive": 0.05,
+    "correct_safe_reliable_required": 20,
+    "final_rgb_luma_peak_max": 0.03137254901960784,
+    "final_rgb_luma_rms_max": 0.00784313725490196,
+    "final_rgb_psnr_min_exclusive": 40.0,
+    "final_rgb_ssim_min_exclusive": 0.98,
+    "notebook_identity": "geometry_v4_g0_g1_colab_v4_g1r_development_v1",
+    "one_generation_pair_per_unique_source": true,
+    "source_observability_required": 4,
+    "stage": "development",
+    "unit_failures_max": 0,
+    "units": 20,
+    "unsafe_per_arm_max": 0
+  },
   "evaluation": {
     "center_reprojection_error_max": 0.02,
     "log_scale_abs_error_max": 0.03,

@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "ab48092967efce8593294ee457a48d87be3ecb3796156a0c4e0f7776e2954d28"
+CONFIG_SHA256 = "89dc5d156c72a342cf32fb986fb3280ecfd1591a2038616411a9853c40601822"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_generated_writer_v1"
@@ -32,6 +32,13 @@ LEGACY_SEEDS = (6101, 6102, 6103, 6104)
 SEARCH_TOP_K = 5
 TRANSLATION_PSR_MIN = 8.0
 LOCAL_PREPROCESSING = "fixed_cubic_polynomial_detrend_then_narrow_band"
+DEVELOPMENT_ARTIFACT_FILES = ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json")
+DEVELOPMENT_NOTEBOOK_ID = "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
+DEVELOPMENT_SOURCE_REQUIRED = 4
+DEVELOPMENT_CORRECT_SAFE_REQUIRED = 20
+FINAL_RGB_PSNR_MIN = 40.0
+FINAL_RGB_SSIM_MIN = 0.98
+CONTENT_SCORE_DRIFT_MAX = 0.05
 SAFETY_TOLERANCES = {"corner": 0.02, "center": 0.02, "rotation_degrees": 2.0, "log_scale": 0.03}
 FIT_GATES = {"support": 6, "coverage": 0.75, "macro_regions": 3, "condition": 1e4, "reprojection": 0.02, "correlation": 0.42, "margin": 0.025}
 HOLDOUT_GATES = {"coverage": 0.75, "macro_regions": 3, "correlation": 0.06, "margin": 0.015, "psr": 8.0, "rotation_spread": 2.0, "log_scale_spread": 0.03}
@@ -81,6 +88,12 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("V4-G1R local preprocessing differs")
     if (holdout.get("spatial_coverage_min"), holdout.get("macro_regions_min"), holdout.get("masked_normalized_correlation_min"), holdout.get("match_margin_min"), holdout.get("psr_min"), holdout.get("cross_scale_rotation_spread_degrees_max"), holdout.get("cross_scale_log_scale_spread_max")) != (HOLDOUT_GATES["coverage"], HOLDOUT_GATES["macro_regions"], HOLDOUT_GATES["correlation"], HOLDOUT_GATES["margin"], HOLDOUT_GATES["psr"], HOLDOUT_GATES["rotation_spread"], HOLDOUT_GATES["log_scale_spread"]):
         raise ValueError("V4-G1R holdout gates differ")
+    development = value.get("development_runner", {})
+    if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
+        raise ValueError("V4-G1R development runner differs")
+    runtime = value.get("runtime", {})
+    if runtime.get("model_id") != MODEL_ID or runtime.get("placement") != PLACEMENT or runtime.get("callback_step_index_zero_based") != CALLBACK_STEP_INDEX or runtime.get("single_fixed_update") is not True:
+        raise ValueError("V4-G1R runtime identity differs")
     return value
 
 

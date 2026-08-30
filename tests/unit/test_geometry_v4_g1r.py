@@ -11,6 +11,8 @@ import torch
 from cegwm.method import geometry_v4_g1r as method
 from cegwm.protocol.geometry_v4_g1r import (
     CONFIG_SHA256,
+    DEVELOPMENT_ARTIFACT_FILES,
+    DEVELOPMENT_NOTEBOOK_ID,
     ENERGY_SHARES,
     FIT_GATES,
     FIT_TILE_IDS,
@@ -95,6 +97,22 @@ def test_rgb_and_fake_vae_writers_keep_frozen_budget_and_single_update() -> None
     assert callback.called and not torch.equal(updated["latents"], latents)
     with pytest.raises(RuntimeError, match="more than once"):
         callback(_Pipeline(), 19, None, state)
+
+
+@pytest.mark.unit
+def test_final_rgb_observability_uses_all_three_domains_and_frozen_quality_limits() -> None:
+    yy, xx = np.mgrid[:64, :64]
+    base = .3 + .3 * xx / 63 + .1 * yy / 63
+    ordinary = np.stack((base, .9 * base, .8 * base), axis=-1)
+    marked, _ = method.write_g1r_rgb(ordinary, KEY)
+    observation = method.measure_g1r_final_rgb(ordinary, marked, KEY, b"wrong-key-0123456789", lambda image, key: 0.0)
+    assert set(observation.correct_domain_scores) == set(observation.wrong_domain_scores) == {"search", "fit", "validate"}
+    assert observation.psnr > 40.0 and observation.ssim > .98
+    assert observation.luma_rms <= 2 / 255 and observation.luma_peak <= 8 / 255
+    assert observation.content_score_drift == 0.0
+    assert observation.passed
+    assert DEVELOPMENT_ARTIFACT_FILES == ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json")
+    assert DEVELOPMENT_NOTEBOOK_ID == "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
 
 
 @pytest.mark.unit

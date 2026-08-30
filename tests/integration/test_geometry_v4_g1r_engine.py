@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import inspect
+import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from experiments import geometry_v4_g1r_engine as engine
+from cegwm.method.geometry_v4_g1r import G1RFinalRGBObservability
 from cegwm.protocol.geometry_v4_g1r import ATTACKS
+from cegwm.runtime.geometry_v4_g1r_sd35 import G1RGeneratedPair
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,3 +64,160 @@ def test_fixed_cpu_three_arm_canary_reaches_engineering_exit() -> None:
     assert summary["correct_unsafe"] == summary["wrong_unsafe"] == summary["negative_unsafe"] == 0
     assert all(value >= 3 for value in summary["correct_safe_by_attack"].values())
     assert summary["status"] == "CPU_ENGINEERING_EXIT"
+
+
+class _FakePipeline:
+    def to(self, device: str):
+        assert device == "cuda"
+        return self
+
+
+class _FakeContentDetector:
+    def __call__(self, image, key):
+        return 0.0
+
+    def identities(self):
+        return {"adapter_id": "fake-content-detector"}
+
+
+def _unreliable_arm() -> dict[str, object]:
+    return {"H_hat": None, "corners_hat": (), "support": 0, "reliability": 0.0, "status": "UNRELIABLE"}
+
+
+@pytest.mark.integration
+def test_real_three_arms_are_independent_and_use_the_required_current_rgb(monkeypatch: pytest.MonkeyPatch) -> None:
+    marked = np.full((32, 32, 3), .6)
+    negative = np.full((32, 32, 3), .4)
+    correct_key, wrong_key = b"0123456789abcdef", b"wrong-key-0123456789"
+    calls: list[tuple[np.ndarray, object]] = []
+
+    def fake_detect(rgb, key):
+        calls.append((rgb, key))
+        return _unreliable_arm()
+
+    monkeypatch.setattr(engine, "detect_g1r", fake_detect)
+    arms = engine._blind_arms_for_keys(marked, negative, correct_key, wrong_key)
+    assert arms.correct is not arms.wrong and arms.wrong is not arms.negative
+    assert calls[0][0] is marked and calls[0][1] == correct_key
+    assert calls[1][0] is marked and calls[1][1] == wrong_key
+    assert calls[2][0] is negative and calls[2][1] == correct_key
+
+
+@pytest.mark.integration
+def test_real_development_generates_each_source_once_retains_20_units_and_orders_truth(monkeypatch: pytest.MonkeyPatch) -> None:
+    generated: list[int] = []
+    events: list[str] = []
+
+    monkeypatch.setattr(engine.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(engine, "_load_real_pipeline_and_assets", lambda token: (_FakePipeline(), object()))
+    monkeypatch.setattr(engine, "build_reused_weighted_joint_content_adapter", lambda assets, root: _FakeContentDetector())
+    monkeypatch.setattr(engine, "_cuda_generator", lambda seed: seed)
+
+    def fake_pair(pipeline, prompt, key, *, height, width, generator):
+        del pipeline, prompt, key
+        assert (height, width) == (512, 512)
+        generated.append(generator)
+        image = Image.fromarray(np.full((64, 64, 3), 128, dtype=np.uint8), mode="RGB")
+        return G1RGeneratedPair(image, image)
+
+    monkeypatch.setattr(engine, "run_g1r_sd35_pair", fake_pair)
+    monkeypatch.setattr(engine, "measure_g1r_final_rgb", lambda *args: G1RFinalRGBObservability(50.0, .99, 0.0, 0.0, 0.0, {name: 1.0 for name in ("search", "fit", "validate")}, {name: 0.0 for name in ("search", "fit", "validate")}))
+    monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm()))
+    monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
+    sources, records, identity = engine.run_real_development(b"0123456789abcdef", b"wrong-key-0123456789", repo_root=ROOT, hf_token="test-token")
+    assert generated == [6201, 6202, 6203, 6204]
+    assert len(sources) == 4 and len(records) == 20 and all(record["failure"] is None for record in records)
+    assert tuple(record["attack"] for record in records) == ATTACKS * 4
+    assert all(set(record["arms"]) == {"correct", "wrong", "negative"} for record in records)
+    assert events == [item for _ in range(20) for item in ("blind", "truth")]
+    assert identity == {"adapter_id": "fake-content-detector"}
+
+
+@pytest.mark.integration
+def test_real_development_retains_source_failure_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(engine.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(engine, "_load_real_pipeline_and_assets", lambda token: (_FakePipeline(), object()))
+    monkeypatch.setattr(engine, "build_reused_weighted_joint_content_adapter", lambda assets, root: _FakeContentDetector())
+    monkeypatch.setattr(engine, "_cuda_generator", lambda seed: seed)
+
+    def fail_pairs(pipeline, prompt, key, *, height, width, generator):
+        del pipeline, prompt, key, height, width
+        calls.append(generator)
+        raise RuntimeError("retained failure")
+
+    monkeypatch.setattr(engine, "run_g1r_sd35_pair", fail_pairs)
+    sources, records, _ = engine.run_real_development(b"0123456789abcdef", b"wrong-key-0123456789", repo_root=ROOT, hf_token="test-token")
+    assert calls == [6201, 6202, 6203, 6204]
+    assert len(sources) == 4 and len(records) == 20
+    assert all(source["failure"] == {"scope": "source_generation", "type": "RuntimeError"} for source in sources)
+    assert all(record["failure"] == {"scope": "source_generation", "type": "RuntimeError"} and record["arms"] is None for record in records)
+
+
+@pytest.mark.integration
+def test_real_summary_cannot_be_passed_by_final_rgb_only() -> None:
+    sources = tuple({"seed": seed, "prompt": "p", "failure": None, "final_rgb": {"passed": True}} for seed in (6201, 6202, 6203, 6204))
+    arms = {name: {**_unreliable_arm(), "truth_metrics": {}, "unsafe": False} for name in ("correct", "wrong", "negative")}
+    records = tuple({"seed": seed, "prompt": "p", "attack": attack, "failure": None, "arms": arms} for seed in (6201, 6202, 6203, 6204) for attack in ATTACKS)
+    summary = engine.summarize_real_development(sources, records)
+    assert summary["source_observability_passed"] == 4 and summary["correct_safe_reliable"] == 0
+    assert summary["failures"] == 0 and summary["status"] == "GATE_FAILED"
+
+
+@pytest.mark.integration
+def test_real_summary_requires_all_20_safe_correct_and_zero_unsafe() -> None:
+    sources = tuple({"seed": seed, "prompt": "p", "failure": None, "final_rgb": {"passed": True}} for seed in (6201, 6202, 6203, 6204))
+    correct = {"H_hat": tuple(np.eye(3).reshape(-1)), "corners_hat": (), "support": 8, "reliability": 1.0, "status": "RELIABLE", "truth_metrics": {}, "unsafe": False}
+    quiet = {**_unreliable_arm(), "truth_metrics": {}, "unsafe": False}
+    records = tuple({"seed": seed, "prompt": "p", "attack": attack, "failure": None, "arms": {"correct": correct, "wrong": quiet, "negative": quiet}} for seed in (6201, 6202, 6203, 6204) for attack in ATTACKS)
+    assert engine.summarize_real_development(sources, records)["status"] == "PASS"
+    changed = [dict(record) for record in records]
+    changed[0] = {**changed[0], "arms": {**changed[0]["arms"], "wrong": {**quiet, "status": "RELIABLE", "unsafe": True}}}
+    assert engine.summarize_real_development(sources, tuple(changed))["status"] == "GATE_FAILED"
+
+
+@pytest.mark.integration
+def test_artifacts_are_create_only_hashed_and_secret_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "_environment_metadata", lambda: {"cuda_available": True, "gpu": {"name": "fake", "vram_bytes": 1}})
+    sources = tuple({"seed": seed, "prompt": "p", "failure": None, "final_rgb": {"passed": False}} for seed in (6201, 6202, 6203, 6204))
+    records = tuple({"seed": seed, "prompt": "p", "attack": attack, "failure": {"scope": "unit", "type": "FakeError"}, "arms": None} for seed in (6201, 6202, 6203, 6204) for attack in ATTACKS)
+    summary = engine.summarize_real_development(sources, records)
+    root = tmp_path / "artifact"
+    engine.write_development_artifacts(root, source_exact="a" * 40, repo_root=ROOT, sources=sources, records=records, summary=summary, content_detector={})
+    for name in ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json"):
+        payload = (root / name).read_bytes()
+        assert (root / f"{name}.sha256").read_text(encoding="ascii") == f"{hashlib.sha256(payload).hexdigest()}  {name}\n"
+        json.loads(payload)
+    manifest = json.loads((root / "g1r-development-manifest.json").read_text(encoding="ascii"))
+    assert manifest["source_exact"] == "a" * 40 and manifest["stage"] == "development" and manifest["units"] == 20
+    assert manifest["seeds"] == [6201, 6202, 6203, 6204] and manifest["attacks"] == list(ATTACKS)
+    assert manifest["config_sha256"] and manifest["notebook_identity"] == "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
+    joined = b"".join(path.read_bytes() for path in root.iterdir())
+    assert b"root-secret-value" not in joined and b"hf-secret-value" not in joined
+    with pytest.raises(FileExistsError):
+        engine.write_development_artifacts(root, source_exact="a" * 40, repo_root=ROOT, sources=sources, records=records, summary=summary, content_detector={})
+
+
+@pytest.mark.integration
+def test_cli_rejects_confirmation_and_has_no_subset_surface(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    result = engine.main(["--stage", "confirmation", "--repo-root", str(ROOT), "--artifact-root", str(tmp_path / "artifact"), "--expected-exact", "a" * 40], environ={})
+    assert result == 2 and json.loads(capsys.readouterr().out)["status"] == "STOPPED"
+    source = inspect.getsource(engine.main)
+    assert "--subset" not in source and "--resume" not in source and "--retry" not in source
+
+
+@pytest.mark.integration
+def test_development_cli_pops_secrets_and_stdout_is_compact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    exact = "a" * 40
+    sources = tuple({"seed": seed, "prompt": "p", "failure": None, "final_rgb": {"passed": False}} for seed in (6201, 6202, 6203, 6204))
+    arms = {name: {**_unreliable_arm(), "truth_metrics": {}, "unsafe": False} for name in ("correct", "wrong", "negative")}
+    records = tuple({"seed": seed, "prompt": "p", "attack": attack, "failure": None, "arms": arms} for seed in (6201, 6202, 6203, 6204) for attack in ATTACKS)
+    monkeypatch.setattr(engine, "_checkout_state", lambda root: (exact, "", True))
+    monkeypatch.setattr(engine, "run_real_development", lambda *args, **kwargs: (sources, records, {}))
+    monkeypatch.setattr(engine, "write_development_artifacts", lambda *args, **kwargs: {})
+    environ = {"CEG_WM_ROOT_KEY": "root-secret-value-0123456789", "HF_TOKEN": "hf-secret-value"}
+    result = engine.main(["--stage", "development", "--repo-root", str(ROOT), "--artifact-root", str(tmp_path / "artifact"), "--expected-exact", exact], environ=environ)
+    output = capsys.readouterr().out
+    assert result == 2 and environ == {}
+    assert "root-secret-value" not in output and "hf-secret-value" not in output
+    assert json.loads(output)["status"] == "GATE_FAILED"

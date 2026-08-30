@@ -78,6 +78,18 @@ each other and from legacy G1. Seeds 6101--6104 are rejected. A runner must
 execute exactly one full split in order with no subset, mixing, retry,
 replacement, or dropped failure.
 
+The real CLI permits only `development`. It generates each of the four unique
+sources once as a clean/marked G1R pair and applies all five attacks afterward,
+retaining correct-key, wrong-key, and unwatermarked-negative blind arms for all
+20 units. Confirmation is rejected by this CLI. Its create-only artifact
+directory contains full records, summary, and manifest JSON files, each with
+an independent SHA-256 sidecar. Source observability requires all three G1R
+domain scores to beat their corresponding wrong-key scores, PSNR above 40,
+SSIM above .98, luma RMS and peak within 2/255 and 8/255, and unchanged-content
+score drift below .05. The real gate requires 4/4 observable sources, 20/20
+safe correct-key recoveries, zero unsafe result in every arm, and zero retained
+failure.
+
 Truth is attached only after all arm outputs are frozen. A `RELIABLE` result is
 unsafe if maximum mapped-corner error or center reprojection error exceeds .02,
 rotation error exceeds 2 degrees, or absolute log-scale error exceeds .03.
