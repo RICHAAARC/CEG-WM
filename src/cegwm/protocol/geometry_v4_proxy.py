@@ -14,7 +14,7 @@ from cegwm.protocol.geometry_v4 import (
 )
 
 P1_CONFIG = "geometry_v4_p1_proxy_v1.json"
-P1_DIGEST = "7ee7c3651a385de04ebe12ec0b5ac88d61bb1677c56258d8a345ad191da9185c"
+P1_DIGEST = "543c71692b6151f7255c41d5df5eca78997a22cddc6a3b27228565c1ee7b05a8"
 P1_RUNNER_ID = "geometry_v4_p1_proxy_engine_v1"
 P1_SOURCE_ID = "geometry_v4_procedural_rgb_v1"
 P1_SOURCE_SHAPE = (64, 64, 3)
@@ -108,6 +108,7 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
         != "primary_endpoint_or_flat_nonfinite_template_degenerate_invalid_fail_closed"
         or detector.get("whole_log_polar_role") != "diagnostic_only"
         or detector.get("local_search_radius_pixels_at_64") != 8
+        or detector.get("local_match_min_valid_fraction") != 0.60
         or detector.get("translation_phase_correlation") != "valid_overlap_fixed_hann_normalized_cross_power"
         or P1_SCALE_BOUNDS[1] < 1 / 0.7
         or source.get("generator_id") != P1_SOURCE_ID

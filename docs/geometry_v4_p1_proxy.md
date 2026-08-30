@@ -43,7 +43,10 @@ a fixed count, enter a deterministic robust similarity fit. It enumerates every
 two-point hypothesis, ranks by inlier count, weighted inlier RMS, and
 lexicographic tile IDs, then refits only the selected inliers. Support, macro
 regions, and normalized convex-hull spatial coverage are computed from those
-inliers. The rectified valid-overlap mask excludes fill-only samples. The
+inliers. The rectified valid-overlap mask excludes fill-only samples. Local
+tile ZNCC uses only the same candidate mask, with masked mean removal and
+normalization; candidates require the frozen 0.60 valid-pixel fraction, so
+invalid padding never enters their score. The
 top-level PSR supplied to the frozen
 reliability gate is the valid-overlap-masked, fixed-Hann-window Cartesian
 phase-correlation translation PSR. Tile matching uses a fixed eight-pixel-at-64 local search and zero-mean

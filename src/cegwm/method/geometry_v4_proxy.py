@@ -23,6 +23,7 @@ from cegwm.shared.keys import normalize_detection_key
 _DIRECTIONS = (0.0, 45.0, 90.0, 135.0)
 _SCALES = (8, 16, 24)
 _CENTERS = (0.125, 0.375, 0.625, 0.875)
+_LOCAL_MIN_VALID_FRACTION = 0.60
 _GLOBAL_ENERGY = 0.40
 _LOCAL_ENERGY = 0.60
 _LUMA_RMS_TARGET = 1.5 / 255.0
@@ -908,6 +909,24 @@ def _normalized_patch_score(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.sum(a * b) / denominator)
 
 
+def _masked_normalized_patch_score(left: np.ndarray, right: np.ndarray, valid: np.ndarray) -> float | None:
+    """Fixed-mask ZNCC; invalid rectification padding never contributes."""
+
+    mask = np.asarray(valid, dtype=bool)
+    if mask.shape != left.shape or left.shape != right.shape:
+        raise ValueError("Geometry-V4 tile mask shape differs")
+    if int(np.count_nonzero(mask)) < math.ceil(_LOCAL_MIN_VALID_FRACTION * mask.size):
+        return None
+    a = np.asarray(left, dtype=np.float64)[mask]
+    b = np.asarray(right, dtype=np.float64)[mask]
+    a = a - float(np.mean(a))
+    b = b - float(np.mean(b))
+    denominator = float(np.sqrt(np.sum(np.square(a)) * np.sum(np.square(b))))
+    if denominator <= 1e-12:
+        return None
+    return float(np.sum(a * b) / denominator)
+
+
 def _match_tiles(
     rectified_plane: np.ndarray,
     valid_overlap: np.ndarray,
@@ -934,8 +953,10 @@ def _match_tiles(
                 for ox in range(-search_radius, search_radius + 1):
                     observed = _patch(rectified_plane, predicted_x + ox, predicted_y + oy, patch_radius)
                     observed_valid = _patch(valid_overlap, predicted_x + ox, predicted_y + oy, patch_radius)
-                    if observed is not None and observed_valid is not None and bool(np.all(observed_valid)):
-                        candidates.append((_normalized_patch_score(observed, template), predicted_x + ox, predicted_y + oy))
+                    if observed is not None and observed_valid is not None:
+                        score = _masked_normalized_patch_score(observed, template, observed_valid)
+                        if score is not None:
+                            candidates.append((score, predicted_x + ox, predicted_y + oy))
             if not candidates:
                 continue
             best = max(candidates, key=lambda item: (item[0], -abs(item[1] - predicted_x) - abs(item[2] - predicted_y)))

@@ -36,6 +36,7 @@
     "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_relative_to_consensus",
     "local_match_min_correlation": 0.42,
     "local_match_min_margin": 0.025,
+    "local_match_min_valid_fraction": 0.6,
     "local_search_radius_pixels_at_64": 8,
     "log_polar_angles": 180,
     "log_polar_radii": 64,
@@ -55,7 +56,7 @@
       0.65,
       1.55
     ],
-    "tile_matching": "rectified_valid_overlap_tile_zncc_with_measured_sidelobe_psr_and_macro_balanced_inliers",
+    "tile_matching": "rectified_valid_overlap_masked_zncc_min_valid_fraction_0.60_with_measured_sidelobe_psr_and_macro_balanced_inliers",
     "translation_phase_correlation": "valid_overlap_fixed_hann_normalized_cross_power",
     "whole_log_polar_role": "diagnostic_only"
   },

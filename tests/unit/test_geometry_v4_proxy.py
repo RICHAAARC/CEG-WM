@@ -176,6 +176,14 @@ def test_sparse_endpoint_raw_is_invalid_and_cannot_seed_rectification(monkeypatc
 
 @pytest.mark.unit
 def test_normalized_cross_power_and_blind_identity_observation_use_measured_matches() -> None:
+    left = np.arange(25, dtype=np.float64).reshape(5, 5)
+    mask = np.ones((5, 5), dtype=bool)
+    assert proxy._masked_normalized_patch_score(left, left, mask) == pytest.approx(proxy._normalized_patch_score(left, left))
+    perturbed = left.copy()
+    mask[0, 0] = False
+    perturbed[0, 0] = 1e9
+    assert proxy._masked_normalized_patch_score(left, perturbed, mask) == pytest.approx(1.0)
+    assert proxy._masked_normalized_patch_score(left, left, np.eye(5, dtype=bool)) is None
     reference = np.zeros((32, 32), dtype=np.float64)
     reference[5, 7] = 1.0
     moving = np.roll(np.roll(reference, 4, axis=0), -3, axis=1)
