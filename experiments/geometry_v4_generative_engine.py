@@ -28,9 +28,6 @@ def _attack(image: Image.Image, name: str) -> Image.Image:
     if name == "crop_0.9":
         w,h=image.size; d=round(min(w,h)*.05); return image.crop((d,d,w-d,h-d)).resize((w,h),Image.Resampling.BICUBIC)
     raise ValueError("unfrozen G1 attack")
-def _default_content_detector(rgb: np.ndarray, key: bytes) -> float:
-    del key
-    return float(np.asarray(rgb, dtype=np.float64).mean())
 def _record(seed: int, prompt: str, attack: str, pipeline: object, key: object, wrong_key: object, detector: Callable[[np.ndarray,bytes],float]) -> dict[str, object]:
     base = {"seed": seed, "prompt": prompt, "attack": attack, "failure": None}
     try:
@@ -40,9 +37,10 @@ def _record(seed: int, prompt: str, attack: str, pipeline: object, key: object, 
         return {**base, "final_rgb": {"passed": observation.passed, **asdict(observation)}, "attacked_rgb": {"correct_key_anchor": rgb_only_anchor_score(_rgb(attacked), key), "wrong_key_anchor": rgb_only_anchor_score(_rgb(attacked), wrong_key)}}
     except Exception as error:
         return {**base, "failure": f"{type(error).__name__}: {error}", "final_rgb": None, "attacked_rgb": None}
-def run(stage: str, detection_key: object, wrong_key: object, *, repo_root: str | Path, hf_token: str, artifact_root: str | Path | None = None, content_detector: Callable[[np.ndarray,bytes],float] = _default_content_detector) -> tuple[dict[str, object], ...]:
+def run(stage: str, detection_key: object, wrong_key: object, *, repo_root: str | Path, hf_token: str, content_detector: Callable[[np.ndarray,bytes],float], artifact_root: str | Path | None = None) -> tuple[dict[str, object], ...]:
     contract = load_g0_g1_contract(repo_root)
     if stage not in {"G0", "G1"}: raise ValueError("stage must be G0 or G1")
+    if not callable(content_detector): raise TypeError("G0/G1 requires the unchanged RGB/key-only content detector")
     if not torch.cuda.is_available(): raise RuntimeError("real SD3.5 G0/G1 requires a CUDA GPU; no RGB proxy is permitted")
     pipeline = load_sd35_pipeline(contract["identity"]["model_id"], torch_dtype=torch.float16, token=hf_token).to("cuda")
     roster = contract[stage.lower()]
