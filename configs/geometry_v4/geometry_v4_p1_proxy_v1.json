@@ -31,6 +31,62 @@
     ],
     "cross_scale_endpoint_policy": "primary_endpoint_or_flat_nonfinite_template_degenerate_invalid_fail_closed",
     "cross_scale_estimation": "keyed_sparse_constellation_glrt_primary_v1",
+    "cross_scale_group_partition": [
+      [
+        [
+          12,
+          0
+        ],
+        [
+          12,
+          135
+        ],
+        [
+          18,
+          90
+        ],
+        [
+          24,
+          90
+        ]
+      ],
+      [
+        [
+          12,
+          45
+        ],
+        [
+          18,
+          0
+        ],
+        [
+          24,
+          0
+        ],
+        [
+          24,
+          135
+        ]
+      ],
+      [
+        [
+          12,
+          90
+        ],
+        [
+          18,
+          45
+        ],
+        [
+          18,
+          135
+        ],
+        [
+          24,
+          45
+        ]
+      ]
+    ],
     "cross_scale_group_score": "four_component_joint_glrt_with_geometric_mean_completeness",
     "cross_scale_primary_grid": "rotation_deg_-16_to_16_step_0.5_log_scale_log_0.65_to_log_1.55_step_0.01_zero_anchored",
     "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_relative_to_consensus",
@@ -40,16 +96,21 @@
     "local_search_radius_pixels_at_64": 8,
     "log_polar_angles": 180,
     "log_polar_radii": 64,
+    "rectification_estimate": "fixed_25_candidate_blind_local_geometry_bundle_v1",
     "reprojection_inlier_diagonal": 0.02,
     "robust_fit": "all_two_point_similarity_hypotheses_inlier_count_weighted_rms_tile_id_tie_break",
     "rs_refine_log_scale_offsets": [
       -0.08,
+      -0.01,
       0.0,
+      0.01,
       0.08
     ],
     "rs_refine_rotation_offsets_deg": [
       -4.0,
+      -0.5,
       0.0,
+      0.5,
       4.0
     ],
     "rs_refine_scale_bounds": [
@@ -91,8 +152,8 @@
     "luma_rms_cap": 0.00784313725490196,
     "luma_rms_target": 0.0058823529411764705,
     "scales_cycles_per_image": [
-      8,
-      16,
+      12,
+      18,
       24
     ],
     "tile_centers": [

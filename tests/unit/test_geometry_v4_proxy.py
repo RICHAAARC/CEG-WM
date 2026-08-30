@@ -66,7 +66,7 @@ def test_writer_has_twelve_independent_global_components_fixed_tiles_and_final_l
     geometry_key = derive_geometry_v4_key(normalize_detection_key(KEY))
     phase_signs = {
         proxy._phase_sign(geometry_key, f"global/{cycles}/{direction}")
-        for cycles in (8, 16, 24)
+        for cycles in (12, 18, 24)
         for direction in (0, 45, 90, 135)
     }
     assert len(phase_signs) == 12
@@ -110,9 +110,22 @@ def test_fixed_multiradius_constellation_groups_and_orbit_order() -> None:
     key = derive_geometry_v4_key(normalize_detection_key(KEY))
     _, _, _, _, components, _ = proxy._anchor_fields((64, 64), key)
     groups = proxy._constellation_groups(components)
+    expected = (
+        ((12, 0.0), (12, 135.0), (18, 90.0), (24, 90.0)),
+        ((12, 45.0), (18, 0.0), (24, 0.0), (24, 135.0)),
+        ((12, 90.0), (18, 45.0), (18, 135.0), (24, 45.0)),
+    )
+    assert proxy._SCALES == (12, 18, 24)
+    assert proxy._CONSTELLATION_GROUP_IDENTITIES == expected
+    flattened = tuple(item for group in expected for item in group)
+    assert len(flattened) == len(set(flattened)) == 12
+    assert set(flattened) == {(cycles, direction) for cycles in proxy._SCALES for direction in proxy._DIRECTIONS}
+    contract = load_p1_proxy(ROOT)
+    assert contract["energy"]["scales_cycles_per_image"] == [12, 18, 24]
+    assert contract["detector"]["cross_scale_group_partition"] == [[list(item) for item in group] for group in expected]
     identities = [item for _, group in groups for item in group]
     assert len(groups) == 3 and len(identities) == len(set(identities)) == 12
-    assert all(len(group) == 4 and len({item[1] for item in group}) == 4 and len({item[0] for item in group}) >= 3 for _, group in groups)
+    assert all(len(group) == 4 and len({item[0] for item in group}) >= 3 for _, group in groups)
     assert proxy._angle_orbits_45(0.0) == (0.0, 45.0, -90.0, -45.0)
     assert len(proxy._orbit_assignments()) == 64 and proxy._orbit_assignments()[0] == (0, 0, 0) and proxy._orbit_assignments()[-1] == (3, 3, 3)
 
@@ -184,6 +197,36 @@ def test_sparse_endpoint_raw_is_invalid_and_cannot_seed_rectification(monkeypatc
     result = proxy._refine_rotation_scale(np.zeros((64, 64, 3), dtype=np.float64), global_reference, by_scale, components)
     assert result["raw_valid"] is False
     assert all(math.isnan(value) for value in result["rectification_seed"])
+
+
+@pytest.mark.unit
+def test_sparse_rectification_never_calls_wide_spatial_refinement(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = derive_geometry_v4_key(normalize_detection_key(KEY))
+    _, global_reference, _, by_scale, components, _ = proxy._anchor_fields((64, 64), key)
+    records = tuple({"identities": tuple(components)[index * 4:(index + 1) * 4], "raw_rotation_deg": 0.0, "raw_log_scale": 0.0, "score": 1.0, "margin": 1.0, "boundary": False, "valid": True} for index in range(3))
+    monkeypatch.setattr(proxy, "_sparse_constellation_diagnostic", lambda *_: records)
+    monkeypatch.setattr(proxy, "_refine_one_rotation_scale", lambda *_: (_ for _ in ()).throw(AssertionError("wide refine")))
+    result = proxy._refine_rotation_scale(np.zeros((64, 64, 3)), global_reference, by_scale, components)
+    assert result["raw_valid"] is True
+    assert result["rotation_deg"] == 0.0 and result["scale"] == 1.0
+    assert result["rectification_seed"] == (0.0, 1.0)
+
+
+@pytest.mark.unit
+def test_fixed_rectification_selector_uses_blind_local_bundle_rank(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[float, float]] = []
+    monkeypatch.setattr(proxy, "_rs_score", lambda *_: (_ for _ in ()).throw(AssertionError("global score")))
+    def fake(*args: object) -> dict[str, object]:
+        angle, scale = float(args[-2]), float(args[-1]); calls.append((angle, scale))
+        chosen = angle == 0.5 and scale == pytest.approx(math.exp(0.01))
+        return {"translation": {"PSR": 10.0}, "reprojection": 0.01, "corner_validity": True, "canonical_to_attacked": object(), "macro_regions": 4, "spatial_coverage": 1.0 if chosen else .75, "support": 8 if chosen else 6, "angle": angle, "scale": scale}
+    monkeypatch.setattr(proxy, "_evaluate_rectification_candidate", fake)
+    selected = proxy._select_rectification_candidate(np.zeros((64,64,3)), np.zeros((64,64)), np.zeros((64,64)), 0.0, 0.0)
+    assert selected is not None and len(set(calls)) == 25
+    assert selected["candidate_offset"] == (0.5, 0.01)
+    assert "candidate_rank" in selected and "candidate_offset" in selected
+    calls.clear()
+    assert proxy._select_rectification_candidate(np.zeros((64,64,3)), np.zeros((64,64)), np.zeros((64,64)), 100.0, 0.0) is None and not calls
 
 
 @pytest.mark.unit

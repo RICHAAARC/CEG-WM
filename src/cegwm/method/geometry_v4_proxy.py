@@ -21,8 +21,13 @@ from cegwm.protocol.geometry_v4 import (
 from cegwm.shared.keys import normalize_detection_key
 
 _DIRECTIONS = (0.0, 45.0, 90.0, 135.0)
-_SCALES = (8, 16, 24)
+_SCALES = (12, 18, 24)
 _CENTERS = (0.125, 0.375, 0.625, 0.875)
+_CONSTELLATION_GROUP_IDENTITIES = (
+    ((12, 0.0), (12, 135.0), (18, 90.0), (24, 90.0)),
+    ((12, 45.0), (18, 0.0), (24, 0.0), (24, 135.0)),
+    ((12, 90.0), (18, 45.0), (18, 135.0), (24, 45.0)),
+)
 _LOCAL_MIN_VALID_FRACTION = 0.60
 _SPARSE_BORDER_MAX_FRACTION = 0.20
 _GLOBAL_ENERGY = 0.40
@@ -160,11 +165,11 @@ def _global_fields(shape: tuple[int, int], key: bytes) -> tuple[np.ndarray, dict
 
 
 def _constellation_groups(by_component: dict[tuple[int, float], np.ndarray]) -> tuple[tuple[np.ndarray, tuple[tuple[int, float], ...]], ...]:
-    groups = []
-    for group in range(3):
-        identities = tuple((cycles, direction) for s, cycles in enumerate(_SCALES) for d, direction in enumerate(_DIRECTIONS) if (s + d) % 3 == group)
-        groups.append((_mean_unit(sum((by_component[item] for item in identities))), identities))
-    return tuple(groups)
+    expected = {(cycles, direction) for cycles in _SCALES for direction in _DIRECTIONS}
+    flattened = tuple(item for group in _CONSTELLATION_GROUP_IDENTITIES for item in group)
+    if len(flattened) != 12 or len(set(flattened)) != 12 or set(flattened) != expected:
+        raise RuntimeError("Geometry-V4 fixed constellation partition differs")
+    return tuple((_mean_unit(sum(by_component[item] for item in identities)), identities) for identities in _CONSTELLATION_GROUP_IDENTITIES)
 
 
 def _angle_orbits_45(raw_angle: float) -> tuple[float, ...]:
@@ -849,13 +854,7 @@ def _refine_rotation_scale(
         observed_band = _bandpass(_luma(attacked), cycles)
         reference_band = _bandpass(by_scale[cycles], cycles)
         independent_angle, independent_scale, coarse_record = _coarse_rotation_scale(observed_band, reference_band)
-        selected_angle, selected_scale = _refine_one_rotation_scale(
-            attacked,
-            by_scale[cycles],
-            independent_angle,
-            independent_scale,
-            cycles=cycles,
-        )
+        selected_angle, selected_scale = independent_angle, independent_scale
         per_scale.append((float(selected_angle), float(selected_scale)))
         qualities.append(float(max(0.0, coarse_record["PSR"]) * max(0.0, _rs_score(attacked, by_scale[cycles], selected_angle, selected_scale, cycles=cycles))))
 
@@ -902,11 +901,15 @@ def _refine_rotation_scale(
         raw_scale = math.inf
     if not math.isfinite(raw_scale):
         raise ValueError("Geometry-V4 joint raw consensus scale is non-finite")
-    rectification_seed_angle = float(np.clip(raw_angle, -16.0, 16.0))
-    rectification_seed_scale = float(np.clip(raw_scale, _RS_SCALE_MIN, _RS_SCALE_MAX))
-    angle, scale = _refine_one_rotation_scale(
-        attacked, global_reference, rectification_seed_angle, rectification_seed_scale
-    )
+    if not (-16.0 < raw_angle < 16.0 and _RS_SCALE_MIN < raw_scale < _RS_SCALE_MAX):
+        return {
+            "rotation_deg": math.nan, "scale": math.nan,
+            "legacy_per_scale_estimates": tuple(per_scale), "legacy_per_scale_quality": tuple(qualities),
+            "group_observations": tuple(group_observations), "joint": joint,
+            "rectification_seed": (math.nan, math.nan), "raw_valid": False,
+        }
+    rectification_seed_angle, rectification_seed_scale = raw_angle, raw_scale
+    angle, scale = raw_angle, raw_scale
     return {
         "rotation_deg": float(angle),
         "scale": float(scale),
@@ -1176,6 +1179,45 @@ def _spatial_coverage(matches: Iterable[dict[str, object]]) -> float:
     return float(min(1.0, area / maximum))
 
 
+def _evaluate_rectification_candidate(
+    attacked_rgb: np.ndarray, combined_reference: np.ndarray, local_reference: np.ndarray, angle: float, scale: float,
+) -> dict[str, object]:
+    h_rs = _similarity_h(angle, scale)
+    rectified_rgb, valid_overlap = _rectify_rs_with_valid(attacked_rgb, angle, scale)
+    translation = _translation_phase_correlation(_luma(rectified_rgb), combined_reference, valid_overlap)
+    shift_x, shift_y = int(translation["shift_x"]), int(translation["shift_y"])
+    matches = _match_tiles(_luma(rectified_rgb), valid_overlap, local_reference, shift_x, shift_y, h_rs)
+    canonical_to_attacked, inlier_matches, residuals, condition = _robust_similarity_fit(matches)
+    attacked_to_canonical = None
+    corners = ()
+    if canonical_to_attacked is not None:
+        attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
+        attacked_to_canonical /= attacked_to_canonical[2, 2]
+        attacked_to_canonical[2, 2] = 1.0
+        corners = _corners(attacked_to_canonical)
+    support = len(inlier_matches)
+    return {"angle": float(angle), "scale": float(scale), "rectified_rgb": rectified_rgb, "valid_overlap": valid_overlap, "translation": translation, "shift_x": shift_x, "shift_y": shift_y, "matches": matches, "canonical_to_attacked": canonical_to_attacked, "inlier_matches": inlier_matches, "residuals": residuals, "condition": condition, "attacked_to_canonical": attacked_to_canonical, "corners": corners, "corner_validity": attacked_to_canonical is not None and _valid_corners(corners), "support": support, "inlier_ratio": support / len(matches) if matches else 0.0, "reprojection": float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0, "macro_regions": _macro_regions(inlier_matches), "spatial_coverage": _spatial_coverage(inlier_matches), "mean_tile_correlation": float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0}
+
+
+def _select_rectification_candidate(attacked_rgb: np.ndarray, combined_reference: np.ndarray, local_reference: np.ndarray, raw_angle: float, raw_log_scale: float) -> dict[str, object] | None:
+    selected = None
+    for angle_offset in (-4.0, -0.5, 0.0, 0.5, 4.0):
+        for log_offset in (-0.08, -0.01, 0.0, 0.01, 0.08):
+            candidate_angle = raw_angle + angle_offset
+            candidate_scale = math.exp(raw_log_scale + log_offset)
+            if not (-16.0 < candidate_angle < 16.0 and _RS_SCALE_MIN < candidate_scale < _RS_SCALE_MAX):
+                continue
+            bundle = _evaluate_rectification_candidate(attacked_rgb, combined_reference, local_reference, candidate_angle, candidate_scale)
+            psr, rms = float(bundle["translation"]["PSR"]), float(bundle["reprojection"])
+            distance = abs(angle_offset) / 4.0 + abs(log_offset) / 0.08
+            rank = (int(bundle["corner_validity"]), int(bundle["canonical_to_attacked"] is not None), int(bundle["macro_regions"]), float(bundle["spatial_coverage"]), int(bundle["support"]), -rms if math.isfinite(rms) else -math.inf, psr if math.isfinite(psr) else -math.inf, -distance, -candidate_angle, -candidate_scale)
+            if selected is None or rank > selected[0]:
+                bundle["candidate_rank"] = rank
+                bundle["candidate_offset"] = (angle_offset, log_offset)
+                selected = (rank, bundle)
+    return None if selected is None else selected[1]
+
+
 def _aggregate_reliability(metrics: dict[str, object], mean_tile_correlation: float) -> float:
     psr = float(metrics["PSR"])
     support = int(metrics["support"])
@@ -1260,34 +1302,20 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     for (cycles, direction), component in sorted(by_component.items()):
         _, _, record = _coarse_rotation_scale(_bandpass(observed_plane, cycles), _bandpass(component, cycles))
         component_observations.append((int(cycles), float(direction), float(record["raw_rotation_deg"]), float(record["raw_log_scale"]), float(record["PSR"])))
-    h_rs = _similarity_h(angle, scale)
-    rectified_rgb, valid_overlap = _rectify_rs_with_valid(observed_rgb, angle, scale)
-    rectified_plane = _luma(rectified_rgb)
-    translation = _translation_phase_correlation(rectified_plane, combined, valid_overlap)
-    shift_x = int(translation["shift_x"])
-    shift_y = int(translation["shift_y"])
-    matches = _match_tiles(rectified_plane, valid_overlap, local_reference, shift_x, shift_y, h_rs)
-    canonical_to_attacked, inlier_matches, residuals, condition = _robust_similarity_fit(matches)
-    if canonical_to_attacked is not None:
-        attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
-        attacked_to_canonical /= attacked_to_canonical[2, 2]
-        attacked_to_canonical[2, 2] = 1.0
-        corners = _corners(attacked_to_canonical)
-    else:
-        attacked_to_canonical = None
-        corners = ()
-    corner_validity = attacked_to_canonical is not None and _valid_corners(corners)
-    support = len(inlier_matches)
-    inlier_ratio = support / len(matches) if matches else 0.0
-    reprojection = float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0
-    macro_regions = _macro_regions(inlier_matches)
-    spatial_coverage = _spatial_coverage(inlier_matches)
     raw_consensus = tuple(float(value) for value in joint["raw_consensus"])
+    bundle = _select_rectification_candidate(observed_rgb, combined, local_reference, raw_consensus[0], raw_consensus[1])
+    if bundle is None:
+        return {"method_id": GEOMETRY_V4_METHOD_ID, "protocol_id": GEOMETRY_V4_PROTOCOL_ID, "H_hat": None, "corners_hat": (), "support": 0, "reliability": 0.0, "status": "UNRELIABLE", "diagnostics": {"error": "no_admissible_rectification_candidate", "PSR": 0.0, "support": 0, "spatial_coverage": 0.0, "cross_scale_rotation_spread_deg": math.inf, "cross_scale_log_scale_spread": math.inf, "raw_group_consensus": {"rotation_deg": raw_consensus[0], "log_scale": raw_consensus[1]}, "resolved_group_raw_estimates": (), "joint_group_raw_observations": group_observations, "public_h_direction": "attacked_to_canonical"}}
+    angle, scale = float(bundle["angle"]), float(bundle["scale"])
+    rectified_rgb, valid_overlap, translation = bundle["rectified_rgb"], bundle["valid_overlap"], bundle["translation"]
+    shift_x, shift_y = int(bundle["shift_x"]), int(bundle["shift_y"])
+    matches, canonical_to_attacked, inlier_matches, residuals = bundle["matches"], bundle["canonical_to_attacked"], bundle["inlier_matches"], bundle["residuals"]
+    condition, attacked_to_canonical, corners = float(bundle["condition"]), bundle["attacked_to_canonical"], bundle["corners"]
+    corner_validity, support, inlier_ratio = bool(bundle["corner_validity"]), int(bundle["support"]), float(bundle["inlier_ratio"])
+    reprojection, macro_regions, spatial_coverage = float(bundle["reprojection"]), int(bundle["macro_regions"]), float(bundle["spatial_coverage"])
     resolved_groups = tuple((float(angle), float(log_scale)) for angle, log_scale in joint["resolved_groups"])
     rotation_spread, log_scale_spread = _raw_group_spreads(resolved_groups, raw_consensus)
-    mean_tile_correlation = (
-        float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0
-    )
+    mean_tile_correlation = float(bundle["mean_tile_correlation"])
     metrics: dict[str, object] = {
         "PSR": float(translation["PSR"]),
         "support": support,
@@ -1320,6 +1348,8 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
             "coarse_log_polar": coarse_record,
             "rotation_deg": angle,
             "scale": scale,
+            "rectification_candidate_offset": tuple(float(value) for value in bundle["candidate_offset"]),
+            "rectification_candidate_rank": tuple(float(value) for value in bundle["candidate_rank"]),
             "translation_pixels": (shift_x, shift_y),
             "mean_tile_correlation": mean_tile_correlation,
             "valid_overlap_fraction": float(np.mean(valid_overlap)),

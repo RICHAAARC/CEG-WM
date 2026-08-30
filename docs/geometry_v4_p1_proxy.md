@@ -8,7 +8,11 @@ split and is not executed by the P1D canary.
 
 The unchanged normalized detection-key bytes are the root input to the
 Geometry-only HKDF domain. Twelve global components cover the Cartesian
-directions 0/45/90/135 degrees at 8/16/24 cycles per image. The highest global
+directions 0/45/90/135 degrees at 12/18/24 cycles per image. This fixed carrier
+set and its fixed three four-component groups were selected from complete
+fixed-16 raw-evidence development search only; they are an engineering choice,
+not a scientific conclusion. The twelve components, four directions, and frozen
+budget are unchanged. The highest global
 scale stays below the 64-pixel Nyquist limit. Every
 direction/scale component has its own keyed phase and sign. Sixteen fixed 4x4
 canonical tiles likewise have keyed local identities without changing their
@@ -40,7 +44,7 @@ or degenerate template invalidates that group; all three groups must be valid or
 the detector fails closed. Their unclipped raw rotation/log-scale winners enter
 the deterministic circular/log-scale consensus and the frozen periodic
 rotation/raw-log-scale spread gates. Bounded refinement is only a later
-rectification seed and cannot rewrite that evidence. Whole-image log-polar
+diagnostic: rectification uses the fixed 25-candidate blind local-geometry bundle around raw consensus. Each physical-interior candidate performs attacked-RGB/key-only R/S rectification, valid-mask translation phase correlation, all 16 masked tile matches, and deterministic robust fitting. Fixed lexicographic rank is corner validity, H existence, macro regions, coverage, support, lower reprojection RMS, translation phase PSR, raw-distance, and numeric tie-break. Candidate selection never rewrites raw groups, consensus, or frozen spreads; no candidate is fail-closed, never a fallback. Translation phase PSR remains distinct from diagnostic tile sidelobe PSR. Whole-image log-polar
 measurements remain diagnostic-only. The detector then uses Cartesian normalized
 cross-power phase correlation for translation. Fixed canonical tile templates
 are matched in the rectified attacked image. Those measured correspondences, not
@@ -106,3 +110,6 @@ rotation -5/+5, scale 0.9/1.1, horizontal translation -0.10/+0.10, and
 crop-rescale 0.9. It is a fixed 16-unit diagnostic roster, never a replacement
 for the 128-unit P1D denominator, and must not be changed in response to its
 outcomes. P1C is neither selected nor inspected.
+The roster contains no compound attack, so it can only evidence its five listed
+attack categories; compound execution remains a separately authorized frozen
+set and is not claimed here.

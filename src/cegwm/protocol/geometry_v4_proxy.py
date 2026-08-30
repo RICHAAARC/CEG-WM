@@ -14,7 +14,7 @@ from cegwm.protocol.geometry_v4 import (
 )
 
 P1_CONFIG = "geometry_v4_p1_proxy_v1.json"
-P1_DIGEST = "eb9d5300c7119d5ddb54b43313750c9a251cec0727e032527154dc9680a7e554"
+P1_DIGEST = "5d2c6bb5db761a27957f9906807c14828f3a3f106912cbe07c46e7f9c5e5decc"
 P1_RUNNER_ID = "geometry_v4_p1_proxy_engine_v1"
 P1_SOURCE_ID = "geometry_v4_procedural_rgb_v1"
 P1_SOURCE_SHAPE = (64, 64, 3)
@@ -80,7 +80,7 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
     energy = value.get("energy", {})
     if (
         energy.get("directions_deg") != [0, 45, 90, 135]
-        or energy.get("scales_cycles_per_image") != [8, 16, 24]
+        or energy.get("scales_cycles_per_image") != [12, 18, 24]
         or energy.get("tile_centers") != [0.125, 0.375, 0.625, 0.875]
         or energy.get("global_fraction") != 0.4
         or energy.get("local_fraction") != 0.6
@@ -104,6 +104,8 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
         != "rotation_deg_-16_to_16_step_0.5_log_scale_log_0.65_to_log_1.55_step_0.01_zero_anchored"
         or detector.get("cross_scale_group_score")
         != "four_component_joint_glrt_with_geometric_mean_completeness"
+        or detector.get("cross_scale_group_partition")
+        != [[[12, 0], [12, 135], [18, 90], [24, 90]], [[12, 45], [18, 0], [24, 0], [24, 135]], [[12, 90], [18, 45], [18, 135], [24, 45]]]
         or detector.get("cross_scale_endpoint_policy")
         != "primary_endpoint_or_flat_nonfinite_template_degenerate_invalid_fail_closed"
         or detector.get("whole_log_polar_role") != "diagnostic_only"
