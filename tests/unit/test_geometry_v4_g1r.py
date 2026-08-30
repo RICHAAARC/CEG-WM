@@ -15,6 +15,8 @@ from cegwm.protocol.geometry_v4_g1r import (
     FIT_GATES,
     FIT_TILE_IDS,
     HOLDOUT_GATES,
+    LOCAL_PREPROCESSING,
+    TRANSLATION_PSR_MIN,
     VALIDATE_TILE_IDS,
     contract_sha256,
     derive_g1r_keys,
@@ -68,6 +70,15 @@ def test_key_domains_and_anchor_energy_are_separate_and_deterministic() -> None:
     assert np.sum(fields.search * fields.validate) == pytest.approx(0.0, abs=1e-8)
     assert np.sum(fields.fit * fields.validate) == pytest.approx(0.0, abs=1e-7)
 
+    direct = {"search": b"search-a", "fit": b"fit-a", "validate": b"validate-a"}
+    baseline = method._domain_fields((64, 64), direct)
+    for changed_name in direct:
+        changed = {**direct, changed_name: direct[changed_name] + b"-changed"}
+        perturbed = method._domain_fields((64, 64), changed)
+        for field_name in direct:
+            equal = np.array_equal(getattr(baseline, field_name), getattr(perturbed, field_name))
+            assert equal is (field_name != changed_name)
+
 
 @pytest.mark.unit
 def test_rgb_and_fake_vae_writers_keep_frozen_budget_and_single_update() -> None:
@@ -106,8 +117,13 @@ def test_validate_domain_cannot_change_search_candidate_or_frozen_h(monkeypatch:
 @pytest.mark.unit
 def test_detector_has_no_oracle_surface_and_preserves_original_fit_gates() -> None:
     assert tuple(inspect.signature(method.detect_g1r).parameters) == ("attacked_rgb", "detection_key")
+    output = method.detect_g1r(np.full((64, 64, 3), .5), KEY)
+    assert set(output) == {"H_hat", "corners_hat", "support", "reliability", "status"}
     forbidden = {"truth", "original", "clean", "residual", "latent", "attack"}
     assert not forbidden & set(inspect.signature(method._search_candidates).parameters)
     assert FIT_GATES["support"] == 6 and FIT_GATES["coverage"] == .75 and FIT_GATES["macro_regions"] == 3
     assert FIT_GATES["condition"] == 1e4 and FIT_GATES["reprojection"] == .02
+    assert FIT_GATES["correlation"] >= .42 and FIT_GATES["margin"] >= .025
+    assert LOCAL_PREPROCESSING == "fixed_cubic_polynomial_detrend_then_narrow_band"
+    assert HOLDOUT_GATES["psr"] >= 8.0 and TRANSLATION_PSR_MIN >= 8.0
     assert HOLDOUT_GATES["rotation_spread"] == 2.0 and HOLDOUT_GATES["log_scale_spread"] == .03

@@ -54,7 +54,25 @@ def _carrier(carrier_id: str, size: int = 128) -> np.ndarray:
     return np.clip(np.stack(channels, axis=-1), 0.08, 0.92).astype(np.float64)
 
 
-def _attack(rgb: np.ndarray, attack: str) -> tuple[np.ndarray, np.ndarray]:
+def _apply_attack(rgb: np.ndarray, attack: str) -> np.ndarray:
+    """Apply one frozen image operation and return only its RGB result."""
+    if attack == "identity":
+        output_to_input = np.eye(3, dtype=np.float64)
+    elif attack == "rotation_5":
+        output_to_input = np.linalg.inv(_similarity_h(5.0, 1.0))
+    elif attack == "scale_0.9":
+        output_to_input = np.linalg.inv(_similarity_h(0.0, .9))
+    elif attack == "translation_0.08_0":
+        output_to_input = np.linalg.inv(_similarity_h(0.0, 1.0, .08, 0.0))
+    elif attack == "crop_0.9":
+        output_to_input = np.linalg.inv(_similarity_h(0.0, 1.0 / .9))
+    else:
+        raise ValueError("unfrozen V4-G1R attack")
+    return np.clip(_sample_h(rgb, output_to_input, 0.0), 0.0, 1.0)
+
+
+def _truth_for_attack(attack: str) -> np.ndarray:
+    """Truth-only evaluator input; call strictly after blind arms are frozen."""
     if attack == "identity":
         canonical_to_attacked = np.eye(3, dtype=np.float64)
     elif attack == "rotation_5":
@@ -66,10 +84,8 @@ def _attack(rgb: np.ndarray, attack: str) -> tuple[np.ndarray, np.ndarray]:
     elif attack == "crop_0.9":
         canonical_to_attacked = _similarity_h(0.0, 1.0 / .9)
     else:
-        raise ValueError("unfrozen V4-G1R attack")
-    attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
-    attacked = _sample_h(rgb, attacked_to_canonical, 0.0)
-    return np.clip(attacked, 0.0, 1.0), attacked_to_canonical
+        raise ValueError("unfrozen V4-G1R truth attack")
+    return np.linalg.inv(canonical_to_attacked)
 
 
 def _blind_arms(attacked_marked: np.ndarray, attacked_negative: np.ndarray) -> BlindArms:
@@ -122,12 +138,10 @@ def run_cpu_canary() -> tuple[Mapping[str, object], ...]:
         for attack in ATTACKS:
             base = {"carrier": carrier_id, "attack": attack, "failure": None, "budget": budget}
             try:
-                attacked_marked, truth = _attack(marked, attack)
-                attacked_negative, negative_truth = _attack(ordinary, attack)
-                if not np.allclose(truth, negative_truth):
-                    raise RuntimeError("V4-G1R synthetic arm transforms differ")
+                attacked_marked = _apply_attack(marked, attack)
+                attacked_negative = _apply_attack(ordinary, attack)
                 arms = _blind_arms(attacked_marked, attacked_negative)
-                evaluation = _evaluate_frozen_arms(arms, truth)
+                evaluation = _evaluate_frozen_arms(arms, _truth_for_attack(attack))
                 records.append({**base, "arms": evaluation})
             except Exception as error:
                 records.append({**base, "failure": f"{type(error).__name__}: {error}", "arms": None})

@@ -66,9 +66,10 @@
   "fit": {
     "condition_number_max": 10000.0,
     "inlier_ratio_min": 0.5,
+    "local_preprocessing": "fixed_cubic_polynomial_detrend_then_narrow_band",
     "macro_regions_min": 3,
-    "masked_normalized_correlation_min": 0.08,
-    "match_margin_min": 0.02,
+    "masked_normalized_correlation_min": 0.42,
+    "match_margin_min": 0.025,
     "one_correspondence_per_tile": true,
     "reprojection_rms_diagonal_max": 0.02,
     "spatial_coverage_min": 0.75,
@@ -102,7 +103,7 @@
     "macro_regions_min": 3,
     "masked_normalized_correlation_min": 0.06,
     "match_margin_min": 0.015,
-    "psr_min": 6.0,
+    "psr_min": 8.0,
     "spatial_coverage_min": 0.75
   },
   "identity": {
@@ -226,6 +227,7 @@
       ]
     },
     "top_k": 5,
-    "translation_operator": "valid_mask_hann_normalized_cross_power_phase_correlation"
+    "translation_operator": "valid_mask_hann_normalized_cross_power_phase_correlation",
+    "translation_psr_min_for_reliable": 8.0
   }
 }

@@ -25,15 +25,25 @@ def test_real_rosters_are_complete_disjoint_and_have_no_subset_interface() -> No
 
 
 @pytest.mark.integration
-def test_truth_is_attached_only_after_blind_three_arm_outputs() -> None:
+def test_truth_is_attached_only_after_blind_three_arm_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tuple(inspect.signature(engine._blind_arms).parameters) == ("attacked_marked", "attacked_negative")
+    assert tuple(inspect.signature(engine._apply_attack).parameters) == ("rgb", "attack")
+    assert "truth" not in inspect.getsource(engine._apply_attack)
     assert "truth_transform" not in inspect.getsource(engine._blind_arms)
     assert tuple(inspect.signature(engine._evaluate_frozen_arms).parameters) == ("arms", "truth_attacked_to_canonical")
+
+    events: list[str] = []
+    unreliable = {"H_hat": None, "corners_hat": (), "support": 0, "reliability": 0.0, "status": "UNRELIABLE"}
+    monkeypatch.setattr(engine, "_blind_arms", lambda marked, negative: events.append("blind") or engine.BlindArms(unreliable, unreliable, unreliable))
+    monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
+    monkeypatch.setattr(engine, "_evaluate_frozen_arms", lambda arms, truth: events.append("evaluate") or {name: {"status": "UNRELIABLE", "support": 0, "truth_metrics": {}, "unsafe": False} for name in ("correct", "wrong", "negative")})
+    records = engine.run_cpu_canary()
+    assert len(records) == 20 and events == [item for _ in range(20) for item in ("blind", "truth", "evaluate")]
 
 
 @pytest.mark.integration
 def test_truth_metric_is_attacked_to_canonical_and_normalized_diagonal() -> None:
-    _, truth = engine._attack(engine._carrier("gradient_shapes", 64), "translation_0.08_0")
+    truth = engine._truth_for_attack("translation_0.08_0")
     reliable = {"status": "RELIABLE", "H_hat": tuple(float(value) for value in truth.reshape(-1))}
     metrics = engine._truth_metrics(reliable, truth)
     assert metrics == pytest.approx({"mapped_corner_error": 0.0, "center_reprojection_error": 0.0, "rotation_abs_error_degrees": 0.0, "log_scale_abs_error": 0.0})

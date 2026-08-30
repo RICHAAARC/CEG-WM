@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Mapping
 
 import numpy as np
@@ -30,6 +31,7 @@ from cegwm.protocol.geometry_v4_g1r import (
     LUMA_PEAK_CAP,
     LUMA_RMS_CAP,
     SEARCH_TOP_K,
+    TRANSLATION_PSR_MIN,
     VALIDATE_TILE_IDS,
     derive_g1r_keys,
 )
@@ -64,6 +66,24 @@ def _unit(field: np.ndarray) -> np.ndarray:
     return value / norm
 
 
+@lru_cache(maxsize=64)
+def _fixed_local_search_basis(height: int, width: int, tile_id: int) -> np.ndarray:
+    row, column = divmod(tile_id, 4)
+    y0, y1 = row * height // 4, (row + 1) * height // 4
+    x0, x1 = column * width // 4, (column + 1) * width // 4
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    xn, yn = xx / width, yy / height
+    columns = [np.ones((y1 - y0) * (x1 - x0), dtype=np.float64)]
+    for cycles in (8, 16, 24):
+        for angle_degrees in (0, 45, 90, 135):
+            angle = math.radians(angle_degrees)
+            argument = 2.0 * math.pi * cycles * (xn * math.cos(angle) + yn * math.sin(angle))
+            columns.extend((np.cos(argument).reshape(-1), np.sin(argument).reshape(-1)))
+    basis = np.linalg.qr(np.stack(columns, axis=1), mode="reduced")[0]
+    basis.setflags(write=False)
+    return basis
+
+
 def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> G1RAnchorFields:
     height, width = shape
     if height < 32 or width < 32:
@@ -79,7 +99,8 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
             phase = _seed(domain_keys["search"], label) / 2**64 * 2.0 * math.pi
             sign = 1.0 if _seed(domain_keys["search"], b"sign:" + label) & 1 else -1.0
             angle = math.radians(angle_degrees)
-            search += sign * np.cos(2.0 * math.pi * cycles * (xn * math.cos(angle) + yn * math.sin(angle)) + phase)
+            argument = 2.0 * math.pi * cycles * (xn * math.cos(angle) + yn * math.sin(angle))
+            search += sign * np.cos(argument + phase)
     search = _unit(search)
 
     def partition(name: str, tile_ids: tuple[int, ...]) -> np.ndarray:
@@ -99,10 +120,8 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
                 sign = 1.0 if _seed(domain_keys[name], b"sign:" + component_label) & 1 else -1.0
                 tile += sign * np.cos(2 * math.pi * (frequency_x * local_x + frequency_y * local_y) + phase)
             tile -= float(np.mean(tile))
-            search_tile = search[y0:y1, x0:x1]
-            denominator = float(np.sum(search_tile * search_tile))
-            if denominator > 1e-12:
-                tile -= float(np.sum(tile * search_tile) / denominator) * search_tile
+            orthogonal_basis = _fixed_local_search_basis(height, width, tile_id)
+            tile = (tile.reshape(-1) - orthogonal_basis @ (orthogonal_basis.T @ tile.reshape(-1))).reshape(tile.shape)
             answer[y0:y1, x0:x1] = tile
         return _unit(answer)
 
@@ -282,9 +301,24 @@ def _patch(array: np.ndarray, center_x: int, center_y: int, radius: int) -> np.n
     return array[center_y - radius:center_y + radius + 1, center_x - radius:center_x + radius + 1]
 
 
+@lru_cache(maxsize=16)
+def _fixed_patch_trend_basis(height: int, width: int) -> np.ndarray:
+    yy, xx = np.mgrid[-1.0:1.0:complex(height), -1.0:1.0:complex(width)]
+    design = np.stack(
+        (np.ones_like(xx), xx, yy, xx * xx, xx * yy, yy * yy, xx**3, xx * xx * yy, xx * yy * yy, yy**3),
+        axis=-1,
+    ).reshape(-1, 10)
+    basis = np.linalg.qr(design, mode="reduced")[0]
+    basis.setflags(write=False)
+    return basis
+
+
 def _narrow_patch(patch: np.ndarray) -> np.ndarray:
     """Fixed local narrow band; removes ordinary low-frequency tile content."""
-    value = np.asarray(patch, dtype=np.float64) - float(np.mean(patch))
+    value = np.asarray(patch, dtype=np.float64)
+    trend_basis = _fixed_patch_trend_basis(*value.shape)
+    flattened = value.reshape(-1)
+    value = (flattened - trend_basis @ (trend_basis.T @ flattened)).reshape(value.shape)
     fy = np.fft.fftfreq(value.shape[0]) * value.shape[0]
     fx = np.fft.fftfreq(value.shape[1]) * value.shape[1]
     radius = np.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
@@ -347,7 +381,7 @@ def _fit_candidate(image: np.ndarray, candidate: Mapping[str, object], fit_key: 
     coverage, macro = _spatial_coverage(inliers), _macro_regions(inliers)
     reprojection = float(np.sqrt(np.mean(residuals * residuals))) if residuals.size else math.inf
     ratio = support / len(matches) if matches else 0.0
-    valid = bool(estimate is not None and support >= FIT_GATES["support"] and coverage >= FIT_GATES["coverage"] and macro >= FIT_GATES["macro_regions"] and condition <= FIT_GATES["condition"] and reprojection <= FIT_GATES["reprojection"] and ratio >= 0.5)
+    valid = bool(estimate is not None and float(candidate["translation_psr"]) >= TRANSLATION_PSR_MIN and support >= FIT_GATES["support"] and coverage >= FIT_GATES["coverage"] and macro >= FIT_GATES["macro_regions"] and condition <= FIT_GATES["condition"] and reprojection <= FIT_GATES["reprojection"] and ratio >= 0.5)
     rank = (int(valid), support, macro, coverage, ratio, -reprojection, -condition, float(candidate["ncc"]), candidate["rank"])
     return {"valid": valid, "canonical_to_attacked": estimate, "matches": tuple(inliers), "support": support, "coverage": coverage, "macro_regions": macro, "reprojection": reprojection, "condition": condition, "inlier_ratio": ratio, "rank": rank, "search": candidate}
 
@@ -424,4 +458,4 @@ def detect_g1r(attacked_rgb: np.ndarray, detection_key: str | bytes | bytearray 
     result = _detect_domains(image, derive_g1r_keys(detection_key))
     observation = result["observation"]
     assert isinstance(observation, GeometryV4Observation)
-    return {"H_hat": observation.H_hat, "corners_hat": observation.corners_hat, "support": observation.support, "reliability": observation.reliability, "status": observation.status, "diagnostics": {"fit": result["fit"], "holdout": result["holdout"], "public_h_direction": "attacked_to_canonical"}}
+    return {"H_hat": observation.H_hat, "corners_hat": observation.corners_hat, "support": observation.support, "reliability": observation.reliability, "status": observation.status}

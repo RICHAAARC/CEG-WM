@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "a54335dd50b35f525c27c25c189a81ef06587099db22ec6411dc94ed8b906c61"
+CONFIG_SHA256 = "ab48092967efce8593294ee457a48d87be3ecb3796156a0c4e0f7776e2954d28"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_generated_writer_v1"
@@ -30,9 +30,11 @@ DEVELOPMENT_SEEDS = (6201, 6202, 6203, 6204)
 CONFIRMATION_SEEDS = (6301, 6302, 6303, 6304)
 LEGACY_SEEDS = (6101, 6102, 6103, 6104)
 SEARCH_TOP_K = 5
+TRANSLATION_PSR_MIN = 8.0
+LOCAL_PREPROCESSING = "fixed_cubic_polynomial_detrend_then_narrow_band"
 SAFETY_TOLERANCES = {"corner": 0.02, "center": 0.02, "rotation_degrees": 2.0, "log_scale": 0.03}
-FIT_GATES = {"support": 6, "coverage": 0.75, "macro_regions": 3, "condition": 1e4, "reprojection": 0.02, "correlation": 0.08, "margin": 0.02}
-HOLDOUT_GATES = {"coverage": 0.75, "macro_regions": 3, "correlation": 0.06, "margin": 0.015, "psr": 6.0, "rotation_spread": 2.0, "log_scale_spread": 0.03}
+FIT_GATES = {"support": 6, "coverage": 0.75, "macro_regions": 3, "condition": 1e4, "reprojection": 0.02, "correlation": 0.42, "margin": 0.025}
+HOLDOUT_GATES = {"coverage": 0.75, "macro_regions": 3, "correlation": 0.06, "margin": 0.015, "psr": 8.0, "rotation_spread": 2.0, "log_scale_spread": 0.03}
 KEY_LABELS = {
     "search": b"CEG-WM/geometry-v4/g1r/search/v1",
     "fit": b"CEG-WM/geometry-v4/g1r/fit/v1",
@@ -72,8 +74,13 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("V4-G1R roster differs")
     if set(FIT_TILE_IDS) & set(VALIDATE_TILE_IDS) or set(FIT_TILE_IDS) | set(VALIDATE_TILE_IDS) != set(range(16)):
         raise ValueError("V4-G1R tile partitions differ")
-    if value.get("search", {}).get("top_k") != SEARCH_TOP_K or value.get("blind_boundary", {}).get("h_direction") != "attacked_to_canonical" or value.get("blind_boundary", {}).get("geometry_can_form_positive") is not False:
+    if value.get("search", {}).get("top_k") != SEARCH_TOP_K or value.get("search", {}).get("translation_psr_min_for_reliable") != TRANSLATION_PSR_MIN or value.get("blind_boundary", {}).get("h_direction") != "attacked_to_canonical" or value.get("blind_boundary", {}).get("geometry_can_form_positive") is not False:
         raise ValueError("V4-G1R blind boundary differs")
+    fit, holdout = value.get("fit", {}), value.get("holdout", {})
+    if fit.get("local_preprocessing") != LOCAL_PREPROCESSING or (fit.get("support_min"), fit.get("spatial_coverage_min"), fit.get("macro_regions_min"), fit.get("condition_number_max"), fit.get("reprojection_rms_diagonal_max"), fit.get("masked_normalized_correlation_min"), fit.get("match_margin_min")) != (FIT_GATES["support"], FIT_GATES["coverage"], FIT_GATES["macro_regions"], FIT_GATES["condition"], FIT_GATES["reprojection"], FIT_GATES["correlation"], FIT_GATES["margin"]):
+        raise ValueError("V4-G1R local preprocessing differs")
+    if (holdout.get("spatial_coverage_min"), holdout.get("macro_regions_min"), holdout.get("masked_normalized_correlation_min"), holdout.get("match_margin_min"), holdout.get("psr_min"), holdout.get("cross_scale_rotation_spread_degrees_max"), holdout.get("cross_scale_log_scale_spread_max")) != (HOLDOUT_GATES["coverage"], HOLDOUT_GATES["macro_regions"], HOLDOUT_GATES["correlation"], HOLDOUT_GATES["margin"], HOLDOUT_GATES["psr"], HOLDOUT_GATES["rotation_spread"], HOLDOUT_GATES["log_scale_spread"]):
+        raise ValueError("V4-G1R holdout gates differ")
     return value
 
 

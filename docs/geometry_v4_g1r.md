@@ -31,7 +31,10 @@ labels in the canonical contract. The content key is unchanged and is never
 derived from Geometry. Search, fit, and validation consume respectively .40,
 .36, and .24 of one unchanged anchor budget. The 4x4 canonical grid is split by
 checkerboard into eight fit and eight validation tiles; each partition covers
-all four 2x2 macro regions. Tile identity and coordinates never depend on RGB.
+all four 2x2 macro regions. The global search constellation and the two
+spatially disjoint local partitions are constructed independently: each field
+reads only its own derived domain key, so changing one key cannot change either
+of the other two fields. Tile identity and coordinates never depend on RGB.
 
 The versioned G1R writer remains one fixed update at step 19 of the 20-step
 SD3.5 run, immediately before final VAE decode. It may not exceed luma RMS
@@ -49,17 +52,23 @@ pixel sums are not core evidence. No candidate means `UNRELIABLE`; search can
 never emit `RELIABLE` and has no fallback.
 
 Each fit tile contributes at most one masked normalized-correlation match with
-a fixed margin. A deterministic robust similarity fit must retain support at
-least 6, spatial coverage at least .75, at least three macro regions, condition
-number at most 1e4, reprojection RMS at most .02, inlier ratio at least .5, and
-strictly convex H-consistent corners. Public H always maps attacked to
-canonical.
+fixed cubic-polynomial local detrending followed by the frozen narrow band,
+correlation at least .42, and margin at least .025. A deterministic robust
+similarity fit must retain support at least 6, spatial coverage at least .75,
+at least three macro regions, condition number at most 1e4, reprojection RMS at
+most .02, inlier ratio at least .5, and strictly convex H-consistent corners.
+Public H always maps attacked to canonical. Any translation or holdout PSR used
+by a `RELIABLE` decision must be at least 8.
 
 `k_validate` bytes are absent from search, rank, fit, and tie-breaking. Only
 after H is frozen are the eight validation tiles evaluated for correlation,
 margin, PSR, cross-scale consistency, coverage, and corner validity. Fit and
 holdout gates must both pass. Changing validation bytes may therefore change
 only `RELIABLE`/`UNRELIABLE`, never the selected candidate or H.
+
+The public detector returns exactly `(H_hat, corners_hat, support, reliability,
+status)`. Search, fit, and holdout diagnostics remain private engineering
+records and cannot enlarge that public geometry interface.
 
 ## Rosters and evidence ceiling
 
