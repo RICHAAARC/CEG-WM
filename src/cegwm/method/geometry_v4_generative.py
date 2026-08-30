@@ -5,14 +5,19 @@ import hashlib
 import hmac
 import math
 from dataclasses import dataclass
-from typing import Callable
+from pathlib import Path
+from typing import Any, Callable
 
 import numpy as np
 import torch
+from PIL import Image
 
 from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.protocol.geometry_v4_generative import ENERGY_SHARES, LUMA_PEAK_CAP, LUMA_RMS_CAP
 from cegwm.shared.keys import normalize_detection_key
+from cegwm.method.content_whitening import score_content_whitened_lf_image
+from cegwm.method.hf import score_hf_image
+from cegwm.method.content_weighted_joint import LFHFScorePair, WeightedJointAsset, load_calibration_asset, weighted_joint_score
 
 _REC709 = np.asarray((0.2126, 0.7152, 0.0722), dtype=np.float64)
 _LATENT_AMPLITUDE = 0.001
@@ -31,6 +36,63 @@ class RGBObservability:
     @property
     def passed(self) -> bool:
         return self.correct_key_anchor > self.wrong_key_anchor and self.psnr > 40.0 and self.ssim > .98 and self.luma_rms <= LUMA_RMS_CAP and self.luma_peak <= LUMA_PEAK_CAP and self.content_score_drift < .05
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenWeightedJointContentAdapter:
+    """The unchanged content detector: current RGB plus normalized key only."""
+
+    lf_public_assets: Any
+    hf_public_assets: Any
+    calibration_asset: WeightedJointAsset
+    calibration_asset_path: str
+    calibration_asset_sha256: str
+
+    def identities(self) -> dict[str, str]:
+        return {
+            "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+            "lf_scorer": "score_content_whitened_lf_image",
+            "hf_scorer": "score_hf_image",
+            "joint_operator": "weighted_joint_score",
+            "calibration_asset": self.calibration_asset_path,
+            "calibration_asset_sha256": self.calibration_asset_sha256,
+        }
+
+    def __call__(self, current_rgb: np.ndarray, normalized_key: bytes) -> float:
+        image = np.asarray(current_rgb, dtype=np.float64)
+        if not isinstance(normalized_key, bytes) or not normalized_key:
+            raise TypeError("content adapter requires normalized detection-key bytes")
+        if image.ndim != 3 or image.shape[2] != 3 or min(image.shape[:2]) < 1 or not np.isfinite(image).all() or image.min() < 0.0 or image.max() > 1.0:
+            raise ValueError("content adapter requires finite current RGB in [0,1]")
+        # The existing scorers receive exactly the current ordinary RGB and normalized key.
+        ordinary = Image.fromarray((image * 255.0).round().clip(0, 255).astype(np.uint8), mode="RGB")
+        lf = float(score_content_whitened_lf_image(ordinary, normalized_key, self.lf_public_assets))
+        hf = float(score_hf_image(ordinary, normalized_key, self.hf_public_assets))
+        if not math.isfinite(lf) or not math.isfinite(hf) or not -1.0 <= lf <= 1.0 or not -1.0 <= hf <= 1.0:
+            raise ValueError("unchanged content branch score must be finite in [-1,1]")
+        pair = LFHFScorePair(lf=lf, hf=hf)
+        score = float(weighted_joint_score(pair.lf, pair.hf, self.calibration_asset))
+        if not math.isfinite(score):
+            raise ValueError("unchanged weighted-joint content score must be finite")
+        return score
+
+
+def build_reused_weighted_joint_content_adapter(assets: Any, repo_root: str | Path) -> FrozenWeightedJointContentAdapter:
+    """Bind only existing Content ISS public assets and the frozen V9 calibration asset."""
+    root = Path(repo_root)
+    asset_path = root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
+    sidecar_path = asset_path.with_name(f"{asset_path.name}.sha256")
+    if not hasattr(assets, "lf_public_assets") or not hasattr(assets, "hf_public_assets"):
+        raise TypeError("reused content adapter requires ContentISS runner public assets")
+    raw = asset_path.read_bytes()
+    asset = load_calibration_asset(asset_path, sidecar_path)
+    return FrozenWeightedJointContentAdapter(
+        assets.lf_public_assets,
+        assets.hf_public_assets,
+        asset,
+        "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        hashlib.sha256(raw).hexdigest(),
+    )
 
 
 def _seed(key: bytes, label: bytes) -> int:

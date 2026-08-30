@@ -17,6 +17,13 @@ are at most 2/255 and 8/255, and the supplied unchanged content detector's
 two independent RGB calls differ by less than .05.  Over-budget and runtime
 failures are retained, never tuned or retried.
 
+The content detector is not a Geometry proxy: it is constructed automatically
+from the same `content_iss_engine._load_pipeline_and_assets` result as the
+generation pipeline.  It accepts only current RGB and normalized key bytes,
+then applies the existing whitening LF scorer, HF scorer, and frozen V9
+weighted-joint asset.  Its scorer and asset identities are retained in every
+run record.
+
 G1 is the one-shot holdout roster: seeds 6101--6104 with their frozen prompts
 crossed with identity, rotation 5 degrees, scale .9, translation .08/0, and
 crop .9.  It may only start after a separately reviewed G0 4/4 freeze, and it

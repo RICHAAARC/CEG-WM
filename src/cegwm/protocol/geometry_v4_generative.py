@@ -36,6 +36,16 @@ def load_g0_g1_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("Geometry-V4 G0/G1 runtime identity differs")
     if tuple(budget.get("global_local_energy_shares", ())) != ENERGY_SHARES or budget.get("luma_rms_cap") != LUMA_RMS_CAP or budget.get("luma_peak_cap") != LUMA_PEAK_CAP:
         raise ValueError("Geometry-V4 G0/G1 budget differs")
+    detector = value.get("content_detector")
+    if not isinstance(detector, dict) or detector != {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_sidecar": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
+        "hf_scorer": "score_hf_image", "joint_operator": "weighted_joint_score",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "loader": "experiments.content_iss_engine._load_pipeline_and_assets",
+    }:
+        raise ValueError("Geometry-V4 G0/G1 content detector identity differs")
     if tuple(value.get("g0", {}).get("seeds", ())) != (5101, 5102, 5103, 5104):
         raise ValueError("Geometry-V4 G0 seed roster differs")
     if set(value.get("g1", {}).get("attacks", ())) != {"identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9"}:

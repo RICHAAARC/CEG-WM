@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 import torch
 
-from cegwm.method.geometry_v4_generative import measure_final_rgb, rgb_only_anchor_score, write_final_latent_anchor
+from cegwm.method import geometry_v4_generative as generated
+from cegwm.method.geometry_v4_generative import FrozenWeightedJointContentAdapter, measure_final_rgb, rgb_only_anchor_score, write_final_latent_anchor
 from cegwm.protocol.geometry_v4_generative import CALLBACK_STEP_INDEX, LUMA_PEAK_CAP, LUMA_RMS_CAP, load_g0_g1_contract
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,3 +44,18 @@ def test_rgb_observability_is_rgb_key_only_and_fail_closed_on_equal_keys() -> No
     assert np.isfinite(rgb_only_anchor_score(marked, KEY))
     with pytest.raises(ValueError, match="must differ"):
         measure_final_rgb(clean, marked, KEY, KEY, lambda rgb, key: 0.0)
+
+
+@pytest.mark.unit
+def test_reused_content_adapter_uses_lf_hf_and_weighted_joint_current_rgb_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, object, bytes]] = []
+    monkeypatch.setattr(generated, "score_content_whitened_lf_image", lambda image, key, assets: calls.append(("lf", image, key)) or .2)
+    monkeypatch.setattr(generated, "score_hf_image", lambda image, key, assets: calls.append(("hf", image, key)) or .3)
+    monkeypatch.setattr(generated, "weighted_joint_score", lambda lf, hf, asset: .25)
+    adapter = FrozenWeightedJointContentAdapter(object(), object(), object(), "asset.json", "a" * 64)  # type: ignore[arg-type]
+    assert adapter(np.full((16, 16, 3), .5), b"normalized") == .25
+    assert [call[0] for call in calls] == ["lf", "hf"] and all(call[2] == b"normalized" for call in calls)
+    with pytest.raises(ValueError, match="finite current RGB"):
+        adapter(np.full((16, 16, 3), np.nan), b"normalized")
+    with pytest.raises(TypeError, match="normalized detection-key bytes"):
+        adapter(np.zeros((16, 16, 3)), "not-bytes")  # type: ignore[arg-type]

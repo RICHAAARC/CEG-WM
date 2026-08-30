@@ -1,5 +1,14 @@
 {
   "artifact_root": "/home/richar/projects/CEG-WM/artifacts/geometry-v4-g0-g1-v1",
+  "content_detector": {
+    "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+    "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+    "calibration_sidecar": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
+    "hf_scorer": "score_hf_image",
+    "joint_operator": "weighted_joint_score",
+    "lf_scorer": "score_content_whitened_lf_image",
+    "loader": "experiments.content_iss_engine._load_pipeline_and_assets"
+  },
   "g0": {
     "attacks": [
       "identity"
