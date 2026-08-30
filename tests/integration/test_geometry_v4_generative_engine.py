@@ -39,3 +39,25 @@ def test_runner_reuses_content_iss_loader_without_a_default_proxy_scorer() -> No
     assert "build_reused_weighted_joint_content_adapter" in source
     assert "content_detector" not in inspect.signature(engine.run).parameters
     assert "mean" not in source and "load_sd35_pipeline" not in source
+
+
+@pytest.mark.integration
+def test_cli_consumes_secrets_once_and_emits_no_secret(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path) -> None:
+    root, token = "a root secret that must not escape", "hf-token-secret"
+    env = {"CEG_WM_ROOT_KEY": root, "HF_TOKEN": token, "OTHER": "ok"}
+    calls: list[tuple[object, ...]] = []
+    monkeypatch.setattr(engine, "_checkout_state", lambda repo: ("a" * 40, "", True))
+    monkeypatch.setattr("cegwm.runtime.content_weighted_joint_sd35.derive_stability_wrong_keys", lambda key: (b"wrong",))
+    monkeypatch.setattr(engine, "run", lambda *args, **kwargs: calls.append(args) or tuple({"final_rgb": {"passed": True}} for _ in range(4)))
+    code = engine.main(["--stage", "G0", "--repo-root", str(tmp_path), "--artifact-root", str(tmp_path / "out"), "--expected-exact", "a" * 40], environ=env)
+    output = capsys.readouterr().out
+    assert code == 0 and len(calls) == 1 and root not in output and token not in output
+    assert "CEG_WM_ROOT_KEY" not in env and "HF_TOKEN" not in env
+
+
+@pytest.mark.integration
+def test_cli_rejects_bad_checkout_before_runner(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path) -> None:
+    monkeypatch.setattr(engine, "_checkout_state", lambda repo: ("b" * 40, "Geometry-V4", False))
+    monkeypatch.setattr(engine, "run", lambda *args, **kwargs: pytest.fail("runner must not start"))
+    assert engine.main(["--stage", "G0", "--repo-root", str(tmp_path), "--artifact-root", str(tmp_path / "out"), "--expected-exact", "a" * 40], environ={}) == 2
+    assert "STOPPED" in capsys.readouterr().out

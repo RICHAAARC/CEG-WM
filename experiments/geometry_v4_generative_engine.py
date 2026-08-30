@@ -1,8 +1,12 @@
 """G0/G1 runner: real SD3.5 only, RGB-only detection, retained failures."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -49,3 +53,59 @@ def run(stage: str, detection_key: object, wrong_key: object, *, repo_root: str 
     path = root / f"{stage.lower()}-records.json"; payload = {"contract_sha256": contract_sha256(repo_root), "stage": stage, "content_detector": content_detector.identities(), "records": records}; path.write_text(json.dumps(payload, indent=2, allow_nan=False)+"\n", encoding="ascii")
     (root / f"{stage.lower()}-records.json.sha256").write_text(hashlib.sha256(path.read_bytes()).hexdigest()+f"  {path.name}\n", encoding="ascii")
     return records
+
+
+def _checkout_state(repo_root: str | Path) -> tuple[str, str, bool]:
+    root = Path(repo_root)
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    return git("rev-parse", "HEAD"), git("branch", "--show-current"), git("status", "--porcelain") == ""
+
+
+def _secret_environment(environ: dict[str, str]) -> tuple[bytes, str]:
+    root_key = environ.pop("CEG_WM_ROOT_KEY", "")
+    hf_token = environ.pop("HF_TOKEN", "")
+    try:
+        if not isinstance(root_key, str) or not root_key.strip() or not isinstance(hf_token, str) or not hf_token.strip():
+            raise RuntimeError("required Colab secrets are unavailable")
+        from cegwm.runtime.content_weighted_joint_sd35 import derive_stability_wrong_keys
+        from cegwm.shared.keys import normalize_detection_key
+        normalized = normalize_detection_key(root_key)
+        return normalized, hf_token
+    finally:
+        root_key = ""
+        environ.pop("CEG_WM_ROOT_KEY", None)
+
+
+def main(argv: list[str] | None = None, *, environ: dict[str, str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Geometry-V4 detached G0/G1 runner")
+    parser.add_argument("--stage", choices=("G0", "G1"), required=True)
+    parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--artifact-root", required=True)
+    parser.add_argument("--expected-exact", required=True)
+    args = parser.parse_args(argv)
+    try:
+        exact, branch, clean = _checkout_state(args.repo_root)
+        if exact != args.expected_exact or branch != "" or not clean:
+            raise RuntimeError("detached checkout exact or clean state differs")
+        env = os.environ if environ is None else environ
+        detection_key, hf_token = _secret_environment(env)
+        try:
+            from cegwm.runtime.content_weighted_joint_sd35 import derive_stability_wrong_keys
+            wrong_key = derive_stability_wrong_keys(detection_key)[0]
+            records = run(args.stage, detection_key, wrong_key, repo_root=args.repo_root, hf_token=hf_token, artifact_root=args.artifact_root)
+        finally:
+            hf_token = ""
+            env.pop("HF_TOKEN", None)
+        passed = sum(bool(record.get("final_rgb", {}).get("passed")) for record in records if isinstance(record.get("final_rgb"), dict))
+        expected = 4 if args.stage == "G0" else len(records)
+        summary = {"stage": args.stage, "source_exact": exact, "clean": clean, "units": len(records), "passed": passed, "expected": expected, "status": "PASS" if passed == expected else "GATE_FAILED"}
+        print(json.dumps(summary, sort_keys=True, separators=(",", ":")), flush=True)
+        return 0 if summary["status"] == "PASS" else 2
+    except Exception as error:
+        print(json.dumps({"stage": args.stage, "status": "STOPPED", "error": type(error).__name__}, sort_keys=True, separators=(",", ":")), flush=True)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
