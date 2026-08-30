@@ -49,6 +49,9 @@ def test_proxy_config_digest_split_roster_and_canonical_bytes() -> None:
     assert set(P1_SPLITS["P1D"]).isdisjoint(P1_SPLITS["P1C"])
     assert contract["attack_operator"]["public_h_direction"] == P1_H_DIRECTION == "attacked_to_canonical"
     assert tuple(contract["detector"]["coarse_scale_bounds"]) == P1_SCALE_BOUNDS
+    assert contract["detector"]["cross_scale_estimation"] == "keyed_sparse_constellation_glrt_primary_v1"
+    assert contract["detector"]["cross_scale_group_score"] == "four_component_joint_glrt_with_geometric_mean_completeness"
+    assert contract["detector"]["whole_log_polar_role"] == "diagnostic_only"
     assert P1_SCALE_BOUNDS[1] >= 1 / 0.7
     rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
     _, attacked_to_canonical = proxy.apply_proxy_attack(rgb, "crop_rescale_0.7")
@@ -63,7 +66,7 @@ def test_writer_has_twelve_independent_global_components_fixed_tiles_and_final_l
     geometry_key = derive_geometry_v4_key(normalize_detection_key(KEY))
     phase_signs = {
         proxy._phase_sign(geometry_key, f"global/{cycles}/{direction}")
-        for cycles in (8, 16, 32)
+        for cycles in (8, 16, 24)
         for direction in (0, 45, 90, 135)
     }
     assert len(phase_signs) == 12
@@ -85,6 +88,24 @@ def test_writer_has_twelve_independent_global_components_fixed_tiles_and_final_l
 
 
 @pytest.mark.unit
+def test_balanced_magnitude_codebook_and_weighted_components_are_publicly_safe() -> None:
+    assert len(proxy._MAGNITUDE_CODEBOOK) == 60
+    assert sum(level * level for level in proxy._MAGNITUDE_LEVELS) / 4.0 == pytest.approx(1.0)
+    assert min(right - left for left, right in zip(proxy._MAGNITUDE_LEVELS, proxy._MAGNITUDE_LEVELS[1:])) >= 0.19
+    assert all(sorted(label for row in code for label in row) == [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3] for code in proxy._MAGNITUDE_CODEBOOK)
+    for code in proxy._MAGNITUDE_CODEBOOK:
+        assert proxy._magnitude_worst_radial_ratio(code) == pytest.approx(proxy._MAGNITUDE_OPTIMAL_RADIAL_RATIO)
+    assert len(proxy._MAGNITUDE_CODEBOOK) == 60
+    key = derive_geometry_v4_key(normalize_detection_key(KEY))
+    assert proxy._magnitude_code(key) == proxy._magnitude_code(key)
+    _, global_field, _, _, components, diagnostics = proxy._anchor_fields((64, 64), key)
+    ratios = sorted(round(float(np.sqrt(np.mean(np.square(value)))), 9) for value in components.values())
+    assert ratios == sorted(round(value, 9) for value in proxy._MAGNITUDE_LEVELS for _ in range(3))
+    assert np.sqrt(np.mean(np.square(global_field))) == pytest.approx(1.0)
+    assert not {"assignment", "weight", "label", "code", "permutation", "index", "digest"} & _record_keys(diagnostics)
+
+
+@pytest.mark.unit
 def test_fixed_multiradius_constellation_groups_and_orbit_order() -> None:
     key = derive_geometry_v4_key(normalize_detection_key(KEY))
     _, _, _, _, components, _ = proxy._anchor_fields((64, 64), key)
@@ -97,12 +118,60 @@ def test_fixed_multiradius_constellation_groups_and_orbit_order() -> None:
 
 
 @pytest.mark.unit
-def test_joint_orbit_tie_break_and_raw_group_spreads(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(proxy, "_rs_score", lambda *args, **kwargs: 1.0)
-    result = proxy._joint_orbit_consensus(np.ones((64, 64, 3)), np.ones((64, 64)), [(0.0, 0.0, 1.0)] * 3)
-    assert len(result["hypotheses"]) == 64 and result["hypotheses"][0][:3] == (0, 0, 0)
+def test_mixed_group_consensus_and_raw_group_spreads() -> None:
+    result = proxy._mixed_group_consensus([(89.0, -0.1, 1.0), (-89.0, 0.0, 1.0), (89.0, 0.1, 1.0)])
+    assert result["valid"] is True
+    assert result["raw_consensus"] == pytest.approx((89.0, 0.0))
     rotation, scale = proxy._raw_group_spreads(((89.0, -10.0), (-89.0, 10.0), (89.0, 0.0)), (89.0, 0.0))
     assert rotation == pytest.approx(2.0) and scale == pytest.approx(10.0)
+
+
+@pytest.mark.unit
+def test_quadratic_radial_peak_is_independent_and_fail_closed() -> None:
+    assert proxy._quadratic_peak_delta(-1.5625, -0.0625, -0.5625) == pytest.approx(0.25)
+    assert proxy._quadratic_peak_delta(-0.5625, -0.0625, -1.5625) == pytest.approx(-0.25)
+    assert proxy._quadratic_peak_delta(0.0, 0.0, -1.0) is None
+    assert proxy._quadratic_peak_delta(0.0, 1.0, float("nan")) is None
+    assert proxy._raw_group_spreads(((0.0, -0.1), (0.0, 0.0), (0.0, 0.1)), (0.0, 0.0))[1] > 0.03
+
+
+@pytest.mark.unit
+def test_sparse_glrt_pure_helpers_and_identity_recovery() -> None:
+    grid = proxy._zero_anchored_log_grid()
+    assert 0.0 in grid and math.log(0.65) in grid and math.log(1.55) in grid
+    assert all(abs(value / 0.01 - round(value / 0.01)) < 1e-12 for value in grid[1:-1])
+    image = np.arange(64 * 64, dtype=np.float64).reshape(64, 64)
+    assert proxy._toroidal_bilinear_patch(image, -0.5, -0.5).shape == (11, 11)
+    lobe = proxy._hann_dtft_lobe(np.arange(-5, 6, dtype=np.float64))
+    assert int(np.argmax(lobe)) == 5
+    key = derive_geometry_v4_key(normalize_detection_key(KEY))
+    global_field, _, components = proxy._global_fields((64, 64), key)
+    records = proxy._sparse_constellation_diagnostic(global_field, components)
+    assert len(records) == 3
+    assert all(record["valid"] and abs(record["raw_rotation_deg"]) <= 0.5 and abs(record["raw_log_scale"]) <= 0.011 for record in records)
+
+
+@pytest.mark.unit
+def test_sparse_endpoint_raw_is_invalid_and_cannot_seed_rectification(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = derive_geometry_v4_key(normalize_detection_key(KEY))
+    _, global_reference, _, by_scale, components, _ = proxy._anchor_fields((64, 64), key)
+    identities = tuple(components)
+    endpoint_records = tuple(
+        {
+            "identities": identities[index * 4 : (index + 1) * 4],
+            "raw_rotation_deg": 16.0,
+            "raw_log_scale": 0.0,
+                "score": 1.0,
+                "margin": 1.0,
+                "boundary": True,
+                "valid": False,
+        }
+        for index in range(3)
+    )
+    monkeypatch.setattr(proxy, "_sparse_constellation_diagnostic", lambda *_: endpoint_records)
+    result = proxy._refine_rotation_scale(np.zeros((64, 64, 3), dtype=np.float64), global_reference, by_scale, components)
+    assert result["raw_valid"] is False
+    assert all(math.isnan(value) for value in result["rectification_seed"])
 
 
 @pytest.mark.unit
@@ -131,6 +200,61 @@ def test_normalized_cross_power_and_blind_identity_observation_use_measured_matc
 
 
 @pytest.mark.unit
+def test_mixed_log_polar_diagnostic_keeps_angular_wrap_and_radial_axis_linear() -> None:
+    generator = np.random.default_rng(17)
+    reference = generator.normal(size=(360, 256))
+
+    def linear_radial_shift(values: np.ndarray, shift: int) -> np.ndarray:
+        result = np.zeros_like(values)
+        if shift >= 0:
+            result[:, shift:] = values[:, : values.shape[1] - shift]
+        else:
+            result[:, :shift] = values[:, -shift:]
+        return result
+
+    moved = linear_radial_shift(np.roll(reference, 7, axis=0), 5)
+    diagnostic = proxy._mixed_logpolar_correlation(moved, reference, 0.01)
+    assert diagnostic["surface"].shape == (360, 511)
+    assert diagnostic["global"]["shift_y"] == diagnostic["measured"]["shift_y"] == 7
+    assert diagnostic["global"]["shift_x"] == diagnostic["measured"]["shift_x"] == 5
+    assert diagnostic["measured"]["rotation_deg"] == pytest.approx(3.5)
+    assert diagnostic["measured"]["log_scale"] == pytest.approx(-0.05, abs=1e-4)
+    assert diagnostic["measured"]["valid"] is True
+
+    moved_negative = linear_radial_shift(np.roll(reference, -9, axis=0), -6)
+    negative = proxy._mixed_logpolar_correlation(moved_negative, reference, 0.01)
+    assert negative["global"]["shift_y"] == -9
+    assert negative["global"]["shift_x"] == -6
+    assert negative["global"]["log_scale"] == pytest.approx(0.06)
+    assert negative["measured"]["score_identity"] == "support_weighted_primary"
+    assert negative["global"]["score_identity"] == "unweighted_coherence_diagnostic_only"
+    assert negative["measured"]["score"] == pytest.approx(
+        negative["measured"]["unweighted_coherence"] * math.sqrt(negative["measured"]["overlap_fraction"])
+    )
+    assert negative["measured"]["score"] < negative["measured"]["unweighted_coherence"]
+
+
+@pytest.mark.unit
+def test_mixed_log_polar_diagnostic_separates_global_and_domain_measurement() -> None:
+    generator = np.random.default_rng(23)
+    reference = generator.normal(size=(360, 256))
+    moved = np.zeros_like(reference)
+    moved[:, 70:] = reference[:, :-70]
+    diagnostic = proxy._mixed_logpolar_correlation(moved, reference, 0.01)
+    assert diagnostic["global"]["shift_x"] == 70
+    assert diagnostic["global"]["log_scale"] == pytest.approx(-0.70)
+    assert diagnostic["global"]["log_scale"] < math.log(0.65)
+    assert diagnostic["measured"]["log_scale"] >= math.log(0.65)
+    assert diagnostic["measured"]["index"] != diagnostic["global"]["index"]
+
+    angular_boundary = np.roll(reference, 32, axis=0)
+    boundary = proxy._mixed_logpolar_correlation(angular_boundary, reference, 0.01)
+    assert boundary["measured"]["rotation_deg"] == pytest.approx(16.0)
+    assert boundary["measured"]["boundary"] is True
+    assert boundary["measured"]["valid"] is False
+
+
+@pytest.mark.unit
 def test_public_h_is_attacked_to_canonical_and_rectifies_nonidentity() -> None:
     rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
     marked, _ = proxy.write_proxy(rgb, KEY)
@@ -148,14 +272,9 @@ def test_public_h_is_attacked_to_canonical_and_rectifies_nonidentity() -> None:
 
 @pytest.mark.unit
 def test_independent_cross_scale_disagreement_fails_closed_instead_of_being_windowed_pass() -> None:
-    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
-    marked, _ = proxy.write_proxy(rgb, KEY)
-    attacked, _ = proxy.apply_proxy_attack(marked, "rotation_+5")
-    detection = proxy.detect_proxy(attacked, KEY)
-    estimates = detection["diagnostics"]["cross_scale_estimates"]
-    assert len(estimates) == 3
-    assert detection["diagnostics"]["cross_scale_log_scale_spread"] > 0.03
-    assert detection["status"] == "UNRELIABLE"
+    raw_groups = ((0.0, -0.1), (0.0, 0.0), (0.0, 0.1))
+    rotation, scale = proxy._raw_group_spreads(raw_groups, (0.0, 0.0))
+    assert rotation == 0.0 and scale > 0.03
 
 
 @pytest.mark.unit
@@ -180,22 +299,27 @@ def test_multiscale_raw_rotation_scale_evidence_is_periodic_and_not_clamped() ->
     assert detection["diagnostics"]["cross_scale_estimates_role"] == "diagnostic_only"
     raw_groups = detection["diagnostics"]["joint_group_raw_observations"]
     resolved_groups = detection["diagnostics"]["resolved_group_raw_estimates"]
-    assert len(raw_groups) == len(resolved_groups) == 3
-    assert all({"identities", "raw_rotation_deg", "raw_log_scale", "lp_psr"} == set(item) for item in raw_groups)
-    assert len(detection["diagnostics"]["joint_orbit_hypotheses"]) == 64
-    assert {"rotation_deg", "log_scale"} == set(detection["diagnostics"]["raw_group_consensus"])
-    assert {"rotation_deg", "scale"} == set(detection["diagnostics"]["rectification_estimate"])
-    raw_consensus = detection["diagnostics"]["raw_group_consensus"]
-    expected_spreads = proxy._raw_group_spreads(
-        tuple((item["rotation_deg"], item["log_scale"]) for item in resolved_groups),
-        (raw_consensus["rotation_deg"], raw_consensus["log_scale"]),
-    )
-    assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] == pytest.approx(expected_spreads[0])
-    assert detection["diagnostics"]["cross_scale_log_scale_spread"] == pytest.approx(expected_spreads[1])
-    assert all(0.65 <= estimate[1] <= 1.55 for estimate in estimates)
-    assert detection["diagnostics"]["valid_overlap_fraction"] == pytest.approx(1.0)
-    assert detection["diagnostics"]["matches"]
-    assert all(math.isfinite(match["PSR"]) for match in detection["diagnostics"]["matches"])
+    assert len(raw_groups) == 3
+    assert all({"identities", "raw_rotation_deg", "raw_log_scale", "sparse_glrt_score", "sparse_glrt_margin", "measurement_id", "valid", "boundary"} == set(item) for item in raw_groups)
+    assert all(item["measurement_id"] == "sparse_keyed_spectrum_glrt_v1" for item in raw_groups)
+    if detection["diagnostics"]["sparse_group_raw_valid"]:
+        assert len(resolved_groups) == 3
+        raw_consensus = detection["diagnostics"]["raw_group_consensus"]
+        expected_spreads = proxy._raw_group_spreads(
+            tuple((item["rotation_deg"], item["log_scale"]) for item in resolved_groups),
+            (raw_consensus["rotation_deg"], raw_consensus["log_scale"]),
+        )
+        assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] == pytest.approx(expected_spreads[0])
+        assert detection["diagnostics"]["cross_scale_log_scale_spread"] == pytest.approx(expected_spreads[1])
+    else:
+        assert not resolved_groups and detection["status"] == "UNRELIABLE"
+        assert math.isinf(detection["diagnostics"]["cross_scale_rotation_spread_deg"])
+        assert math.isinf(detection["diagnostics"]["cross_scale_log_scale_spread"])
+    if detection["diagnostics"]["sparse_group_raw_valid"]:
+        assert all(0.65 <= estimate[1] <= 1.55 for estimate in estimates)
+        assert detection["diagnostics"]["valid_overlap_fraction"] == pytest.approx(1.0)
+        assert detection["diagnostics"]["matches"]
+        assert all(math.isfinite(match["PSR"]) for match in detection["diagnostics"]["matches"])
 
 
 @pytest.mark.unit

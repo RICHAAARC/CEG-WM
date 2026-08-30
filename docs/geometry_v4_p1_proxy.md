@@ -8,7 +8,8 @@ split and is not executed by the P1D canary.
 
 The unchanged normalized detection-key bytes are the root input to the
 Geometry-only HKDF domain. Twelve global components cover the Cartesian
-directions 0/45/90/135 degrees at 8/16/32 cycles per image. Every
+directions 0/45/90/135 degrees at 8/16/24 cycles per image. The highest global
+scale stays below the 64-pixel Nyquist limit. Every
 direction/scale component has its own keyed phase and sign. Sixteen fixed 4x4
 canonical tiles likewise have keyed local identities without changing their
 public coordinates.
@@ -23,23 +24,27 @@ pattern is emitted in a writer or runner record.
 ## Blind detector
 
 The detector accepts only current attacked ordinary RGB and the supplied
-detection key. It obtains a coarse rotation/scale estimate by normalized
-cross-power phase correlation of log-polar spectral magnitudes, refines that
-estimate on a fixed public neighbourhood, rectifies rotation/scale, then uses
-Cartesian normalized cross-power phase correlation for translation. Fixed
-canonical tile templates are matched in the rectified attacked image. Those
-measured correspondences, not a fixed count, enter a deterministic robust
-similarity fit. It enumerates every two-point hypothesis, ranks by inlier count,
-weighted inlier RMS, and lexicographic tile IDs, then refits only the selected
-inliers. Support, macro regions, and normalized convex-hull spatial coverage are
-computed from those inliers. Each scale obtains its own keyed-band log-polar
-normalized-phase R/S estimate and fixed-neighbourhood refinement. A
-quality-weighted circular/log-scale consensus uses bounded search/refinement
-estimates only to form the coarse rectification. Separately recorded, unclipped
-raw log-polar rotations and raw log-scales enter the frozen spread gates only as
-their distances from that deterministic consensus; rotation distance uses the
-180-degree periodic metric. The rectified valid-overlap
-mask excludes fill-only samples. The top-level PSR supplied to the frozen
+detection key. Its primary R/S estimator is
+`keyed_sparse_constellation_glrt_primary_v1`: three independent keyed
+four-component sparse-spectrum groups are scored on a fixed rotation grid
+(-16 to +16 degrees in 0.5-degree steps) and zero-anchored log-scale grid
+(log(0.65) to log(1.55) in 0.01 steps, including both endpoints). Each group
+uses a joint GLRT score multiplied by the geometric-mean completeness of its
+four component observations. A primary endpoint winner, flat/non-finite surface,
+or degenerate template invalidates that group; all three groups must be valid or
+the detector fails closed. Their unclipped raw rotation/log-scale winners enter
+the deterministic circular/log-scale consensus and the frozen periodic
+rotation/raw-log-scale spread gates. Bounded refinement is only a later
+rectification seed and cannot rewrite that evidence. Whole-image log-polar
+measurements remain diagnostic-only. The detector then uses Cartesian normalized
+cross-power phase correlation for translation. Fixed canonical tile templates
+are matched in the rectified attacked image. Those measured correspondences, not
+a fixed count, enter a deterministic robust similarity fit. It enumerates every
+two-point hypothesis, ranks by inlier count, weighted inlier RMS, and
+lexicographic tile IDs, then refits only the selected inliers. Support, macro
+regions, and normalized convex-hull spatial coverage are computed from those
+inliers. The rectified valid-overlap mask excludes fill-only samples. The
+top-level PSR supplied to the frozen
 reliability gate is the valid-overlap-masked, fixed-Hann-window Cartesian
 phase-correlation translation PSR. Tile matching uses a fixed eight-pixel-at-64 local search and zero-mean
 normalized correlation, and records a real

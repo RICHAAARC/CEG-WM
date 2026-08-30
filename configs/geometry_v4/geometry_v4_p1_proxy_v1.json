@@ -29,7 +29,10 @@
       0.65,
       1.55
     ],
-    "cross_scale_estimation": "independent_keyed_band_log_polar_normalized_phase_then_quality_weighted_consensus",
+    "cross_scale_endpoint_policy": "primary_endpoint_or_flat_nonfinite_template_degenerate_invalid_fail_closed",
+    "cross_scale_estimation": "keyed_sparse_constellation_glrt_primary_v1",
+    "cross_scale_group_score": "four_component_joint_glrt_with_geometric_mean_completeness",
+    "cross_scale_primary_grid": "rotation_deg_-16_to_16_step_0.5_log_scale_log_0.65_to_log_1.55_step_0.01_zero_anchored",
     "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_relative_to_consensus",
     "local_match_min_correlation": 0.42,
     "local_match_min_margin": 0.025,
@@ -53,7 +56,8 @@
       1.55
     ],
     "tile_matching": "rectified_valid_overlap_tile_zncc_with_measured_sidelobe_psr_and_macro_balanced_inliers",
-    "translation_phase_correlation": "valid_overlap_fixed_hann_normalized_cross_power"
+    "translation_phase_correlation": "valid_overlap_fixed_hann_normalized_cross_power",
+    "whole_log_polar_role": "diagnostic_only"
   },
   "development_canary": {
     "attacks": [
@@ -87,7 +91,7 @@
     "scales_cycles_per_image": [
       8,
       16,
-      32
+      24
     ],
     "tile_centers": [
       0.125,
