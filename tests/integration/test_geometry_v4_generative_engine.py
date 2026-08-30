@@ -12,9 +12,10 @@ from experiments import geometry_v4_generative_engine as engine
 
 
 class _FixturePipeline:
-    class _VAE:
+    class _VAE(torch.nn.Module):
         config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
-        def decode(self, value, return_dict=True): return SimpleNamespace(sample=value[:, :3])
+        def __init__(self): super().__init__(); self.weight = torch.nn.Parameter(torch.ones(()))
+        def decode(self, value, return_dict=True): return SimpleNamespace(sample=value[:, :3] * self.weight)
     vae = _VAE()
     def __call__(self, *, callback_on_step_end=None, **kwargs):
         state = {"latents": torch.zeros((1, 4, 16, 16), dtype=torch.float32)}

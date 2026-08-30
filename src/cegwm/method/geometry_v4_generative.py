@@ -135,7 +135,15 @@ def _vae_rgb(pipeline: Any, latents: torch.Tensor) -> torch.Tensor:
     vae = getattr(pipeline, "vae", None); config = getattr(vae, "config", None)
     scaling, shift = getattr(config, "scaling_factor", None), getattr(config, "shift_factor", None)
     if not callable(getattr(vae, "decode", None)) or not isinstance(scaling, (int, float)) or not isinstance(shift, (int, float)) or not math.isfinite(scaling) or scaling <= 0 or not math.isfinite(shift): raise RuntimeError("Geometry-V4 requires a valid differentiable SD3 VAE")
-    decoded = vae.decode(latents / float(scaling) + float(shift), return_dict=True)
+    try:
+        parameter = next(vae.parameters())
+    except (AttributeError, StopIteration, TypeError) as error:
+        raise RuntimeError("Geometry-V4 VAE device and dtype cannot be resolved") from error
+    if not parameter.dtype.is_floating_point:
+        raise RuntimeError("Geometry-V4 VAE must use a floating dtype")
+    # Keep `latents`' float32 leaf in the graph; this cast is differentiable.
+    coordinate = (latents.to(torch.float32) / float(scaling) + float(shift)).to(device=parameter.device, dtype=parameter.dtype)
+    decoded = vae.decode(coordinate, return_dict=True)
     sample = getattr(decoded, "sample", None)
     if not isinstance(sample, torch.Tensor) or sample.ndim != 4 or sample.shape[0] != 1 or sample.shape[1] != 3 or not bool(torch.isfinite(sample).all()): raise RuntimeError("Geometry-V4 VAE decode is invalid")
     return (sample + 1.0) / 2.0

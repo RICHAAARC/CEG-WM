@@ -14,9 +14,12 @@ from cegwm.protocol.geometry_v4_generative import CALLBACK_STEP_INDEX, LUMA_PEAK
 ROOT = Path(__file__).resolve().parents[2]
 KEY, WRONG = "0123456789abcdef", "fedcba9876543210"
 
-class _VAE:
+class _VAE(torch.nn.Module):
     config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
-    def decode(self, value, return_dict=True): return SimpleNamespace(sample=value[:, :3])
+    def __init__(self):
+        super().__init__(); self.weight = torch.nn.Parameter(torch.ones((), dtype=torch.float16)); self.seen = None
+    def decode(self, value, return_dict=True):
+        self.seen = value; return SimpleNamespace(sample=value[:, :3] * self.weight)
 class _Pipeline: vae = _VAE()
 
 
@@ -46,6 +49,13 @@ def test_shared_basis_is_keyed_and_signed() -> None:
     assert abs(float((global_part * local_part).sum())) < 1e-5
     image = np.full((32, 32, 3), .5); image += basis[0, 0].numpy()[..., None] * .001
     assert rgb_only_anchor_score(image, KEY) > rgb_only_anchor_score(image, WRONG)
+
+@pytest.mark.unit
+def test_vae_parameter_dtype_cast_remains_differentiable() -> None:
+    pipeline = _Pipeline(); latents = torch.zeros((1, 4, 16, 16), dtype=torch.float32)
+    updated = write_final_latent_anchor(latents, KEY, pipeline)
+    assert pipeline.vae.seen.dtype == torch.float16
+    assert torch.linalg.vector_norm(updated - latents) > 0
 
 
 @pytest.mark.unit
