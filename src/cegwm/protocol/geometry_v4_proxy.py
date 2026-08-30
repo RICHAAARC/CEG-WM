@@ -14,7 +14,7 @@ from cegwm.protocol.geometry_v4 import (
 )
 
 P1_CONFIG = "geometry_v4_p1_proxy_v1.json"
-P1_DIGEST = "543c71692b6151f7255c41d5df5eca78997a22cddc6a3b27228565c1ee7b05a8"
+P1_DIGEST = "eb9d5300c7119d5ddb54b43313750c9a251cec0727e032527154dc9680a7e554"
 P1_RUNNER_ID = "geometry_v4_p1_proxy_engine_v1"
 P1_SOURCE_ID = "geometry_v4_procedural_rgb_v1"
 P1_SOURCE_SHAPE = (64, 64, 3)

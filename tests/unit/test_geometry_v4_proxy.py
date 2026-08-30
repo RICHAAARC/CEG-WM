@@ -137,6 +137,18 @@ def test_quadratic_radial_peak_is_independent_and_fail_closed() -> None:
 
 @pytest.mark.unit
 def test_sparse_glrt_pure_helpers_and_identity_recovery() -> None:
+    plane = np.arange(64 * 64, dtype=np.float64).reshape(64, 64)
+    assert np.array_equal(proxy._sparse_constant_border_reflection(plane), plane)
+    for axis, reverse in ((0, False), (0, True), (1, False), (1, True)):
+        padded = plane.copy()
+        selector = slice(None, 7) if not reverse else slice(-7, None)
+        if axis == 0:
+            padded[selector, :] = 0.5
+        else:
+            padded[:, selector] = 0.5
+        reflected = proxy._sparse_constant_border_reflection(padded)
+        assert reflected is not None and not np.all(reflected == 0.5)
+    assert proxy._sparse_constant_border_reflection(np.full((64, 64), 0.5)) is None
     grid = proxy._zero_anchored_log_grid()
     assert 0.0 in grid and math.log(0.65) in grid and math.log(1.55) in grid
     assert all(abs(value / 0.01 - round(value / 0.01)) < 1e-12 for value in grid[1:-1])

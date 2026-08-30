@@ -56,6 +56,7 @@
       0.65,
       1.55
     ],
+    "sparse_fft_preprocess": "attacked_only_constant_border_reflection_v1_max_fraction_0.20_min_center_fraction_0.60",
     "tile_matching": "rectified_valid_overlap_masked_zncc_min_valid_fraction_0.60_with_measured_sidelobe_psr_and_macro_balanced_inliers",
     "translation_phase_correlation": "valid_overlap_fixed_hann_normalized_cross_power",
     "whole_log_polar_role": "diagnostic_only"

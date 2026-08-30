@@ -24,6 +24,7 @@ _DIRECTIONS = (0.0, 45.0, 90.0, 135.0)
 _SCALES = (8, 16, 24)
 _CENTERS = (0.125, 0.375, 0.625, 0.875)
 _LOCAL_MIN_VALID_FRACTION = 0.60
+_SPARSE_BORDER_MAX_FRACTION = 0.20
 _GLOBAL_ENERGY = 0.40
 _LOCAL_ENERGY = 0.60
 _LUMA_RMS_TARGET = 1.5 / 255.0
@@ -389,12 +390,36 @@ def _spectral_magnitude(plane: np.ndarray) -> np.ndarray:
     return np.log1p(np.abs(spectrum))
 
 
+def _sparse_constant_border_reflection(plane: np.ndarray) -> np.ndarray | None:
+    """Blindly replace only constant edge padding before the sparse FFT."""
+
+    source = np.asarray(plane, dtype=np.float64)
+    height, width = source.shape
+    if not np.all(np.isfinite(source)) or float(np.ptp(source)) <= 1e-12:
+        return None
+    limits = (max(0, math.floor(_SPARSE_BORDER_MAX_FRACTION * height)), max(0, math.floor(_SPARSE_BORDER_MAX_FRACTION * width)))
+    top = next((index for index in range(limits[0]) if np.ptp(source[index, :]) > 1e-12), limits[0])
+    bottom = next((index for index in range(limits[0]) if np.ptp(source[height - 1 - index, :]) > 1e-12), limits[0])
+    left = next((index for index in range(limits[1]) if np.ptp(source[:, index]) > 1e-12), limits[1])
+    right = next((index for index in range(limits[1]) if np.ptp(source[:, width - 1 - index]) > 1e-12), limits[1])
+    if height - top - bottom < math.ceil(_LOCAL_MIN_VALID_FRACTION * height) or width - left - right < math.ceil(_LOCAL_MIN_VALID_FRACTION * width):
+        return None
+    result = source.copy()
+    if left: result[:, :left] = result[:, left : 2 * left][:, ::-1]
+    if right: result[:, width-right:] = result[:, width-2*right : width-right][:, ::-1]
+    if top: result[:top, :] = result[top : 2 * top, :][::-1, :]
+    if bottom: result[height-bottom:, :] = result[height-2*bottom : height-bottom, :][::-1, :]
+    return result
+
+
 def _sparse_constellation_diagnostic(
     attacked_plane: np.ndarray, by_component: dict[tuple[int, float], np.ndarray]
 ) -> tuple[dict[str, object], ...]:
     """Blind sparse-carrier R/S surfaces with independent fail-closed group raws."""
 
-    plane = np.asarray(attacked_plane, dtype=np.float64)
+    plane = _sparse_constant_border_reflection(np.asarray(attacked_plane, dtype=np.float64))
+    if plane is None:
+        return ()
     height, width = plane.shape
     window = np.outer(np.hanning(height), np.hanning(width))
     spectrum = np.abs(np.fft.fftshift(np.fft.fft2((plane - float(np.mean(plane))) * window)))

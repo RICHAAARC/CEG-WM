@@ -25,6 +25,11 @@ pattern is emitted in a writer or runner record.
 
 The detector accepts only current attacked ordinary RGB and the supplied
 detection key. Its primary R/S estimator is
+Before its sparse FFT only, the attacked luma receives deterministic
+`attacked_only_constant_border_reflection_v1`: each side scans at most 20% for
+constant rows or columns and mirrors nearest interior content. It never reads a
+fill value, source, truth, or attack label; flat/non-finite or under-60%-center
+inputs fail closed. Local matching still uses the original attacked RGB.
 `keyed_sparse_constellation_glrt_primary_v1`: three independent keyed
 four-component sparse-spectrum groups are scored on a fixed rotation grid
 (-16 to +16 degrees in 0.5-degree steps) and zero-anchored log-scale grid
