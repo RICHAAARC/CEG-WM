@@ -640,7 +640,8 @@ def _robust_similarity_fit(
             )
             weighted_rms = float(np.sqrt(np.average(np.square(residuals[inliers]), weights=weights)))
             pair_identity = tuple(sorted((material[first_index]["tile"], material[second_index]["tile"])))
-            rank: tuple[object, ...] = (-len(inliers), weighted_rms, pair_identity)
+            macro_balance = _macro_regions(material[index] for index in inliers)
+            rank: tuple[object, ...] = (-len(inliers), -macro_balance, weighted_rms, pair_identity)
             if best is None or rank < best[0]:
                 best = (rank, inliers)
     if best is None:
