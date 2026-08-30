@@ -1,19 +1,42 @@
 {
   "artifact_root": "/home/richar/projects/CEG-WM/artifacts/geometry-v4-g0-g1-v1",
   "g0": {
-    "attacks": ["identity"],
+    "attacks": [
+      "identity"
+    ],
     "prompts": [
       "a small brass astrolabe on a dark wooden table",
       "a small brass astrolabe on a dark wooden table",
       "a small brass astrolabe on a dark wooden table",
       "a small brass astrolabe on a dark wooden table"
     ],
-    "seeds": [5101, 5102, 5103, 5104]
+    "seeds": [
+      5101,
+      5102,
+      5103,
+      5104
+    ]
   },
   "g1": {
-    "attacks": ["identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9"],
-    "prompts": ["a red ceramic teapot in a sunlit kitchen", "a blue paper kite over a grassy field", "a glass terrarium with a tiny fern", "a silver compass beside a folded map"],
-    "seeds": [6101, 6102, 6103, 6104]
+    "attacks": [
+      "identity",
+      "rotation_5",
+      "scale_0.9",
+      "translation_0.08_0",
+      "crop_0.9"
+    ],
+    "prompts": [
+      "a red ceramic teapot in a sunlit kitchen",
+      "a blue paper kite over a grassy field",
+      "a glass terrarium with a tiny fern",
+      "a silver compass beside a folded map"
+    ],
+    "seeds": [
+      6101,
+      6102,
+      6103,
+      6104
+    ]
   },
   "identity": {
     "callback_step_index_zero_based": 19,
@@ -22,7 +45,10 @@
     "writer_id": "geometry_v4_generated_writer_v1"
   },
   "residual_budget": {
-    "global_local_energy_shares": [0.4, 0.6],
+    "global_local_energy_shares": [
+      0.4,
+      0.6
+    ],
     "luma_peak_cap": 0.03137254901960784,
     "luma_rms_cap": 0.00784313725490196
   },
