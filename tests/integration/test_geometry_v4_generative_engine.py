@@ -67,3 +67,15 @@ def test_cli_rejects_bad_checkout_before_runner(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(engine, "run", lambda *args, **kwargs: pytest.fail("runner must not start"))
     assert engine.main(["--stage", "G0", "--repo-root", str(tmp_path), "--artifact-root", str(tmp_path / "out"), "--expected-exact", "a" * 40], environ={}) == 2
     assert "STOPPED" in capsys.readouterr().out
+
+
+@pytest.mark.integration
+def test_g1_summary_rejects_final_rgb_only_false_pass(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path) -> None:
+    env = {"CEG_WM_ROOT_KEY": "root secret material", "HF_TOKEN": "hf secret"}
+    monkeypatch.setattr(engine, "_checkout_state", lambda repo: ("a" * 40, "", True))
+    monkeypatch.setattr("cegwm.runtime.content_weighted_joint_sd35.derive_stability_wrong_keys", lambda key: (b"wrong",))
+    records = tuple({"final_rgb": {"passed": True}, "attacked_rgb": {"passed": False}} for _ in range(20))
+    monkeypatch.setattr(engine, "run", lambda *args, **kwargs: records)
+    code = engine.main(["--stage", "G1", "--repo-root", str(tmp_path), "--artifact-root", str(tmp_path / "out"), "--expected-exact", "a" * 40], environ=env)
+    output = capsys.readouterr().out
+    assert code == 2 and '"passed":0' in output and '"status":"GATE_FAILED"' in output

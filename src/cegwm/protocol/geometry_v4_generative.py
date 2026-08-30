@@ -15,6 +15,15 @@ CALLBACK_STEP_INDEX = 19
 LUMA_RMS_CAP = 2.0 / 255.0
 LUMA_PEAK_CAP = 8.0 / 255.0
 ENERGY_SHARES = (0.4, 0.6)
+G1_ROTATION_COARSE_DEGREES = (-7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5)
+G1_SCALE_COARSE = (0.88, 0.9, 0.95, 1.0, 1.05, 1.1, 1.12)
+G1_ROTATION_FINE_OFFSETS = (-1.25, -0.625, 0.0, 0.625, 1.25)
+G1_SCALE_FINE_OFFSETS = (-0.025, -0.0125, 0.0, 0.0125, 0.025)
+G1_MIN_ANCHOR_SCORE = 3.0
+G1_MIN_TRANSLATION_PSR = 4.0
+G1_MIN_TILE_SCORE = 0.05
+G1_MIN_SUPPORT = 6
+G1_MIN_MACRO_REGIONS = 3
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
@@ -48,8 +57,34 @@ def load_g0_g1_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("Geometry-V4 G0/G1 content detector identity differs")
     if tuple(value.get("g0", {}).get("seeds", ())) != (5101, 5102, 5103, 5104):
         raise ValueError("Geometry-V4 G0 seed roster differs")
-    if set(value.get("g1", {}).get("attacks", ())) != {"identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9"}:
-        raise ValueError("Geometry-V4 G1 attack roster differs")
+    g1 = value.get("g1", {})
+    if tuple(g1.get("seeds", ())) != (6101, 6102, 6103, 6104) or tuple(g1.get("prompts", ())) != (
+        "a red ceramic teapot in a sunlit kitchen",
+        "a blue paper kite over a grassy field",
+        "a glass terrarium with a tiny fern",
+        "a silver compass beside a folded map",
+    ) or tuple(g1.get("attacks", ())) != ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9"):
+        raise ValueError("Geometry-V4 G1 4-by-5 roster differs")
+    g1_detector = value.get("g1_detector")
+    if not isinstance(g1_detector, dict) or g1_detector != {
+        "h_direction": "attacked_to_canonical",
+        "rotation_coarse_degrees": list(G1_ROTATION_COARSE_DEGREES),
+        "scale_coarse": list(G1_SCALE_COARSE),
+        "rotation_fine_offsets": list(G1_ROTATION_FINE_OFFSETS),
+        "scale_fine_offsets": list(G1_SCALE_FINE_OFFSETS),
+        "interpolation": "numpy_bilinear_pixel_center",
+        "fill": "current_rgb_channel_median",
+        "rotation_center": "normalized_image_center_0.5_0.5",
+        "order": "centered_rotation_scale_then_translation_then_attacked_to_canonical_inverse",
+        "translation": "valid_mask_hann_normalized_cross_power_phase_correlation",
+        "candidate_rank": "signed_combined_anchor_then_translation_psr_then_fixed_lexicographic",
+        "min_anchor_score": G1_MIN_ANCHOR_SCORE,
+        "min_translation_psr": G1_MIN_TRANSLATION_PSR,
+        "min_tile_score": G1_MIN_TILE_SCORE,
+        "min_support": G1_MIN_SUPPORT,
+        "min_macro_regions": G1_MIN_MACRO_REGIONS,
+    }:
+        raise ValueError("Geometry-V4 G1 blind detector contract differs")
     return value
 
 

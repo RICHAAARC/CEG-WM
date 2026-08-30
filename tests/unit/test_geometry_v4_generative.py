@@ -6,9 +6,10 @@ import numpy as np
 import pytest
 import torch
 from types import SimpleNamespace
+from PIL import Image
 
 from cegwm.method import geometry_v4_generative as generated
-from cegwm.method.geometry_v4_generative import FrozenWeightedJointContentAdapter, measure_final_rgb, rgb_anchor_basis, rgb_only_anchor_score, write_final_latent_anchor
+from cegwm.method.geometry_v4_generative import FrozenWeightedJointContentAdapter, detect_g1_geometry, measure_final_rgb, rectify_g1_rgb, rgb_anchor_basis, rgb_only_anchor_score, write_final_latent_anchor
 from cegwm.protocol.geometry_v4_generative import CALLBACK_STEP_INDEX, LUMA_PEAK_CAP, LUMA_RMS_CAP, load_g0_g1_contract
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +29,10 @@ def test_contract_freezes_sole_placement_budget_and_rosters() -> None:
     contract = load_g0_g1_contract(ROOT)
     assert contract["identity"]["callback_step_index_zero_based"] == CALLBACK_STEP_INDEX == 19
     assert tuple(contract["g0"]["seeds"]) == (5101, 5102, 5103, 5104)
+    assert tuple(contract["g1"]["seeds"]) == (6101, 6102, 6103, 6104)
+    assert tuple(contract["g1"]["attacks"]) == ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9")
+    assert contract["g1_detector"]["h_direction"] == "attacked_to_canonical"
+    assert contract["g1_detector"]["min_anchor_score"] == 3.0
     assert tuple(contract["residual_budget"]["global_local_energy_shares"]) == (.4, .6)
     assert LUMA_RMS_CAP == 2 / 255 and LUMA_PEAK_CAP == 8 / 255
 
@@ -84,3 +89,35 @@ def test_reused_content_adapter_uses_lf_hf_and_weighted_joint_current_rgb_only(m
         adapter(np.full((16, 16, 3), np.nan), b"normalized")
     with pytest.raises(TypeError, match="normalized detection-key bytes"):
         adapter(np.zeros((16, 16, 3)), "not-bytes")  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_g1_blind_detector_recovers_five_fixed_attack_classes_and_wrong_key_fails_closed() -> None:
+    from experiments.geometry_v4_generative_engine import _attack
+
+    height = width = 128
+    yy, xx = np.mgrid[:height, :width]
+    base = .45 + .04 * np.sin(2 * np.pi * xx / width) + .03 * np.cos(2 * np.pi * yy / height)
+    basis = rgb_anchor_basis((height, width), KEY)[0][0, 0].numpy()
+    marked = np.repeat((base + 5.0 * basis)[..., None], 3, axis=2).clip(0.0, 1.0)
+    marked_image = Image.fromarray((marked * 255).round().astype(np.uint8), mode="RGB")
+    for attack_name in ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9"):
+        attacked = np.asarray(_attack(marked_image, attack_name), dtype=np.float64) / 255.0
+        correct = detect_g1_geometry(attacked, KEY)
+        wrong = detect_g1_geometry(attacked, WRONG)
+        assert correct["status"] == "RELIABLE", (attack_name, correct["diagnostics"])
+        assert correct["H_hat"] is not None and len(correct["corners_hat"]) == 4 and correct["support"] >= 6
+        assert wrong["status"] == "UNRELIABLE", (attack_name, wrong["diagnostics"])
+        rectified = rectify_g1_rgb(attacked, correct["H_hat"])
+        assert rgb_only_anchor_score(rectified, KEY) > rgb_only_anchor_score(rectified, WRONG)
+        if attack_name != "identity":
+            assert np.mean(np.square(rectified - marked)) < np.mean(np.square(attacked - marked)), attack_name
+
+
+@pytest.mark.unit
+def test_g1_detector_public_interface_has_no_oracle_or_attack_input() -> None:
+    import inspect
+
+    assert tuple(inspect.signature(detect_g1_geometry).parameters) == ("attacked_rgb", "detection_key")
+    unreliable = detect_g1_geometry(np.full((64, 64, 3), .5), KEY)
+    assert unreliable["status"] == "UNRELIABLE" and unreliable["H_hat"] is None and unreliable["corners_hat"] == ()

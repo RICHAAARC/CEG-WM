@@ -13,8 +13,22 @@ import torch
 from PIL import Image
 
 from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
-from cegwm.protocol.geometry_v4_generative import ENERGY_SHARES, LUMA_PEAK_CAP, LUMA_RMS_CAP
+from cegwm.protocol.geometry_v4_generative import (
+    ENERGY_SHARES,
+    G1_MIN_ANCHOR_SCORE,
+    G1_MIN_MACRO_REGIONS,
+    G1_MIN_SUPPORT,
+    G1_MIN_TILE_SCORE,
+    G1_MIN_TRANSLATION_PSR,
+    G1_ROTATION_COARSE_DEGREES,
+    G1_ROTATION_FINE_OFFSETS,
+    G1_SCALE_COARSE,
+    G1_SCALE_FINE_OFFSETS,
+    LUMA_PEAK_CAP,
+    LUMA_RMS_CAP,
+)
 from cegwm.shared.keys import normalize_detection_key
+from cegwm.method.geometry_v4_proxy import _corners, _sample_h, _similarity_h, _valid_corners, normalized_phase_correlation
 from cegwm.method.content_whitening import score_content_whitened_lf_image
 from cegwm.method.hf import score_hf_image
 from cegwm.method.content_weighted_joint import LFHFScorePair, WeightedJointAsset, load_calibration_asset, weighted_joint_score
@@ -175,6 +189,152 @@ def rgb_only_anchor_score(rgb: np.ndarray, detection_key: str | bytes | bytearra
     basis, _, _ = rgb_anchor_basis(image.shape[:2], detection_key)
     luma = torch.from_numpy((image @ _REC709).astype(np.float32))[None, None]
     return float((luma - luma.mean()).mul(basis.cpu()).sum().item())
+
+
+def _g1_rgb(rgb: np.ndarray) -> np.ndarray:
+    image = np.asarray(rgb, dtype=np.float64)
+    if image.ndim != 3 or image.shape[2] != 3 or min(image.shape[:2]) < 32 or not np.isfinite(image).all() or image.min() < 0.0 or image.max() > 1.0:
+        raise ValueError("G1 detector requires finite current ordinary RGB in [0,1]")
+    return image
+
+
+def _g1_luma(rgb: np.ndarray) -> np.ndarray:
+    return np.asarray(rgb, dtype=np.float64) @ _REC709
+
+
+def _g1_valid_warp(image: np.ndarray, output_to_input: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    fill = np.median(image, axis=(0, 1))
+    warped = _sample_h(image, output_to_input, fill)
+    valid = _sample_h(np.ones(image.shape[:2], dtype=np.float64), output_to_input, 0.0) >= 0.999999
+    return np.clip(warped, 0.0, 1.0), valid
+
+
+def _g1_phase_translation(rectified: np.ndarray, valid: np.ndarray, reference: np.ndarray) -> dict[str, object]:
+    plane = _g1_luma(rectified)
+    window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
+    weight = window * valid.astype(np.float64)
+    if float(weight.sum()) <= 1e-12:
+        return {"shift_x": 0, "shift_y": 0, "PSR": 0.0}
+    observed = (plane - float(np.sum(plane * weight) / np.sum(weight))) * weight
+    keyed = (reference - float(np.sum(reference * weight) / np.sum(weight))) * weight
+    return normalized_phase_correlation(observed, keyed)
+
+
+def _g1_translation(tx: float, ty: float) -> np.ndarray:
+    return np.asarray(((1.0, 0.0, tx), (0.0, 1.0, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
+
+
+def _g1_search_candidate(image: np.ndarray, reference: np.ndarray, angle: float, scale: float) -> dict[str, object]:
+    rs = _similarity_h(angle, scale)
+    rectified_rs, valid_rs = _g1_valid_warp(image, rs)
+    phase = _g1_phase_translation(rectified_rs, valid_rs, reference)
+    base_x, base_y = int(phase["shift_x"]), int(phase["shift_y"])
+    best: dict[str, object] | None = None
+    height, width = image.shape[:2]
+    # A fixed local integer refinement removes phase-correlation quantization only.
+    for oy in (-1, 0, 1):
+        for ox in (-1, 0, 1):
+            shift_x, shift_y = base_x + ox, base_y + oy
+            canonical_to_attacked = rs @ _g1_translation(shift_x / max(1, width - 1), shift_y / max(1, height - 1))
+            rectified, valid = _g1_valid_warp(image, canonical_to_attacked)
+            plane = _g1_luma(rectified)
+            centered = plane - float(np.mean(plane[valid]))
+            score = float(np.sum(centered * reference * valid))
+            rank = (score, float(phase["PSR"]), -abs(ox) - abs(oy), -shift_y, -shift_x)
+            if best is None or rank > best["rank"]:
+                best = {
+                    "angle": float(angle), "scale": float(scale), "shift_x": shift_x, "shift_y": shift_y,
+                    "canonical_to_attacked": canonical_to_attacked, "translation_psr": float(phase["PSR"]),
+                    "search_score": score, "rank": rank,
+                }
+    assert best is not None
+    return best
+
+
+def _g1_search(image: np.ndarray, detection_key: object) -> dict[str, object]:
+    search_size = 128
+    ordinary = Image.fromarray((image * 255.0).round().clip(0, 255).astype(np.uint8), mode="RGB")
+    resized = np.asarray(ordinary.resize((search_size, search_size), Image.Resampling.BICUBIC), dtype=np.float64) / 255.0
+    reference = rgb_anchor_basis((search_size, search_size), detection_key)[0][0, 0].numpy().astype(np.float64)
+    coarse = max(
+        (_g1_search_candidate(resized, reference, angle, scale) for angle in G1_ROTATION_COARSE_DEGREES for scale in G1_SCALE_COARSE),
+        key=lambda item: item["rank"],
+    )
+    candidates = []
+    for angle_offset in G1_ROTATION_FINE_OFFSETS:
+        for scale_offset in G1_SCALE_FINE_OFFSETS:
+            angle = float(coarse["angle"]) + angle_offset
+            scale = float(coarse["scale"]) + scale_offset
+            if -10.0 <= angle <= 10.0 and 0.84 <= scale <= 1.16:
+                candidates.append(_g1_search_candidate(resized, reference, angle, scale))
+    return max(candidates, key=lambda item: item["rank"])
+
+
+def rectify_g1_rgb(attacked_rgb: np.ndarray, h_attacked_to_canonical: tuple[float, ...]) -> np.ndarray:
+    """Rectify current RGB using the public attacked-to-canonical estimate."""
+    image = _g1_rgb(attacked_rgb)
+    homography = np.asarray(h_attacked_to_canonical, dtype=np.float64)
+    if homography.shape != (9,) or not np.isfinite(homography).all():
+        raise ValueError("G1 H_hat must contain nine finite values")
+    homography = homography.reshape(3, 3)
+    if abs(float(np.linalg.det(homography))) <= 1e-12:
+        raise ValueError("G1 H_hat must be nonsingular")
+    return _g1_valid_warp(image, np.linalg.inv(homography))[0]
+
+
+def detect_g1_geometry(attacked_rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> dict[str, object]:
+    """Fixed attacked-RGB plus normalized-key-only G1 similarity recovery."""
+    image = _g1_rgb(attacked_rgb)
+    normalized = normalize_detection_key(detection_key)
+    selected = _g1_search(image, normalized)
+    # Search translations are normalized at 128px; the transform itself is resolution independent.
+    canonical_to_attacked = np.asarray(selected["canonical_to_attacked"], dtype=np.float64)
+    attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
+    attacked_to_canonical /= attacked_to_canonical[2, 2]
+    corners = _corners(attacked_to_canonical)
+    corner_validity = _valid_corners(corners)
+    rectified, valid = _g1_valid_warp(image, canonical_to_attacked)
+    plane = _g1_luma(rectified)
+    centered = plane - float(np.mean(plane[valid]))
+    combined_t, global_t, local_t = rgb_anchor_basis(image.shape[:2], normalized)
+    combined = combined_t[0, 0].numpy().astype(np.float64)
+    global_part = global_t[0, 0].numpy().astype(np.float64)
+    local_part = local_t[0, 0].numpy().astype(np.float64)
+    anchor_score = float(np.sum(centered * combined * valid))
+    global_score = float(np.sum(centered * global_part * valid))
+    height, width = image.shape[:2]
+    tile_scores: list[float] = []
+    macro_regions: set[tuple[int, int]] = set()
+    for row in range(4):
+        for col in range(4):
+            mask = np.zeros((height, width), dtype=bool)
+            mask[row * height // 4:(row + 1) * height // 4, col * width // 4:(col + 1) * width // 4] = True
+            score = float(np.sum(centered * local_part * valid * mask))
+            tile_scores.append(score)
+            if score >= G1_MIN_TILE_SCORE:
+                macro_regions.add((row // 2, col // 2))
+    support = sum(score >= G1_MIN_TILE_SCORE for score in tile_scores)
+    reliable = bool(
+        corner_validity
+        and anchor_score >= G1_MIN_ANCHOR_SCORE
+        and global_score > 0.0
+        and float(selected["translation_psr"]) >= G1_MIN_TRANSLATION_PSR
+        and support >= G1_MIN_SUPPORT
+        and len(macro_regions) >= G1_MIN_MACRO_REGIONS
+    )
+    if not reliable:
+        return {
+            "H_hat": None, "corners_hat": (), "support": support, "reliability": 0.0, "status": "UNRELIABLE",
+            "diagnostics": {"anchor_score": anchor_score, "global_score": global_score, "translation_phase_psr": float(selected["translation_psr"]), "macro_regions": len(macro_regions), "tile_scores": tuple(tile_scores), "public_h_direction": "attacked_to_canonical"},
+        }
+    return {
+        "H_hat": tuple(float(value) for value in attacked_to_canonical.reshape(-1)),
+        "corners_hat": corners,
+        "support": support,
+        "reliability": 1.0,
+        "status": "RELIABLE",
+        "diagnostics": {"anchor_score": anchor_score, "global_score": global_score, "translation_phase_psr": float(selected["translation_psr"]), "macro_regions": len(macro_regions), "tile_scores": tuple(tile_scores), "rotation_deg": float(selected["angle"]), "scale": float(selected["scale"]), "translation_pixels_search_128": (int(selected["shift_x"]), int(selected["shift_y"])), "public_h_direction": "attacked_to_canonical"},
+    }
 
 
 def measure_final_rgb(clean_rgb: np.ndarray, marked_rgb: np.ndarray, detection_key: object, wrong_key: object, content_detector: Callable[[np.ndarray, bytes], float]) -> RGBObservability:

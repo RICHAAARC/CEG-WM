@@ -47,6 +47,52 @@
       6104
     ]
   },
+  "g1_detector": {
+    "candidate_rank": "signed_combined_anchor_then_translation_psr_then_fixed_lexicographic",
+    "fill": "current_rgb_channel_median",
+    "h_direction": "attacked_to_canonical",
+    "interpolation": "numpy_bilinear_pixel_center",
+    "min_anchor_score": 3.0,
+    "min_macro_regions": 3,
+    "min_support": 6,
+    "min_tile_score": 0.05,
+    "min_translation_psr": 4.0,
+    "order": "centered_rotation_scale_then_translation_then_attacked_to_canonical_inverse",
+    "rotation_center": "normalized_image_center_0.5_0.5",
+    "rotation_coarse_degrees": [
+      -7.5,
+      -5.0,
+      -2.5,
+      0.0,
+      2.5,
+      5.0,
+      7.5
+    ],
+    "rotation_fine_offsets": [
+      -1.25,
+      -0.625,
+      0.0,
+      0.625,
+      1.25
+    ],
+    "scale_coarse": [
+      0.88,
+      0.9,
+      0.95,
+      1.0,
+      1.05,
+      1.1,
+      1.12
+    ],
+    "scale_fine_offsets": [
+      -0.025,
+      -0.0125,
+      0.0,
+      0.0125,
+      0.025
+    ],
+    "translation": "valid_mask_hann_normalized_cross_power_phase_correlation"
+  },
   "identity": {
     "callback_step_index_zero_based": 19,
     "model_id": "stabilityai/stable-diffusion-3.5-medium",
