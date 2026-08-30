@@ -21,7 +21,7 @@ from cegwm.method.geometry_v4_generative import (
     rectify_g1_rgb,
     rgb_only_anchor_score,
 )
-from cegwm.protocol.geometry_v4_generative import contract_sha256, load_g0_g1_contract
+from cegwm.protocol.geometry_v4_generative import G1_MIN_ANCHOR_SCORE, contract_sha256, load_g0_g1_contract
 from experiments.content_iss_engine import _load_pipeline_and_assets
 from cegwm.runtime.geometry_v4_sd35 import run_sd35_final_latent_pair
 
@@ -37,43 +37,52 @@ def _attack(image: Image.Image, name: str) -> Image.Image:
     if name == "crop_0.9":
         w,h=image.size; d=round(min(w,h)*.05); return image.crop((d,d,w-d,h-d)).resize((w,h),Image.Resampling.BICUBIC)
     raise ValueError("unfrozen G1 attack")
+
+
+def _g1_attacked_record(attacked_rgb: np.ndarray, key: object, wrong_key: object) -> dict[str, object]:
+    """Evaluate two independent blind arms from the same current attacked RGB."""
+    correct = detect_g1_geometry(attacked_rgb, key)
+    wrong = detect_g1_geometry(attacked_rgb, wrong_key)
+    rectified_correct = None
+    if correct["status"] == "RELIABLE" and correct["H_hat"] is not None:
+        rectified = rectify_g1_rgb(attacked_rgb, correct["H_hat"])
+        rectified_correct = rgb_only_anchor_score(rectified, key)
+    passed = bool(
+        correct["status"] == "RELIABLE"
+        and correct["H_hat"] is not None
+        and len(correct["corners_hat"]) == 4
+        and int(correct["support"]) >= 6
+        and wrong["status"] == "UNRELIABLE"
+        and rectified_correct is not None
+        and rectified_correct >= G1_MIN_ANCHOR_SCORE
+    )
+    return {
+        "passed": passed,
+        "correct_key_geometry": correct,
+        "wrong_key_geometry": wrong,
+        "correct_key_self_rectified_anchor": rectified_correct,
+        "geometry_role": "coordinate_only_never_positive",
+    }
+
+
 def _record(stage: str, seed: int, prompt: str, attack: str, pipeline: object, key: object, wrong_key: object, detector: object) -> dict[str, object]:
     base = {"seed": seed, "prompt": prompt, "attack": attack, "failure": None}
     try:
         pair = run_sd35_final_latent_pair(pipeline, prompt, key, height=512, width=512, generator=torch.Generator(device="cuda").manual_seed(seed))
-        observation = measure_final_rgb(_rgb(pair.clean), _rgb(pair.marked), key, wrong_key, detector)
         attacked = _attack(pair.marked, attack)
         attacked_rgb = _rgb(attacked)
         if stage == "G0":
+            observation = measure_final_rgb(_rgb(pair.clean), _rgb(pair.marked), key, wrong_key, detector)
+            final_record: dict[str, object] = {"passed": observation.passed, **asdict(observation)}
             attacked_record = {"correct_key_anchor": rgb_only_anchor_score(attacked_rgb, key), "wrong_key_anchor": rgb_only_anchor_score(attacked_rgb, wrong_key)}
         else:
-            correct = detect_g1_geometry(attacked_rgb, key)
-            wrong = detect_g1_geometry(attacked_rgb, wrong_key)
-            rectified_correct = rectified_wrong = None
-            if correct["status"] == "RELIABLE" and correct["H_hat"] is not None:
-                rectified = rectify_g1_rgb(attacked_rgb, correct["H_hat"])
-                rectified_correct = rgb_only_anchor_score(rectified, key)
-                rectified_wrong = rgb_only_anchor_score(rectified, wrong_key)
-            passed = bool(
-                observation.passed
-                and correct["status"] == "RELIABLE"
-                and correct["H_hat"] is not None
-                and len(correct["corners_hat"]) == 4
-                and int(correct["support"]) >= 6
-                and wrong["status"] == "UNRELIABLE"
-                and rectified_correct is not None
-                and rectified_wrong is not None
-                and rectified_correct > rectified_wrong
-            )
-            attacked_record = {
-                "passed": passed,
-                "correct_key_geometry": correct,
-                "wrong_key_geometry": wrong,
-                "rectified_correct_key_anchor": rectified_correct,
-                "rectified_wrong_key_anchor": rectified_wrong,
-                "geometry_role": "coordinate_only_never_positive",
-            }
-        return {**base, "content_detector": detector.identities(), "final_rgb": {"passed": observation.passed, **asdict(observation)}, "attacked_rgb": attacked_record}
+            attacked_record = _g1_attacked_record(attacked_rgb, key, wrong_key)
+            try:
+                observation = measure_final_rgb(_rgb(pair.clean), _rgb(pair.marked), key, wrong_key, detector)
+                final_record = {"passed": observation.passed, **asdict(observation)}
+            except Exception as diagnostic_error:
+                final_record = {"passed": False, "diagnostic_failure": f"{type(diagnostic_error).__name__}: {diagnostic_error}"}
+        return {**base, "content_detector": detector.identities(), "final_rgb": final_record, "attacked_rgb": attacked_record}
     except Exception as error:
         return {**base, "failure": f"{type(error).__name__}: {error}", "final_rgb": None, "attacked_rgb": None}
 def run(stage: str, detection_key: object, wrong_key: object, *, repo_root: str | Path, hf_token: str, artifact_root: str | Path | None = None) -> tuple[dict[str, object], ...]:

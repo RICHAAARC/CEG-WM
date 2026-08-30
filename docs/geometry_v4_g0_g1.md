@@ -56,15 +56,18 @@ global evidence, and valid convex corners. A failed invariant emits no H or
 corners. Correct and wrong keys each execute this complete path independently;
 neither may reuse the other's candidates or H.
 
-A G1 unit passes only when the unchanged final-RGB observability gate passes,
-correct-key geometry is RELIABLE with H/corners/support, wrong-key geometry is
-UNRELIABLE, and the current attacked RGB rectified by the correct H has higher
-correct-key than wrong-key anchor evidence. This coordinate output never votes
-for watermark presence and never changes the content threshold. All 4x5=20
-units remain in the denominator, including exceptions; there is no retry,
-replacement, fallback, or attack-conditioned detector path. The command-line
-summary counts `attacked_rgb.passed`, so twenty final-RGB-only passes cannot be
-reported as a G1 pass.
+A G1 unit passes only when correct-key geometry is RELIABLE with
+H/corners/support, wrong-key geometry is UNRELIABLE, and the correct arm's own
+H rectifies the current attacked RGB to a correct-key signed anchor score of at
+least 3.0. The wrong arm never consumes or scores the correct arm's H or
+rectified image; it runs only its own complete blind detector and must fail
+closed. The clean/marked pair, final-RGB observability, and content drift remain
+recorded diagnostics and cannot influence `attacked_rgb.passed`. This
+coordinate output never votes for watermark presence and never changes the
+content threshold. All 4x5=20 units remain in the denominator, including
+exceptions; there is no retry, replacement, fallback, or attack-conditioned
+detector path. The command-line summary counts `attacked_rgb.passed`, so twenty
+final-RGB-only passes cannot be reported as a G1 pass.
 
 The preceding real G0 artifact at source exact
 `5b29a275151d436dbe1d51789cffe8e6908966b7` passed 4/4 with no failure; its

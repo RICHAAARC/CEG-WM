@@ -3,10 +3,12 @@ from __future__ import annotations
 import inspect
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from PIL import Image
 
+from cegwm.method.geometry_v4_generative import RGBObservability
 from cegwm.runtime.geometry_v4_sd35 import FinalLatentAnchorCallback, run_sd35_final_latent_pair
 from experiments import geometry_v4_generative_engine as engine
 
@@ -79,3 +81,53 @@ def test_g1_summary_rejects_final_rgb_only_false_pass(monkeypatch: pytest.Monkey
     code = engine.main(["--stage", "G1", "--repo-root", str(tmp_path), "--artifact-root", str(tmp_path / "out"), "--expected-exact", "a" * 40], environ=env)
     output = capsys.readouterr().out
     assert code == 2 and '"passed":0' in output and '"status":"GATE_FAILED"' in output
+
+
+@pytest.mark.integration
+def test_g1_attacked_gate_does_not_consume_paired_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Generator:
+        def manual_seed(self, seed): return self
+
+    image = Image.new("RGB", (32, 32), "gray")
+    monkeypatch.setattr(engine.torch, "Generator", lambda **kwargs: _Generator())
+    monkeypatch.setattr(engine, "run_sd35_final_latent_pair", lambda *args, **kwargs: SimpleNamespace(clean=image, marked=image))
+    monkeypatch.setattr(engine, "_g1_attacked_record", lambda *args: {"passed": True})
+    detector = SimpleNamespace(identities=lambda: {})
+    passing = RGBObservability(50.0, .99, 0.0, 0.0, 4.0, -1.0, 0.0)
+    failing = RGBObservability(10.0, .5, 1.0, 1.0, -1.0, 4.0, 1.0)
+    monkeypatch.setattr(engine, "measure_final_rgb", lambda *args: passing)
+    first = engine._record("G1", 1, "prompt", "identity", object(), b"correct", b"wrong", detector)
+    monkeypatch.setattr(engine, "measure_final_rgb", lambda *args: failing)
+    second = engine._record("G1", 1, "prompt", "identity", object(), b"correct", b"wrong", detector)
+    assert first["final_rgb"]["passed"] is True and second["final_rgb"]["passed"] is False
+    assert first["attacked_rgb"]["passed"] is second["attacked_rgb"]["passed"] is True
+    monkeypatch.setattr(engine, "measure_final_rgb", lambda *args: (_ for _ in ()).throw(RuntimeError("diagnostic only")))
+    third = engine._record("G1", 1, "prompt", "identity", object(), b"correct", b"wrong", detector)
+    assert third["final_rgb"]["passed"] is False and "diagnostic_failure" in third["final_rgb"]
+    assert third["failure"] is None and third["attacked_rgb"]["passed"] is True
+
+
+@pytest.mark.integration
+def test_g1_key_arms_never_share_h_or_rectified_rgb(monkeypatch: pytest.MonkeyPatch) -> None:
+    correct_key, wrong_key = b"correct", b"wrong"
+    correct_h = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    wrong_h = (1.0, 0.0, .2, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    detect_calls: list[object] = []
+    rectify_calls: list[tuple[float, ...]] = []
+    score_calls: list[object] = []
+
+    def detect(rgb, key):
+        detect_calls.append(key)
+        if key == correct_key:
+            return {"status": "RELIABLE", "H_hat": correct_h, "corners_hat": ((0, 0), (1, 0), (1, 1), (0, 1)), "support": 6}
+        return {"status": "UNRELIABLE", "H_hat": wrong_h, "corners_hat": (), "support": 0}
+
+    monkeypatch.setattr(engine, "detect_g1_geometry", detect)
+    monkeypatch.setattr(engine, "rectify_g1_rgb", lambda rgb, h: rectify_calls.append(h) or rgb)
+    monkeypatch.setattr(engine, "rgb_only_anchor_score", lambda rgb, key: score_calls.append(key) or 3.0)
+    result = engine._g1_attacked_record(np.full((32, 32, 3), .5), correct_key, wrong_key)
+    assert result["passed"] is True
+    assert detect_calls == [correct_key, wrong_key]
+    assert rectify_calls == [correct_h]
+    assert score_calls == [correct_key]
+    assert "rectified_wrong_key_anchor" not in result
