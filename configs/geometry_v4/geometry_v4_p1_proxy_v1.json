@@ -33,7 +33,7 @@
     "cross_scale_reliability_evidence": "unclipped_periodic_raw_rotation_and_raw_log_scale_relative_to_consensus",
     "local_match_min_correlation": 0.42,
     "local_match_min_margin": 0.025,
-    "local_search_radius_pixels_at_64": 4,
+    "local_search_radius_pixels_at_64": 8,
     "log_polar_angles": 180,
     "log_polar_radii": 64,
     "reprojection_inlier_diagonal": 0.02,

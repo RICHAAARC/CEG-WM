@@ -497,7 +497,7 @@ def _match_tiles(
 ) -> list[dict[str, object]]:
     height, width = rectified_plane.shape
     patch_radius = max(4, int(round(min(height, width) / 16.0)))
-    search_radius = max(3, int(round(4.0 * min(height, width) / 64.0)))
+    search_radius = max(3, int(round(8.0 * min(height, width) / 64.0)))
     matches: list[dict[str, object]] = []
     for row, cy in enumerate(_CENTERS):
         for column, cx in enumerate(_CENTERS):
