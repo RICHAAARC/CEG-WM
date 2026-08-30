@@ -311,12 +311,19 @@ def _coarse_rotation_scale(observed: np.ndarray, reference: np.ndarray) -> tuple
     observed_lp, log_step = _log_polar(_spectral_magnitude(observed))
     reference_lp, _ = _log_polar(_spectral_magnitude(reference))
     result = normalized_phase_correlation(observed_lp, reference_lp)
-    rotation = float(result["shift_y"]) * 180.0 / observed_lp.shape[0]
-    rotation = ((rotation + 90.0) % 180.0) - 90.0
-    rotation = float(np.clip(rotation, -15.0, 15.0))
-    log_scale = -float(result["shift_x"]) * log_step
-    scale = float(np.clip(math.exp(log_scale), _RS_SCALE_MIN, _RS_SCALE_MAX))
-    return rotation, scale, {"rotation_deg": rotation, "scale": scale, "PSR": float(result["PSR"])}
+    raw_rotation = _wrap_rotation_180(float(result["shift_y"]) * 180.0 / observed_lp.shape[0])
+    raw_log_scale = -float(result["shift_x"]) * log_step
+    raw_scale = math.exp(raw_log_scale)
+    rotation = float(np.clip(raw_rotation, -15.0, 15.0))
+    scale = float(np.clip(raw_scale, _RS_SCALE_MIN, _RS_SCALE_MAX))
+    return rotation, scale, {
+        "rotation_deg": rotation,
+        "scale": scale,
+        "raw_rotation_deg": raw_rotation,
+        "raw_log_scale": raw_log_scale,
+        "raw_scale": raw_scale,
+        "PSR": float(result["PSR"]),
+    }
 
 
 def _wrap_rotation_180(angle_deg: float) -> float:
@@ -336,6 +343,33 @@ def _quality_weighted_consensus(estimates: Iterable[tuple[float, float, float]])
     angle = math.degrees(math.atan2(float(np.sum(weights * np.sin(doubled))), float(np.sum(weights * np.cos(doubled))))) / 2.0
     log_scale = float(np.average(np.log(np.asarray([item[1] for item in material], dtype=np.float64)), weights=weights))
     return _wrap_rotation_180(angle), float(np.clip(math.exp(log_scale), _RS_SCALE_MIN, _RS_SCALE_MAX))
+
+
+def _periodic_rotation_spread_180(rotations_deg: Iterable[float]) -> float:
+    """Largest pairwise angular distance on the 180-degree magnitude circle."""
+
+    values = tuple(_wrap_rotation_180(value) for value in rotations_deg)
+    if not values or not all(math.isfinite(value) for value in values):
+        return math.inf
+    return float(
+        max(
+            abs(_wrap_rotation_180(left - right))
+            for left in values
+            for right in values
+        )
+    )
+
+
+def _raw_cross_scale_spreads(raw_estimates: Iterable[tuple[float, float]]) -> tuple[float, float]:
+    """Return gate evidence from unbounded log-polar estimates, never search values."""
+
+    material = tuple((float(angle), float(log_scale)) for angle, log_scale in raw_estimates)
+    if not material or not all(math.isfinite(value) for pair in material for value in pair):
+        return math.inf, math.inf
+    return (
+        _periodic_rotation_spread_180(angle for angle, _ in material),
+        float(max(log_scale for _, log_scale in material) - min(log_scale for _, log_scale in material)),
+    )
 
 
 def _rectify_rs(attacked: np.ndarray, angle: float, scale: float) -> np.ndarray:
@@ -395,7 +429,7 @@ def _refine_rotation_scale(
     by_scale: dict[int, np.ndarray],
     coarse_angle: float,
     coarse_scale: float,
-) -> tuple[float, float, list[tuple[float, float]], list[float]]:
+) -> tuple[float, float, list[tuple[float, float]], list[tuple[float, float]], list[float]]:
     global_angle, global_scale = _refine_one_rotation_scale(
         attacked, global_reference, coarse_angle, coarse_scale
     )
@@ -403,6 +437,7 @@ def _refine_rotation_scale(
         max(0.0, _rs_score(attacked, global_reference, global_angle, global_scale)) * len(_SCALES) ** 2
     )
     per_scale: list[tuple[float, float]] = []
+    raw_per_scale: list[tuple[float, float]] = []
     qualities: list[float] = []
     for cycles in _SCALES:
         observed_band = _bandpass(_luma(attacked), cycles)
@@ -416,6 +451,7 @@ def _refine_rotation_scale(
             cycles=cycles,
         )
         per_scale.append((float(selected_angle), float(selected_scale)))
+        raw_per_scale.append((float(coarse_record["raw_rotation_deg"]), float(coarse_record["raw_log_scale"])))
         qualities.append(float(max(0.0, coarse_record["PSR"]) * max(0.0, _rs_score(attacked, by_scale[cycles], selected_angle, selected_scale, cycles=cycles))))
     angle, scale = _quality_weighted_consensus(
         (estimate_angle, estimate_scale, quality)
@@ -424,7 +460,7 @@ def _refine_rotation_scale(
             + [(*estimate, quality) for estimate, quality in zip(per_scale, qualities, strict=True)]
         )
     )
-    return float(angle), float(scale), per_scale, qualities
+    return float(angle), float(scale), per_scale, raw_per_scale, qualities
 
 
 def _patch(plane: np.ndarray, center_x: int, center_y: int, radius: int) -> np.ndarray | None:
@@ -697,7 +733,7 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     combined, global_reference, local_reference, by_scale, _ = _anchor_fields(observed_rgb.shape[:2], geometry_key)
     observed_plane = _luma(observed_rgb)
     coarse_angle, coarse_scale, coarse_record = _coarse_rotation_scale(observed_plane, global_reference)
-    angle, scale, per_scale, per_scale_quality = _refine_rotation_scale(
+    angle, scale, per_scale, raw_per_scale, per_scale_quality = _refine_rotation_scale(
         observed_rgb, global_reference, by_scale, coarse_angle, coarse_scale
     )
     h_rs = _similarity_h(angle, scale)
@@ -722,10 +758,7 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     reprojection = float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0
     macro_regions = _macro_regions(inlier_matches)
     spatial_coverage = _spatial_coverage(inlier_matches)
-    rotations = np.asarray([item[0] for item in per_scale], dtype=np.float64)
-    log_scales = np.log(np.asarray([item[1] for item in per_scale], dtype=np.float64))
-    rotation_spread = float(np.max(rotations) - np.min(rotations))
-    log_scale_spread = float(np.max(log_scales) - np.min(log_scales))
+    rotation_spread, log_scale_spread = _raw_cross_scale_spreads(raw_per_scale)
     mean_tile_correlation = (
         float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0
     )
@@ -768,6 +801,10 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
             "matches": tuple(inlier_matches),
             "public_h_direction": "attacked_to_canonical",
             "cross_scale_estimates": tuple((float(a), float(s)) for a, s in per_scale),
+            "cross_scale_raw_estimates": tuple(
+                {"rotation_deg": float(angle), "log_scale": float(log_scale), "scale": float(math.exp(log_scale))}
+                for angle, log_scale in raw_per_scale
+            ),
             "cross_scale_quality": tuple(float(value) for value in per_scale_quality),
         }
     )

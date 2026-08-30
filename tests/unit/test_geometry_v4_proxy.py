@@ -130,21 +130,32 @@ def test_independent_cross_scale_disagreement_fails_closed_instead_of_being_wind
     detection = proxy.detect_proxy(attacked, KEY)
     estimates = detection["diagnostics"]["cross_scale_estimates"]
     assert len(estimates) == 3
-    assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] > 2.0
+    assert detection["diagnostics"]["cross_scale_log_scale_spread"] > 0.03
     assert detection["status"] == "UNRELIABLE"
 
 
 @pytest.mark.unit
-def test_multiscale_rotation_scale_wrap_and_valid_tile_psr_are_measured_not_clamped() -> None:
+def test_multiscale_raw_rotation_scale_evidence_is_periodic_and_not_clamped() -> None:
     angle, scale = proxy._quality_weighted_consensus(((89.0, 0.9, 2.0), (-89.0, 1.1, 2.0)))
     assert abs(abs(angle) - 90.0) < 1e-9
     assert scale == pytest.approx(math.sqrt(0.99))
+
+    raw_rotation_spread, raw_log_scale_spread = proxy._raw_cross_scale_spreads(
+        ((89.0, math.log(0.1)), (-89.0, math.log(10.0)), (0.0, 0.0))
+    )
+    bounded_log_scale_spread = math.log(1.55) - math.log(0.65)
+    assert raw_rotation_spread == pytest.approx(89.0)
+    assert raw_log_scale_spread > 4.0 > bounded_log_scale_spread
+    assert raw_log_scale_spread > 0.03  # frozen gate must see disagreement before search clipping
 
     rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
     marked, _ = proxy.write_proxy(rgb, KEY)
     detection = proxy.detect_proxy(marked, KEY)
     estimates = detection["diagnostics"]["cross_scale_estimates"]
     assert len(estimates) == len(detection["diagnostics"]["cross_scale_quality"]) == 3
+    raw_estimates = detection["diagnostics"]["cross_scale_raw_estimates"]
+    assert len(raw_estimates) == 3
+    assert all({"rotation_deg", "log_scale", "scale"} == set(item) for item in raw_estimates)
     assert all(0.65 <= estimate[1] <= 1.55 for estimate in estimates)
     assert detection["diagnostics"]["valid_overlap_fraction"] == pytest.approx(1.0)
     assert detection["diagnostics"]["matches"]

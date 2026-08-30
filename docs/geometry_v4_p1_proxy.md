@@ -34,9 +34,10 @@ weighted inlier RMS, and lexicographic tile IDs, then refits only the selected
 inliers. Support, macro regions, and normalized convex-hull spatial coverage are
 computed from those inliers. Each scale obtains its own keyed-band log-polar
 normalized-phase R/S estimate and fixed-neighbourhood refinement. A
-quality-weighted circular/log-scale consensus uses those measured estimates only
-to form the coarse rectification; it neither shares nor clips the raw per-scale
-estimates, which still enter the frozen spread gates. The rectified valid-overlap
+quality-weighted circular/log-scale consensus uses bounded search/refinement
+estimates only to form the coarse rectification. Separately recorded, unclipped
+raw log-polar rotations and raw log-scales alone enter the frozen spread gates;
+rotation spread uses 180-degree periodic distances. The rectified valid-overlap
 mask excludes fill-only samples. Tile matching uses zero-mean normalized
 correlation and records a real sidelobe PSR; only valid measured matches may
 contribute to deterministic macro-balanced inliers, support, or coverage. Its
