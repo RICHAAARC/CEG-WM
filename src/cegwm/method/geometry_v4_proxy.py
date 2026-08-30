@@ -395,6 +395,23 @@ def _rectify_rs_with_valid(attacked: np.ndarray, angle: float, scale: float) -> 
     return rectified, np.asarray(valid >= 0.999999, dtype=bool)
 
 
+def _translation_phase_correlation(
+    rectified_plane: np.ndarray, reference: np.ndarray, valid_overlap: np.ndarray
+) -> dict[str, object]:
+    """Fixed-window masked Cartesian phase correlation for the public translation PSR."""
+
+    valid = np.asarray(valid_overlap, dtype=np.float64)
+    if valid.shape != rectified_plane.shape or reference.shape != rectified_plane.shape:
+        raise ValueError("Geometry-V4 translation phase inputs differ")
+    window = np.outer(np.hanning(rectified_plane.shape[0]), np.hanning(rectified_plane.shape[1]))
+    weight = valid * window
+    if float(np.sum(weight)) <= 1e-12:
+        raise ValueError("Geometry-V4 translation overlap is empty")
+    observed = rectified_plane - float(np.sum(rectified_plane * weight) / np.sum(weight))
+    keyed_reference = reference - float(np.sum(reference * weight) / np.sum(weight))
+    return normalized_phase_correlation(observed * weight, keyed_reference * weight)
+
+
 def _bandpass(plane: np.ndarray, cycles: int) -> np.ndarray:
     height, width = plane.shape
     fy = np.fft.fftfreq(height) * height
@@ -748,7 +765,7 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     h_rs = _similarity_h(angle, scale)
     rectified_rgb, valid_overlap = _rectify_rs_with_valid(observed_rgb, angle, scale)
     rectified_plane = _luma(rectified_rgb)
-    translation = normalized_phase_correlation(rectified_plane * valid_overlap, combined * valid_overlap)
+    translation = _translation_phase_correlation(rectified_plane, combined, valid_overlap)
     shift_x = int(translation["shift_x"])
     shift_y = int(translation["shift_y"])
     matches = _match_tiles(rectified_plane, valid_overlap, local_reference, shift_x, shift_y, h_rs)

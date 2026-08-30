@@ -52,7 +52,8 @@
       0.65,
       1.55
     ],
-    "tile_matching": "rectified_valid_overlap_tile_zncc_with_measured_sidelobe_psr_and_macro_balanced_inliers"
+    "tile_matching": "rectified_valid_overlap_tile_zncc_with_measured_sidelobe_psr_and_macro_balanced_inliers",
+    "translation_phase_correlation": "valid_overlap_fixed_hann_normalized_cross_power"
   },
   "development_canary": {
     "attacks": [

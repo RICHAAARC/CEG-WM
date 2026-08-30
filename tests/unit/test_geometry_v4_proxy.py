@@ -92,6 +92,9 @@ def test_normalized_cross_power_and_blind_identity_observation_use_measured_matc
     correlation = proxy.normalized_phase_correlation(moving, reference)
     assert (correlation["shift_y"], correlation["shift_x"]) == (4, -3)
     assert correlation["PSR"] > 8.0
+    translation = proxy._translation_phase_correlation(reference, reference, np.ones_like(reference, dtype=bool))
+    assert (translation["shift_y"], translation["shift_x"]) == (0, 0)
+    assert translation["PSR"] > 8.0
 
     rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
     marked, _ = proxy.write_proxy(rgb, KEY)

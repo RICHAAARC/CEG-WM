@@ -40,8 +40,8 @@ raw log-polar rotations and raw log-scales enter the frozen spread gates only as
 their distances from that deterministic consensus; rotation distance uses the
 180-degree periodic metric. The rectified valid-overlap
 mask excludes fill-only samples. The top-level PSR supplied to the frozen
-reliability gate is the valid-masked Cartesian phase-correlation translation
-PSR. Tile matching uses a fixed eight-pixel-at-64 local search and zero-mean
+reliability gate is the valid-overlap-masked, fixed-Hann-window Cartesian
+phase-correlation translation PSR. Tile matching uses a fixed eight-pixel-at-64 local search and zero-mean
 normalized correlation, and records a real
 per-tile sidelobe PSR as a local-match diagnostic only: it currently does not
 participate in match acceptance, aggregate reliability, or any frozen
