@@ -1,0 +1,231 @@
+{
+  "anchor": {
+    "canonical_tiles": "4x4_fixed",
+    "energy_shares": {
+      "fit_local": 0.36,
+      "search_global": 0.4,
+      "validate_holdout": 0.24
+    },
+    "fit_tile_ids": [
+      0,
+      2,
+      5,
+      7,
+      8,
+      10,
+      13,
+      15
+    ],
+    "luma_peak_cap": 0.03137254901960784,
+    "luma_rms_cap": 0.00784313725490196,
+    "validate_tile_ids": [
+      1,
+      3,
+      4,
+      6,
+      9,
+      11,
+      12,
+      14
+    ]
+  },
+  "blind_boundary": {
+    "allowed_detector_inputs": [
+      "current_attacked_ordinary_RGB",
+      "normalized_detection_key"
+    ],
+    "forbidden_detector_inputs": [
+      "truth_transform",
+      "original_RGB",
+      "clean_RGB",
+      "writer_residual",
+      "latent",
+      "attack_name"
+    ],
+    "geometry_can_form_positive": false,
+    "h_direction": "attacked_to_canonical",
+    "no_fallback_retry_or_replacement": true
+  },
+  "cpu_exit": {
+    "attacks_per_carrier": 5,
+    "correct_safe_reliable_min": 18,
+    "correct_unsafe_max": 0,
+    "evidence_class": "synthetic_only",
+    "formal_denominator": 0,
+    "minimum_safe_per_attack": 3,
+    "ordinary_rgb_carriers": 4,
+    "wrong_unsafe_max": 0
+  },
+  "evaluation": {
+    "center_reprojection_error_max": 0.02,
+    "log_scale_abs_error_max": 0.03,
+    "mapped_corner_error_max": 0.02,
+    "rotation_abs_error_degrees_max": 2.0,
+    "truth_timing": "runner_only_after_all_arm_outputs_are_frozen"
+  },
+  "fit": {
+    "condition_number_max": 10000.0,
+    "inlier_ratio_min": 0.5,
+    "macro_regions_min": 3,
+    "masked_normalized_correlation_min": 0.08,
+    "match_margin_min": 0.02,
+    "one_correspondence_per_tile": true,
+    "reprojection_rms_diagonal_max": 0.02,
+    "spatial_coverage_min": 0.75,
+    "support_min": 6
+  },
+  "frozen_g1_evidence": {
+    "artifact_sha256": "946eb98e2cc2d6ce867056ffc3f77764ec9ba63d386c364c911ec18aa5f333f5",
+    "content_flip_inference_allowed": false,
+    "correct_reliable_safe": 0,
+    "correct_reliable_unsafe": 19,
+    "correct_unreliable": 1,
+    "exceptions": 0,
+    "final_observability_unique_sources_passed": 2,
+    "old_gate_passed": 2,
+    "status": "G1_METHOD_PARTIAL_NOT_PASSED",
+    "units": 20,
+    "wrong_reliable_harmless": 0,
+    "wrong_reliable_unsafe": 18,
+    "wrong_unreliable": 2
+  },
+  "gpu_exit": {
+    "all_arms_unsafe_max": 0,
+    "correct_safe_reliable": 20,
+    "final_rgb_observability_unique_sources": 4,
+    "requires_separate_authorization": true
+  },
+  "holdout": {
+    "corner_validity_required": true,
+    "cross_scale_log_scale_spread_max": 0.03,
+    "cross_scale_rotation_spread_degrees_max": 2.0,
+    "macro_regions_min": 3,
+    "masked_normalized_correlation_min": 0.06,
+    "match_margin_min": 0.015,
+    "psr_min": 6.0,
+    "spatial_coverage_min": 0.75
+  },
+  "identity": {
+    "method_id": "geometry_v4_keyed_multiscale_sync_anchor_v1",
+    "protocol_id": "cegwm-geometry-v4-g1r-v1",
+    "stage": "V4-G1R",
+    "status": "G1_METHOD_PARTIAL_NOT_PASSED",
+    "writer_id": "geometry_v4_g1r_generated_writer_v1"
+  },
+  "key_domains": {
+    "fit": "CEG-WM/geometry-v4/g1r/fit/v1",
+    "root": "existing_geometry_v4_key",
+    "search": "CEG-WM/geometry-v4/g1r/search/v1",
+    "validate": "CEG-WM/geometry-v4/g1r/validate/v1"
+  },
+  "rosters": {
+    "attacks": [
+      "identity",
+      "rotation_5",
+      "scale_0.9",
+      "translation_0.08_0",
+      "crop_0.9"
+    ],
+    "confirmation": {
+      "prompts": [
+        "a ceramic owl on a bookshelf",
+        "a yellow umbrella beside a park bench",
+        "a glass vase holding white daisies",
+        "a mountain cabin under a cloudy sky"
+      ],
+      "seeds": [
+        6301,
+        6302,
+        6303,
+        6304
+      ]
+    },
+    "development": {
+      "prompts": [
+        "a copper kettle beside a linen napkin",
+        "a green bicycle leaning against a brick wall",
+        "a bowl of oranges on a marble counter",
+        "a wooden sailboat on a calm lake"
+      ],
+      "seeds": [
+        6201,
+        6202,
+        6203,
+        6204
+      ]
+    },
+    "forbidden_legacy_seeds": [
+      6101,
+      6102,
+      6103,
+      6104
+    ],
+    "units_per_split": 20
+  },
+  "runtime": {
+    "callback_step_index_zero_based": 19,
+    "model_id": "stabilityai/stable-diffusion-3.5-medium",
+    "placement": "20_step_callback_step_19_final_latent_before_VAE_decode",
+    "single_fixed_update": true
+  },
+  "schema_version": "cegwm_geometry_v4_g1r_v1",
+  "search": {
+    "candidate_rank": [
+      "phase_consistency",
+      "normalized_narrow_band_correlation",
+      "translation_psr",
+      "fixed_lexicographic"
+    ],
+    "coarse_rotation_degrees": [
+      -8.0,
+      -6.0,
+      -4.0,
+      -2.0,
+      0.0,
+      2.0,
+      4.0,
+      6.0,
+      8.0
+    ],
+    "coarse_scales": [
+      0.86,
+      0.9,
+      0.95,
+      1.0,
+      1.05,
+      1.1,
+      1.14
+    ],
+    "fine_rotation_offsets_degrees": [
+      -1.0,
+      -0.5,
+      0.0,
+      0.5,
+      1.0
+    ],
+    "fine_scale_offsets": [
+      -0.02,
+      -0.01,
+      0.0,
+      0.01,
+      0.02
+    ],
+    "no_candidate_status": "UNRELIABLE",
+    "physical_bounds": {
+      "rotation_degrees": [
+        -10.0,
+        10.0
+      ],
+      "scale": [
+        0.84,
+        1.16
+      ],
+      "translation_normalized": [
+        -0.12,
+        0.12
+      ]
+    },
+    "top_k": 5,
+    "translation_operator": "valid_mask_hann_normalized_cross_power_phase_correlation"
+  }
+}
