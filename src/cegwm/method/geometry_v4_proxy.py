@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import itertools
 import math
 from typing import Iterable
 
@@ -64,13 +65,14 @@ def _mean_unit(field: np.ndarray) -> np.ndarray:
     return centered / rms
 
 
-def _global_fields(shape: tuple[int, int], key: bytes) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+def _global_fields(shape: tuple[int, int], key: bytes) -> tuple[np.ndarray, dict[int, np.ndarray], dict[tuple[int, float], np.ndarray]]:
     height, width = shape
     yy, xx = np.mgrid[:height, :width]
     x = xx / float(width)
     y = yy / float(height)
     all_components: list[np.ndarray] = []
     by_scale: dict[int, np.ndarray] = {}
+    by_component: dict[tuple[int, float], np.ndarray] = {}
     for cycles in _SCALES:
         scale_components: list[np.ndarray] = []
         for angle_deg in _DIRECTIONS:
@@ -78,10 +80,27 @@ def _global_fields(shape: tuple[int, int], key: bytes) -> tuple[np.ndarray, dict
             phase, sign = _phase_sign(key, f"global/{cycles}/{int(angle_deg)}")
             coordinate = x * math.cos(angle) + y * math.sin(angle)
             component = sign * np.sin(2.0 * math.pi * cycles * coordinate + phase)
+            by_component[(cycles, angle_deg)] = _mean_unit(component)
             scale_components.append(component)
             all_components.append(component)
         by_scale[cycles] = _mean_unit(np.sum(scale_components, axis=0))
-    return _mean_unit(np.sum(all_components, axis=0)), by_scale
+    return _mean_unit(np.sum(all_components, axis=0)), by_scale, by_component
+
+
+def _constellation_groups(by_component: dict[tuple[int, float], np.ndarray]) -> tuple[tuple[np.ndarray, tuple[tuple[int, float], ...]], ...]:
+    groups = []
+    for group in range(3):
+        identities = tuple((cycles, direction) for s, cycles in enumerate(_SCALES) for d, direction in enumerate(_DIRECTIONS) if (s + d) % 3 == group)
+        groups.append((_mean_unit(sum((by_component[item] for item in identities))), identities))
+    return tuple(groups)
+
+
+def _angle_orbits_45(raw_angle: float) -> tuple[float, ...]:
+    return tuple(_wrap_rotation_180(raw_angle + 45.0 * q) for q in range(4))
+
+
+def _orbit_assignments() -> tuple[tuple[int, int, int], ...]:
+    return tuple(itertools.product(range(4), repeat=3))
 
 
 def _local_field(shape: tuple[int, int], key: bytes) -> np.ndarray:
@@ -108,8 +127,8 @@ def _local_field(shape: tuple[int, int], key: bytes) -> np.ndarray:
 
 def _anchor_fields(
     shape: tuple[int, int], key: bytes
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[int, np.ndarray], dict[str, float | int]]:
-    global_field, by_scale = _global_fields(shape, key)
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[int, np.ndarray], dict[tuple[int, float], np.ndarray], dict[str, float | int]]:
+    global_field, by_scale, by_component = _global_fields(shape, key)
     local_field = _local_field(shape, key)
     projection = float(np.mean(global_field * local_field))
     local_field = _mean_unit(local_field - projection * global_field)
@@ -127,7 +146,7 @@ def _anchor_fields(
         "global_local_cross": cross,
         "joint_rms": float(np.sqrt(np.mean(np.square(combined)))),
     }
-    return combined, global_field, local_field, by_scale, diagnostics
+    return combined, global_field, local_field, by_scale, by_component, diagnostics
 
 
 def write_proxy(rgb: np.ndarray, detection_key: str | bytes) -> tuple[np.ndarray, dict[str, object]]:
@@ -136,7 +155,7 @@ def write_proxy(rgb: np.ndarray, detection_key: str | bytes) -> tuple[np.ndarray
     source = _require_rgb(rgb)
     root = normalize_detection_key(detection_key)
     geometry_key = derive_geometry_v4_key(root)
-    combined, _, _, _, anchor_diagnostics = _anchor_fields(source.shape[:2], geometry_key)
+    combined, _, _, _, _, anchor_diagnostics = _anchor_fields(source.shape[:2], geometry_key)
     scale = min(_LUMA_RMS_TARGET, _LUMA_PEAK_CAP / float(np.max(np.abs(combined))))
     candidate = source + (combined * scale)[..., None]
     marked = np.clip(candidate, 0.0, 1.0)
@@ -293,7 +312,7 @@ def _spectral_magnitude(plane: np.ndarray) -> np.ndarray:
     return np.log1p(np.abs(spectrum))
 
 
-def _log_polar(magnitude: np.ndarray, angles: int = 180, radii: int = 64) -> tuple[np.ndarray, float]:
+def _log_polar(magnitude: np.ndarray, angles: int = 360, radii: int = 256) -> tuple[np.ndarray, float]:
     height, width = magnitude.shape
     center_x = (width - 1) / 2.0
     center_y = (height - 1) / 2.0
@@ -381,6 +400,86 @@ def _raw_cross_scale_spreads(
     )
 
 
+def _raw_group_spreads(groups: Iterable[tuple[float, float]], consensus: tuple[float, float]) -> tuple[float, float]:
+    """Measure raw, resolved group residuals to the raw joint consensus."""
+
+    values = tuple((float(angle), float(log_scale)) for angle, log_scale in groups)
+    raw_angle, raw_log_scale = (float(value) for value in consensus)
+    if (
+        not values
+        or not all(math.isfinite(value) for pair in values for value in pair)
+        or not math.isfinite(raw_angle)
+        or not math.isfinite(raw_log_scale)
+    ):
+        return math.inf, math.inf
+    return (
+        float(max(abs(_wrap_rotation_180(angle - raw_angle)) for angle, _ in values)),
+        float(max(abs(log_scale - raw_log_scale) for _, log_scale in values)),
+    )
+
+
+def _joint_orbit_consensus(attacked: np.ndarray, global_reference: np.ndarray, raw_groups: list[tuple[float, float, float]]) -> dict[str, object]:
+    """Blind 4^3 symmetry-orbit search over the three scale-group log-polar observations."""
+
+    if len(raw_groups) != 3:
+        raise ValueError("Geometry-V4 joint orbit consensus requires three groups")
+    raw_log_scale = float(np.median([item[1] for item in raw_groups]))
+    try:
+        raw_scale = math.exp(raw_log_scale)
+    except OverflowError:
+        raw_scale = math.inf
+    score_cache: dict[float, float] = {}
+
+    def bounded_joint_score(candidate_angle: float) -> float:
+        """Score a raw orbit candidate after fixed bounded search only."""
+
+        if candidate_angle in score_cache:
+            return score_cache[candidate_angle]
+        if not math.isfinite(candidate_angle) or not math.isfinite(raw_scale):
+            score_cache[candidate_angle] = -math.inf
+            return -math.inf
+        seed_angle = float(np.clip(candidate_angle, -16.0, 16.0))
+        seed_scale = float(np.clip(raw_scale, _RS_SCALE_MIN, _RS_SCALE_MAX))
+        refined_angle, refined_scale = _refine_one_rotation_scale(
+            attacked, global_reference, seed_angle, seed_scale
+        )
+        value = _rs_score(attacked, global_reference, refined_angle, refined_scale)
+        score_cache[candidate_angle] = float(value) if math.isfinite(value) else -math.inf
+        return score_cache[candidate_angle]
+
+    hypotheses: list[tuple[int, int, int, float]] = []
+    for orbit in _orbit_assignments():
+        angles = [_angle_orbits_45(raw_groups[index][0])[orbit[index]] for index in range(3)]
+        medoid = min(
+            enumerate(angles),
+            key=lambda item: (
+                sum(abs(_wrap_rotation_180(item[1] - candidate)) for candidate in angles),
+                item[0],
+            ),
+        )[1]
+        raw_rotation_spread = max(abs(_wrap_rotation_180(angle - medoid)) for angle in angles)
+        score = bounded_joint_score(medoid) - raw_rotation_spread / 180.0
+        hypotheses.append((*orbit, float(score) if math.isfinite(score) else -math.inf))
+    hypotheses.sort(key=lambda item: (-item[3], item[:3]))
+    winner = hypotheses[0]
+    angles = [_angle_orbits_45(raw_groups[index][0])[winner[index]] for index in range(3)]
+    consensus_angle = min(
+        enumerate(angles),
+        key=lambda item: (
+            sum(abs(_wrap_rotation_180(item[1] - candidate)) for candidate in angles),
+            item[0],
+        ),
+    )[1]
+    runner_score = hypotheses[1][3] if len(hypotheses) > 1 else winner[3]
+    margin = float(winner[3] - runner_score) if math.isfinite(winner[3]) and math.isfinite(runner_score) else -math.inf
+    return {
+        "raw_consensus": (float(consensus_angle), raw_log_scale),
+        "resolved_groups": tuple((float(angle), float(raw_groups[index][1])) for index, angle in enumerate(angles)),
+        "hypotheses": tuple(hypotheses),
+        "margin": margin,
+    }
+
+
 def _rectify_rs(attacked: np.ndarray, angle: float, scale: float) -> np.ndarray:
     fill = float(np.median(attacked))
     return _sample_h(attacked, _similarity_h(angle, scale), fill)
@@ -453,17 +552,11 @@ def _refine_rotation_scale(
     attacked: np.ndarray,
     global_reference: np.ndarray,
     by_scale: dict[int, np.ndarray],
-    coarse_angle: float,
-    coarse_scale: float,
-) -> tuple[float, float, list[tuple[float, float]], list[tuple[float, float]], list[float]]:
-    global_angle, global_scale = _refine_one_rotation_scale(
-        attacked, global_reference, coarse_angle, coarse_scale
-    )
-    global_quality = float(
-        max(0.0, _rs_score(attacked, global_reference, global_angle, global_scale)) * len(_SCALES) ** 2
-    )
+    by_component: dict[tuple[int, float], np.ndarray],
+) -> dict[str, object]:
+    """Use unbounded joint group evidence for rectification, preserving all raw evidence."""
+
     per_scale: list[tuple[float, float]] = []
-    raw_per_scale: list[tuple[float, float]] = []
     qualities: list[float] = []
     for cycles in _SCALES:
         observed_band = _bandpass(_luma(attacked), cycles)
@@ -477,16 +570,50 @@ def _refine_rotation_scale(
             cycles=cycles,
         )
         per_scale.append((float(selected_angle), float(selected_scale)))
-        raw_per_scale.append((float(coarse_record["raw_rotation_deg"]), float(coarse_record["raw_log_scale"])))
         qualities.append(float(max(0.0, coarse_record["PSR"]) * max(0.0, _rs_score(attacked, by_scale[cycles], selected_angle, selected_scale, cycles=cycles))))
-    angle, scale = _quality_weighted_consensus(
-        (estimate_angle, estimate_scale, quality)
-        for estimate_angle, estimate_scale, quality in (
-            [(global_angle, global_scale, global_quality)]
-            + [(*estimate, quality) for estimate, quality in zip(per_scale, qualities, strict=True)]
+
+    groups = _constellation_groups(by_component)
+    raw_groups: list[tuple[float, float, float]] = []
+    group_observations: list[dict[str, object]] = []
+    observed_plane = _luma(attacked)
+    for reference, identities in groups:
+        _, _, record = _coarse_rotation_scale(observed_plane, reference)
+        raw_rotation = float(record["raw_rotation_deg"])
+        raw_log_scale = float(record["raw_log_scale"])
+        raw_psr = float(record["PSR"])
+        raw_groups.append((raw_rotation, raw_log_scale, raw_psr))
+        group_observations.append(
+            {
+                "identities": tuple((int(cycles), float(direction)) for cycles, direction in identities),
+                "raw_rotation_deg": raw_rotation,
+                "raw_log_scale": raw_log_scale,
+                "lp_psr": raw_psr,
+            }
         )
+    joint = _joint_orbit_consensus(attacked, global_reference, raw_groups)
+    raw_angle, raw_log_scale = (float(value) for value in joint["raw_consensus"])
+    if not math.isfinite(raw_angle) or not math.isfinite(raw_log_scale):
+        raise ValueError("Geometry-V4 joint raw consensus is non-finite")
+    try:
+        raw_scale = math.exp(raw_log_scale)
+    except OverflowError:
+        raw_scale = math.inf
+    if not math.isfinite(raw_scale):
+        raise ValueError("Geometry-V4 joint raw consensus scale is non-finite")
+    rectification_seed_angle = float(np.clip(raw_angle, -16.0, 16.0))
+    rectification_seed_scale = float(np.clip(raw_scale, _RS_SCALE_MIN, _RS_SCALE_MAX))
+    angle, scale = _refine_one_rotation_scale(
+        attacked, global_reference, rectification_seed_angle, rectification_seed_scale
     )
-    return float(angle), float(scale), per_scale, raw_per_scale, qualities
+    return {
+        "rotation_deg": float(angle),
+        "scale": float(scale),
+        "legacy_per_scale_estimates": tuple(per_scale),
+        "legacy_per_scale_quality": tuple(qualities),
+        "group_observations": tuple(group_observations),
+        "joint": joint,
+        "rectification_seed": (rectification_seed_angle, rectification_seed_scale),
+    }
 
 
 def _patch(plane: np.ndarray, center_x: int, center_y: int, radius: int) -> np.ndarray | None:
@@ -757,12 +884,20 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     observed_rgb = _require_rgb(attacked)
     root = normalize_detection_key(detection_key)
     geometry_key = derive_geometry_v4_key(root)
-    combined, global_reference, local_reference, by_scale, _ = _anchor_fields(observed_rgb.shape[:2], geometry_key)
+    combined, global_reference, local_reference, by_scale, by_component, _ = _anchor_fields(observed_rgb.shape[:2], geometry_key)
     observed_plane = _luma(observed_rgb)
     coarse_angle, coarse_scale, coarse_record = _coarse_rotation_scale(observed_plane, global_reference)
-    angle, scale, per_scale, raw_per_scale, per_scale_quality = _refine_rotation_scale(
-        observed_rgb, global_reference, by_scale, coarse_angle, coarse_scale
-    )
+    rotation_scale = _refine_rotation_scale(observed_rgb, global_reference, by_scale, by_component)
+    angle = float(rotation_scale["rotation_deg"])
+    scale = float(rotation_scale["scale"])
+    per_scale = tuple(rotation_scale["legacy_per_scale_estimates"])
+    per_scale_quality = tuple(rotation_scale["legacy_per_scale_quality"])
+    group_observations = tuple(rotation_scale["group_observations"])
+    joint = dict(rotation_scale["joint"])
+    component_observations = []
+    for (cycles, direction), component in sorted(by_component.items()):
+        _, _, record = _coarse_rotation_scale(_bandpass(observed_plane, cycles), _bandpass(component, cycles))
+        component_observations.append((int(cycles), float(direction), float(record["raw_rotation_deg"]), float(record["raw_log_scale"]), float(record["PSR"])))
     h_rs = _similarity_h(angle, scale)
     rectified_rgb, valid_overlap = _rectify_rs_with_valid(observed_rgb, angle, scale)
     rectified_plane = _luma(rectified_rgb)
@@ -785,7 +920,9 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     reprojection = float(np.sqrt(np.mean(np.square(residuals)))) if support else 1.0
     macro_regions = _macro_regions(inlier_matches)
     spatial_coverage = _spatial_coverage(inlier_matches)
-    rotation_spread, log_scale_spread = _raw_cross_scale_spreads(raw_per_scale, angle, scale)
+    raw_consensus = tuple(float(value) for value in joint["raw_consensus"])
+    resolved_groups = tuple((float(angle), float(log_scale)) for angle, log_scale in joint["resolved_groups"])
+    rotation_spread, log_scale_spread = _raw_group_spreads(resolved_groups, raw_consensus)
     mean_tile_correlation = (
         float(np.mean([float(item["correlation"]) for item in inlier_matches])) if inlier_matches else 0.0
     )
@@ -828,11 +965,29 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
             "matches": tuple(inlier_matches),
             "public_h_direction": "attacked_to_canonical",
             "cross_scale_estimates": tuple((float(a), float(s)) for a, s in per_scale),
-            "cross_scale_raw_estimates": tuple(
-                {"rotation_deg": float(angle), "log_scale": float(log_scale), "scale": float(math.exp(log_scale))}
-                for angle, log_scale in raw_per_scale
-            ),
+            "cross_scale_estimates_role": "diagnostic_only",
             "cross_scale_quality": tuple(float(value) for value in per_scale_quality),
+            "component_raw_observations": tuple(component_observations),
+            "component_observations_role": "diagnostic_only",
+            "joint_group_raw_observations": group_observations,
+            "joint_orbit_hypotheses": tuple(
+                {"orbit": tuple(int(value) for value in hypothesis[:3]), "score": float(hypothesis[3])}
+                for hypothesis in joint["hypotheses"]
+            ),
+            "joint_orbit_margin": float(joint["margin"]),
+            "raw_group_consensus": {
+                "rotation_deg": raw_consensus[0],
+                "log_scale": raw_consensus[1],
+            },
+            "resolved_group_raw_estimates": tuple(
+                {"rotation_deg": group_angle, "log_scale": group_log_scale}
+                for group_angle, group_log_scale in resolved_groups
+            ),
+            "rectification_seed": {
+                "rotation_deg": float(rotation_scale["rectification_seed"][0]),
+                "scale": float(rotation_scale["rectification_seed"][1]),
+            },
+            "rectification_estimate": {"rotation_deg": angle, "scale": scale},
         }
     )
     return {

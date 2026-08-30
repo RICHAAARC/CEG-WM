@@ -85,6 +85,27 @@ def test_writer_has_twelve_independent_global_components_fixed_tiles_and_final_l
 
 
 @pytest.mark.unit
+def test_fixed_multiradius_constellation_groups_and_orbit_order() -> None:
+    key = derive_geometry_v4_key(normalize_detection_key(KEY))
+    _, _, _, _, components, _ = proxy._anchor_fields((64, 64), key)
+    groups = proxy._constellation_groups(components)
+    identities = [item for _, group in groups for item in group]
+    assert len(groups) == 3 and len(identities) == len(set(identities)) == 12
+    assert all(len(group) == 4 and len({item[1] for item in group}) == 4 and len({item[0] for item in group}) >= 3 for _, group in groups)
+    assert proxy._angle_orbits_45(0.0) == (0.0, 45.0, -90.0, -45.0)
+    assert len(proxy._orbit_assignments()) == 64 and proxy._orbit_assignments()[0] == (0, 0, 0) and proxy._orbit_assignments()[-1] == (3, 3, 3)
+
+
+@pytest.mark.unit
+def test_joint_orbit_tie_break_and_raw_group_spreads(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(proxy, "_rs_score", lambda *args, **kwargs: 1.0)
+    result = proxy._joint_orbit_consensus(np.ones((64, 64, 3)), np.ones((64, 64)), [(0.0, 0.0, 1.0)] * 3)
+    assert len(result["hypotheses"]) == 64 and result["hypotheses"][0][:3] == (0, 0, 0)
+    rotation, scale = proxy._raw_group_spreads(((89.0, -10.0), (-89.0, 10.0), (89.0, 0.0)), (89.0, 0.0))
+    assert rotation == pytest.approx(2.0) and scale == pytest.approx(10.0)
+
+
+@pytest.mark.unit
 def test_normalized_cross_power_and_blind_identity_observation_use_measured_matches() -> None:
     reference = np.zeros((32, 32), dtype=np.float64)
     reference[5, 7] = 1.0
@@ -156,9 +177,21 @@ def test_multiscale_raw_rotation_scale_evidence_is_periodic_and_not_clamped() ->
     detection = proxy.detect_proxy(marked, KEY)
     estimates = detection["diagnostics"]["cross_scale_estimates"]
     assert len(estimates) == len(detection["diagnostics"]["cross_scale_quality"]) == 3
-    raw_estimates = detection["diagnostics"]["cross_scale_raw_estimates"]
-    assert len(raw_estimates) == 3
-    assert all({"rotation_deg", "log_scale", "scale"} == set(item) for item in raw_estimates)
+    assert detection["diagnostics"]["cross_scale_estimates_role"] == "diagnostic_only"
+    raw_groups = detection["diagnostics"]["joint_group_raw_observations"]
+    resolved_groups = detection["diagnostics"]["resolved_group_raw_estimates"]
+    assert len(raw_groups) == len(resolved_groups) == 3
+    assert all({"identities", "raw_rotation_deg", "raw_log_scale", "lp_psr"} == set(item) for item in raw_groups)
+    assert len(detection["diagnostics"]["joint_orbit_hypotheses"]) == 64
+    assert {"rotation_deg", "log_scale"} == set(detection["diagnostics"]["raw_group_consensus"])
+    assert {"rotation_deg", "scale"} == set(detection["diagnostics"]["rectification_estimate"])
+    raw_consensus = detection["diagnostics"]["raw_group_consensus"]
+    expected_spreads = proxy._raw_group_spreads(
+        tuple((item["rotation_deg"], item["log_scale"]) for item in resolved_groups),
+        (raw_consensus["rotation_deg"], raw_consensus["log_scale"]),
+    )
+    assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] == pytest.approx(expected_spreads[0])
+    assert detection["diagnostics"]["cross_scale_log_scale_spread"] == pytest.approx(expected_spreads[1])
     assert all(0.65 <= estimate[1] <= 1.55 for estimate in estimates)
     assert detection["diagnostics"]["valid_overlap_fraction"] == pytest.approx(1.0)
     assert detection["diagnostics"]["matches"]
