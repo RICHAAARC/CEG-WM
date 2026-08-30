@@ -38,10 +38,14 @@ quality-weighted circular/log-scale consensus uses bounded search/refinement
 estimates only to form the coarse rectification. Separately recorded, unclipped
 raw log-polar rotations and raw log-scales alone enter the frozen spread gates;
 rotation spread uses 180-degree periodic distances. The rectified valid-overlap
-mask excludes fill-only samples. Tile matching uses zero-mean normalized
-correlation and records a real sidelobe PSR; only valid measured matches may
-contribute to deterministic macro-balanced inliers, support, or coverage. Its
-measured diagnostics are passed to the frozen P0
+mask excludes fill-only samples. The top-level PSR supplied to the frozen
+reliability gate is the valid-masked Cartesian phase-correlation translation
+PSR. Tile matching uses zero-mean normalized correlation and records a real
+per-tile sidelobe PSR as a local-match diagnostic only: it currently does not
+participate in match acceptance, aggregate reliability, or any frozen
+reliability gate. Only valid measured matches may contribute to deterministic
+macro-balanced inliers, support, or coverage. These measured diagnostics are
+passed to the frozen P0
 `reliability_is_reliable` gate and a
 `GeometryV4Observation`; geometry never produces positive watermark evidence.
 There is no original/residual/truth input, oracle initialization, retry, or
