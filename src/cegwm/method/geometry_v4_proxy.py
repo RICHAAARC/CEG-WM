@@ -319,9 +319,37 @@ def _coarse_rotation_scale(observed: np.ndarray, reference: np.ndarray) -> tuple
     return rotation, scale, {"rotation_deg": rotation, "scale": scale, "PSR": float(result["PSR"])}
 
 
+def _wrap_rotation_180(angle_deg: float) -> float:
+    """Canonical representative for magnitude-spectrum rotations."""
+
+    return float((float(angle_deg) + 90.0) % 180.0 - 90.0)
+
+
+def _quality_weighted_consensus(estimates: Iterable[tuple[float, float, float]]) -> tuple[float, float]:
+    """Fuse measured periodic angles and log-scales without changing raw estimates."""
+
+    material = [(float(a), float(s), max(0.0, float(q))) for a, s, q in estimates]
+    if not material or not all(math.isfinite(item) for triple in material for item in triple):
+        raise ValueError("Geometry-V4 cross-scale estimates are invalid")
+    weights = np.asarray([max(1e-9, item[2]) for item in material], dtype=np.float64)
+    doubled = np.radians(np.asarray([item[0] for item in material], dtype=np.float64) * 2.0)
+    angle = math.degrees(math.atan2(float(np.sum(weights * np.sin(doubled))), float(np.sum(weights * np.cos(doubled))))) / 2.0
+    log_scale = float(np.average(np.log(np.asarray([item[1] for item in material], dtype=np.float64)), weights=weights))
+    return _wrap_rotation_180(angle), float(np.clip(math.exp(log_scale), _RS_SCALE_MIN, _RS_SCALE_MAX))
+
+
 def _rectify_rs(attacked: np.ndarray, angle: float, scale: float) -> np.ndarray:
     fill = float(np.median(attacked))
     return _sample_h(attacked, _similarity_h(angle, scale), fill)
+
+
+def _rectify_rs_with_valid(attacked: np.ndarray, angle: float, scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """Return rectified RGB and an RGB-independent overlap mask for local evidence."""
+
+    transform = _similarity_h(angle, scale)
+    rectified = _sample_h(attacked, transform, float(np.median(attacked)))
+    valid = _sample_h(np.ones(attacked.shape[:2], dtype=np.float64), transform, 0.0)
+    return rectified, np.asarray(valid >= 0.999999, dtype=bool)
 
 
 def _bandpass(plane: np.ndarray, cycles: int) -> np.ndarray:
@@ -367,13 +395,19 @@ def _refine_rotation_scale(
     by_scale: dict[int, np.ndarray],
     coarse_angle: float,
     coarse_scale: float,
-) -> tuple[float, float, list[tuple[float, float]]]:
-    angle, scale = _refine_one_rotation_scale(attacked, global_reference, coarse_angle, coarse_scale)
+) -> tuple[float, float, list[tuple[float, float]], list[float]]:
+    global_angle, global_scale = _refine_one_rotation_scale(
+        attacked, global_reference, coarse_angle, coarse_scale
+    )
+    global_quality = float(
+        max(0.0, _rs_score(attacked, global_reference, global_angle, global_scale)) * len(_SCALES) ** 2
+    )
     per_scale: list[tuple[float, float]] = []
+    qualities: list[float] = []
     for cycles in _SCALES:
         observed_band = _bandpass(_luma(attacked), cycles)
         reference_band = _bandpass(by_scale[cycles], cycles)
-        independent_angle, independent_scale, _ = _coarse_rotation_scale(observed_band, reference_band)
+        independent_angle, independent_scale, coarse_record = _coarse_rotation_scale(observed_band, reference_band)
         selected_angle, selected_scale = _refine_one_rotation_scale(
             attacked,
             by_scale[cycles],
@@ -382,7 +416,15 @@ def _refine_rotation_scale(
             cycles=cycles,
         )
         per_scale.append((float(selected_angle), float(selected_scale)))
-    return float(angle), float(scale), per_scale
+        qualities.append(float(max(0.0, coarse_record["PSR"]) * max(0.0, _rs_score(attacked, by_scale[cycles], selected_angle, selected_scale, cycles=cycles))))
+    angle, scale = _quality_weighted_consensus(
+        (estimate_angle, estimate_scale, quality)
+        for estimate_angle, estimate_scale, quality in (
+            [(global_angle, global_scale, global_quality)]
+            + [(*estimate, quality) for estimate, quality in zip(per_scale, qualities, strict=True)]
+        )
+    )
+    return float(angle), float(scale), per_scale, qualities
 
 
 def _patch(plane: np.ndarray, center_x: int, center_y: int, radius: int) -> np.ndarray | None:
@@ -402,6 +444,7 @@ def _normalized_patch_score(left: np.ndarray, right: np.ndarray) -> float:
 
 def _match_tiles(
     rectified_plane: np.ndarray,
+    valid_overlap: np.ndarray,
     local_reference: np.ndarray,
     shift_x: int,
     shift_y: int,
@@ -424,7 +467,8 @@ def _match_tiles(
             for oy in range(-search_radius, search_radius + 1):
                 for ox in range(-search_radius, search_radius + 1):
                     observed = _patch(rectified_plane, predicted_x + ox, predicted_y + oy, patch_radius)
-                    if observed is not None:
+                    observed_valid = _patch(valid_overlap, predicted_x + ox, predicted_y + oy, patch_radius)
+                    if observed is not None and observed_valid is not None and bool(np.all(observed_valid)):
                         candidates.append((_normalized_patch_score(observed, template), predicted_x + ox, predicted_y + oy))
             if not candidates:
                 continue
@@ -434,6 +478,8 @@ def _match_tiles(
             ]
             second = max((item[0] for item in separated), default=-1.0)
             margin = best[0] - second
+            sidelobes = np.asarray([item[0] for item in separated], dtype=np.float64)
+            sidelobe_psr = float((best[0] - float(np.mean(sidelobes))) / (float(np.std(sidelobes)) + 1e-12)) if sidelobes.size else 0.0
             if best[0] < 0.42 or margin < 0.025:
                 continue
             rectified_point = np.asarray((best[1] / (width - 1), best[2] / (height - 1), 1.0), dtype=np.float64)
@@ -446,6 +492,7 @@ def _match_tiles(
                     "attacked": (float(attacked_point[0]), float(attacked_point[1])),
                     "correlation": float(best[0]),
                     "margin": float(margin),
+                    "PSR": sidelobe_psr,
                 }
             )
     return matches
@@ -650,16 +697,16 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
     combined, global_reference, local_reference, by_scale, _ = _anchor_fields(observed_rgb.shape[:2], geometry_key)
     observed_plane = _luma(observed_rgb)
     coarse_angle, coarse_scale, coarse_record = _coarse_rotation_scale(observed_plane, global_reference)
-    angle, scale, per_scale = _refine_rotation_scale(
+    angle, scale, per_scale, per_scale_quality = _refine_rotation_scale(
         observed_rgb, global_reference, by_scale, coarse_angle, coarse_scale
     )
     h_rs = _similarity_h(angle, scale)
-    rectified_rgb = _rectify_rs(observed_rgb, angle, scale)
+    rectified_rgb, valid_overlap = _rectify_rs_with_valid(observed_rgb, angle, scale)
     rectified_plane = _luma(rectified_rgb)
-    translation = normalized_phase_correlation(rectified_plane, combined)
+    translation = normalized_phase_correlation(rectified_plane * valid_overlap, combined * valid_overlap)
     shift_x = int(translation["shift_x"])
     shift_y = int(translation["shift_y"])
-    matches = _match_tiles(rectified_plane, local_reference, shift_x, shift_y, h_rs)
+    matches = _match_tiles(rectified_plane, valid_overlap, local_reference, shift_x, shift_y, h_rs)
     canonical_to_attacked, inlier_matches, residuals, condition = _robust_similarity_fit(matches)
     if canonical_to_attacked is not None:
         attacked_to_canonical = np.linalg.inv(canonical_to_attacked)
@@ -716,10 +763,12 @@ def detect_proxy(attacked: np.ndarray, detection_key: str | bytes) -> dict[str, 
             "scale": scale,
             "translation_pixels": (shift_x, shift_y),
             "mean_tile_correlation": mean_tile_correlation,
+            "valid_overlap_fraction": float(np.mean(valid_overlap)),
             "candidate_match_count": len(matches),
             "matches": tuple(inlier_matches),
             "public_h_direction": "attacked_to_canonical",
             "cross_scale_estimates": tuple((float(a), float(s)) for a, s in per_scale),
+            "cross_scale_quality": tuple(float(value) for value in per_scale_quality),
         }
     )
     return {

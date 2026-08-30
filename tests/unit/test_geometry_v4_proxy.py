@@ -12,6 +12,8 @@ from cegwm.method import geometry_v4_proxy as proxy
 from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.protocol.geometry_v4_proxy import (
     P1_ATTACKS,
+    P1_DEVELOPMENT_CANARY_ATTACKS,
+    P1_DEVELOPMENT_CANARY_SEEDS,
     P1_DIGEST,
     P1_H_DIRECTION,
     P1_SCALE_BOUNDS,
@@ -42,6 +44,8 @@ def test_proxy_config_digest_split_roster_and_canonical_bytes() -> None:
     assert tuple(contract["attacks"]) == P1_ATTACKS
     assert tuple(contract["splits"]["P1D"]["seeds"]) == P1_SPLITS["P1D"]
     assert tuple(contract["splits"]["P1C"]["seeds"]) == P1_SPLITS["P1C"]
+    assert tuple(contract["development_canary"]["seeds"]) == P1_DEVELOPMENT_CANARY_SEEDS
+    assert tuple(contract["development_canary"]["attacks"]) == P1_DEVELOPMENT_CANARY_ATTACKS
     assert set(P1_SPLITS["P1D"]).isdisjoint(P1_SPLITS["P1C"])
     assert contract["attack_operator"]["public_h_direction"] == P1_H_DIRECTION == "attacked_to_canonical"
     assert tuple(contract["detector"]["coarse_scale_bounds"]) == P1_SCALE_BOUNDS
@@ -128,6 +132,23 @@ def test_independent_cross_scale_disagreement_fails_closed_instead_of_being_wind
     assert len(estimates) == 3
     assert detection["diagnostics"]["cross_scale_rotation_spread_deg"] > 2.0
     assert detection["status"] == "UNRELIABLE"
+
+
+@pytest.mark.unit
+def test_multiscale_rotation_scale_wrap_and_valid_tile_psr_are_measured_not_clamped() -> None:
+    angle, scale = proxy._quality_weighted_consensus(((89.0, 0.9, 2.0), (-89.0, 1.1, 2.0)))
+    assert abs(abs(angle) - 90.0) < 1e-9
+    assert scale == pytest.approx(math.sqrt(0.99))
+
+    rgb = np.full((64, 64, 3), 0.5, dtype=np.float64)
+    marked, _ = proxy.write_proxy(rgb, KEY)
+    detection = proxy.detect_proxy(marked, KEY)
+    estimates = detection["diagnostics"]["cross_scale_estimates"]
+    assert len(estimates) == len(detection["diagnostics"]["cross_scale_quality"]) == 3
+    assert all(0.65 <= estimate[1] <= 1.55 for estimate in estimates)
+    assert detection["diagnostics"]["valid_overlap_fraction"] == pytest.approx(1.0)
+    assert detection["diagnostics"]["matches"]
+    assert all(math.isfinite(match["PSR"]) for match in detection["diagnostics"]["matches"])
 
 
 @pytest.mark.unit

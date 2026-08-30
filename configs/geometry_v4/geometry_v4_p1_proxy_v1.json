@@ -29,7 +29,7 @@
       0.65,
       1.55
     ],
-    "cross_scale_estimation": "independent_per_scale_log_polar_and_fixed_refine",
+    "cross_scale_estimation": "independent_keyed_band_log_polar_normalized_phase_then_quality_weighted_consensus",
     "local_match_min_correlation": 0.42,
     "local_match_min_margin": 0.025,
     "local_search_radius_pixels_at_64": 4,
@@ -50,6 +50,24 @@
     "rs_refine_scale_bounds": [
       0.65,
       1.55
+    ],
+    "tile_matching": "rectified_valid_overlap_tile_zncc_with_measured_sidelobe_psr_and_macro_balanced_inliers"
+  },
+  "development_canary": {
+    "attacks": [
+      "identity",
+      "rotation_-5",
+      "rotation_+5",
+      "scale_0.9",
+      "scale_1.1",
+      "translation_-0.10_0",
+      "translation_+0.10_0",
+      "crop_rescale_0.9"
+    ],
+    "id": "geometry_v4_p1d_multiscale_sync_matching_canary_v1",
+    "seeds": [
+      4101,
+      4102
     ]
   },
   "energy": {

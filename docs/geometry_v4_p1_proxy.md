@@ -32,13 +32,20 @@ measured correspondences, not a fixed count, enter a deterministic robust
 similarity fit. It enumerates every two-point hypothesis, ranks by inlier count,
 weighted inlier RMS, and lexicographic tile IDs, then refits only the selected
 inliers. Support, macro regions, and normalized convex-hull spatial coverage are
-computed from those inliers. Each scale obtains its own log-polar and fixed
-neighbourhood R/S estimate; the reliability spread is not constrained around a
-shared estimate. Its measured diagnostics are passed to the frozen P0
+computed from those inliers. Each scale obtains its own keyed-band log-polar
+normalized-phase R/S estimate and fixed-neighbourhood refinement. A
+quality-weighted circular/log-scale consensus uses those measured estimates only
+to form the coarse rectification; it neither shares nor clips the raw per-scale
+estimates, which still enter the frozen spread gates. The rectified valid-overlap
+mask excludes fill-only samples. Tile matching uses zero-mean normalized
+correlation and records a real sidelobe PSR; only valid measured matches may
+contribute to deterministic macro-balanced inliers, support, or coverage. Its
+measured diagnostics are passed to the frozen P0
 `reliability_is_reliable` gate and a
 `GeometryV4Observation`; geometry never produces positive watermark evidence.
 There is no original/residual/truth input, oracle initialization, retry, or
 fallback in this path.
+
 
 The public `H_hat` direction is attacked-to-canonical. `corners_hat` maps the
 attacked-image TL/TR/BR/BL unit-square corners into canonical coordinates. A
@@ -70,3 +77,12 @@ then may truth consistency and attacked-to-canonical coordinate error be read;
 a mismatch cannot initialize, alter, or prematurely stop those detector arms.
 The present local canaries do
 not execute the full 8x16 P1D or any P1C outcome.
+
+## Frozen development canary
+
+This iteration's non-formal engineering canary is frozen in the canonical P1
+config before execution: P1D seeds 4101 and 4102 crossed with identity,
+rotation -5/+5, scale 0.9/1.1, horizontal translation -0.10/+0.10, and
+crop-rescale 0.9. It is a fixed 16-unit diagnostic roster, never a replacement
+for the 128-unit P1D denominator, and must not be changed in response to its
+outcomes. P1C is neither selected nor inspected.

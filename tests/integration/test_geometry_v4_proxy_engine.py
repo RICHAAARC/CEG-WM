@@ -6,7 +6,11 @@ import numpy as np
 import pytest
 
 from experiments import geometry_v4_proxy_engine as engine
-from cegwm.protocol.geometry_v4_proxy import P1_ATTACKS
+from cegwm.protocol.geometry_v4_proxy import (
+    P1_ATTACKS,
+    P1_DEVELOPMENT_CANARY_ATTACKS,
+    P1_DEVELOPMENT_CANARY_SEEDS,
+)
 
 KEY = "0123456789abcdef"
 WRONG_KEY = "fedcba9876543210"
@@ -71,6 +75,22 @@ def test_small_canary_is_nonformal_and_keeps_real_three_arm_outputs() -> None:
         assert record["source"]["image_identity_sha256"]
         assert not {"key_digest", "derived_key", "root_key", "pattern"} & _record_keys(record)
         assert KEY not in repr(record) and WRONG_KEY not in repr(record)
+
+
+@pytest.mark.integration
+def test_frozen_development_canary_is_exactly_the_configured_p1d_2x8_roster() -> None:
+    records = engine.run_development_canary(KEY, WRONG_KEY)
+    assert len(records) == len(P1_DEVELOPMENT_CANARY_SEEDS) * len(P1_DEVELOPMENT_CANARY_ATTACKS) == 16
+    assert {(record["seed"], record["attack"]) for record in records} == {
+        (seed, attack) for seed in P1_DEVELOPMENT_CANARY_SEEDS for attack in P1_DEVELOPMENT_CANARY_ATTACKS
+    }
+    assert all(record["formal_denominator_member"] is False and record["failure"] is None for record in records)
+    for record in records:
+        correct = record["arms"]["marked_correct_key"]["detection"]
+        negative = record["arms"]["attacked_unwatermarked_negative"]["detection"]
+        wrong = record["arms"]["same_unit_wrong_key"]["detection"]
+        assert set(correct["diagnostics"]["cross_scale_estimates"]) or correct["status"] == "STOPPED"
+        assert negative["status"] != "RELIABLE" and wrong["status"] != "RELIABLE"
 
 
 @pytest.mark.integration

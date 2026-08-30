@@ -13,6 +13,8 @@ from cegwm.method.geometry_v4_proxy import apply_proxy_attack, detect_proxy, wri
 from cegwm.protocol.geometry_v4 import GEOMETRY_V4_METHOD_ID, GEOMETRY_V4_PROTOCOL_ID, GeometryV4Observation
 from cegwm.protocol.geometry_v4_proxy import (
     P1_ATTACKS,
+    P1_DEVELOPMENT_CANARY_ATTACKS,
+    P1_DEVELOPMENT_CANARY_SEEDS,
     P1_DIGEST,
     P1_RUNNER_ID,
     P1_SOURCE_ID,
@@ -263,6 +265,22 @@ def run_canary(
             attack=attack,
         )
         for split, seed, attack in resolved
+    )
+
+
+def run_development_canary(
+    detection_key: str | bytes, wrong_key: str | bytes
+) -> tuple[dict[str, object], ...]:
+    """Run only the predeclared 2x8 engineering roster from the canonical config."""
+
+    return run_canary(
+        detection_key,
+        wrong_key,
+        subset=tuple(
+            (seed, attack)
+            for seed in P1_DEVELOPMENT_CANARY_SEEDS
+            for attack in P1_DEVELOPMENT_CANARY_ATTACKS
+        ),
     )
 
 

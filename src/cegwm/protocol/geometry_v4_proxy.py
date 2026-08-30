@@ -14,7 +14,7 @@ from cegwm.protocol.geometry_v4 import (
 )
 
 P1_CONFIG = "geometry_v4_p1_proxy_v1.json"
-P1_DIGEST = "b7f030de43c1b15a31c5344a11f0745081f0a0c11b637c2b16efefeadaa9c925"
+P1_DIGEST = "54a22f62f5f58a755d2ea0e8be59d0e1bc378634f03b0b49089dd9abbf0a6f75"
 P1_RUNNER_ID = "geometry_v4_p1_proxy_engine_v1"
 P1_SOURCE_ID = "geometry_v4_procedural_rgb_v1"
 P1_SOURCE_SHAPE = (64, 64, 3)
@@ -39,6 +39,18 @@ P1_ATTACKS = (
     "compound_+7_1.1_-0.05_+0.05",
 )
 P1_SPLITS = {"P1D": tuple(range(4101, 4109)), "P1C": tuple(range(4201, 4209))}
+P1_DEVELOPMENT_CANARY_ID = "geometry_v4_p1d_multiscale_sync_matching_canary_v1"
+P1_DEVELOPMENT_CANARY_SEEDS = (4101, 4102)
+P1_DEVELOPMENT_CANARY_ATTACKS = (
+    "identity",
+    "rotation_-5",
+    "rotation_+5",
+    "scale_0.9",
+    "scale_1.1",
+    "translation_-0.10_0",
+    "translation_+0.10_0",
+    "crop_rescale_0.9",
+)
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
@@ -80,6 +92,7 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
     attack_operator = value.get("attack_operator", {})
     source = value.get("source", {})
     modes = value.get("runner_modes", {})
+    canary = value.get("development_canary", {})
     if (
         attack_operator.get("public_h_direction") != P1_H_DIRECTION
         or tuple(detector.get("coarse_scale_bounds", ())) != P1_SCALE_BOUNDS
@@ -91,6 +104,10 @@ def load_p1_proxy(root: str | Path) -> Mapping[str, Any]:
         or modes.get("full", {}).get("external_images_allowed") is not False
         or modes.get("full", {}).get("attack_subset_allowed") is not False
         or modes.get("engineering_canary", {}).get("formal_denominator_member") is not False
+        or canary.get("id") != P1_DEVELOPMENT_CANARY_ID
+        or tuple(canary.get("seeds", ())) != P1_DEVELOPMENT_CANARY_SEEDS
+        or tuple(canary.get("attacks", ())) != P1_DEVELOPMENT_CANARY_ATTACKS
+        or not set(P1_DEVELOPMENT_CANARY_ATTACKS).issubset(P1_ATTACKS)
     ):
         raise ValueError("P1 proxy H, search, source, or runner-mode identity differs")
     return value
