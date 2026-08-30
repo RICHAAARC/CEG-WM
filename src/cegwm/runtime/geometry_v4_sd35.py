@@ -16,13 +16,15 @@ class FinalLatentAnchorCallback:
     tensor_inputs = ("latents",)
     def __init__(self, detection_key: object) -> None: self._key, self.called = detection_key, False
     def __call__(self, pipeline: Any, step_index: int, timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
-        del pipeline, timestep
+        del timestep
         if not isinstance(step_index, int) or not isinstance(callback_kwargs, dict): raise TypeError("invalid diffusers callback state")
         if step_index != 19: return callback_kwargs
         if self.called: raise RuntimeError("Geometry-V4 final callback attempted step 19 more than once")
         self.called = True
         updated = dict(callback_kwargs)
-        updated["latents"] = write_final_latent_anchor(updated.get("latents"), self._key)
+        if pipeline is None or not callable(getattr(getattr(pipeline, "vae", None), "decode", None)):
+            raise RuntimeError("Geometry-V4 final callback requires the real SD3 VAE pipeline")
+        updated["latents"] = write_final_latent_anchor(updated.get("latents"), self._key, pipeline)
         return updated
 
 

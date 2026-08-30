@@ -99,22 +99,62 @@ def _seed(key: bytes, label: bytes) -> int:
     return int.from_bytes(hmac.new(key, label, hashlib.sha256).digest()[:8], "big")
 
 
-def write_final_latent_anchor(latents: torch.Tensor, detection_key: str | bytes | bytearray | memoryview) -> torch.Tensor:
-    """Return one fixed-amplitude keyed residual at the sole final callback state."""
-    if not isinstance(latents, torch.Tensor) or latents.ndim != 4 or not latents.dtype.is_floating_point or not bool(torch.isfinite(latents).all()):
-        raise ValueError("final callback latents must be finite floating NCHW")
-    root = normalize_detection_key(detection_key)
-    key = derive_geometry_v4_key(root)
-    generator = torch.Generator(device="cpu").manual_seed(_seed(key, b"g0-g1-final-latent-anchor"))
-    global_field = torch.randn(latents.shape, generator=generator, dtype=torch.float32, device="cpu")
-    local_field = torch.randn(latents.shape, generator=generator, dtype=torch.float32, device="cpu")
-    global_field -= global_field.mean(dim=(-2, -1), keepdim=True)
-    local_field -= local_field.mean(dim=(-2, -1), keepdim=True)
-    global_field /= torch.linalg.vector_norm(global_field).clamp_min(torch.finfo(torch.float32).eps)
-    local_field -= (local_field * global_field).sum() * global_field
-    local_field /= torch.linalg.vector_norm(local_field).clamp_min(torch.finfo(torch.float32).eps)
-    residual = math.sqrt(ENERGY_SHARES[0]) * global_field + math.sqrt(ENERGY_SHARES[1]) * local_field
-    return latents + residual.to(device=latents.device, dtype=latents.dtype) * _LATENT_AMPLITUDE
+def _unit(field: torch.Tensor) -> torch.Tensor:
+    field = field - field.mean(dim=(-2, -1), keepdim=True)
+    norm = torch.linalg.vector_norm(field)
+    if not bool(torch.isfinite(norm)) or float(norm) == 0.0: raise RuntimeError("Geometry-V4 anchor basis is degenerate")
+    return field / norm
+
+
+def rgb_anchor_basis(shape: tuple[int, int], detection_key: str | bytes | bytearray | memoryview, *, device: torch.device | str = "cpu", dtype: torch.dtype = torch.float32) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """One keyed 12-component global plus 4x4 local RGB-luma basis for writer and detector."""
+    h, w = shape
+    if h < 16 or w < 16: raise ValueError("RGB anchor basis requires at least 16 pixels per side")
+    key = derive_geometry_v4_key(normalize_detection_key(detection_key))
+    yy, xx = torch.meshgrid(torch.arange(h, device=device, dtype=dtype), torch.arange(w, device=device, dtype=dtype), indexing="ij")
+    global_field = torch.zeros((1, 1, h, w), device=device, dtype=dtype)
+    for cycles in (8, 16, 32):
+        for angle_degrees in (0, 45, 90, 135):
+            label = f"global:{cycles}:{angle_degrees}".encode()
+            phase = (_seed(key, label) / 2**64) * 2 * math.pi
+            sign = 1.0 if (_seed(key, b"sign:" + label) & 1) else -1.0
+            angle = math.radians(angle_degrees)
+            global_field += sign * torch.cos(2 * math.pi * cycles * (xx * math.cos(angle) / w + yy * math.sin(angle) / h) + phase)[None, None]
+    local_field = torch.zeros_like(global_field)
+    for row in range(4):
+        for col in range(4):
+            label = f"tile:{row * 4 + col}".encode(); phase = (_seed(key, label) / 2**64) * 2 * math.pi
+            mask = ((yy >= row*h/4) & (yy < (row+1)*h/4) & (xx >= col*w/4) & (xx < (col+1)*w/4)).to(dtype)
+            local_field += mask[None, None] * torch.cos(2 * math.pi * (2 * xx / w + 2 * yy / h) + phase)
+    global_field = _unit(global_field); local_field = local_field - (local_field * global_field).sum() * global_field; local_field = _unit(local_field)
+    combined = math.sqrt(ENERGY_SHARES[0]) * global_field + math.sqrt(ENERGY_SHARES[1]) * local_field
+    return combined, global_field, local_field
+
+
+def _vae_rgb(pipeline: Any, latents: torch.Tensor) -> torch.Tensor:
+    vae = getattr(pipeline, "vae", None); config = getattr(vae, "config", None)
+    scaling, shift = getattr(config, "scaling_factor", None), getattr(config, "shift_factor", None)
+    if not callable(getattr(vae, "decode", None)) or not isinstance(scaling, (int, float)) or not isinstance(shift, (int, float)) or not math.isfinite(scaling) or scaling <= 0 or not math.isfinite(shift): raise RuntimeError("Geometry-V4 requires a valid differentiable SD3 VAE")
+    decoded = vae.decode(latents / float(scaling) + float(shift), return_dict=True)
+    sample = getattr(decoded, "sample", None)
+    if not isinstance(sample, torch.Tensor) or sample.ndim != 4 or sample.shape[0] != 1 or sample.shape[1] != 3 or not bool(torch.isfinite(sample).all()): raise RuntimeError("Geometry-V4 VAE decode is invalid")
+    return (sample + 1.0) / 2.0
+
+
+def write_final_latent_anchor(latents: torch.Tensor, detection_key: str | bytes | bytearray | memoryview, pipeline: Any) -> torch.Tensor:
+    """One fixed first-order VAE-adjoint update; no search, loop, or final-RGB feedback."""
+    if not isinstance(latents, torch.Tensor) or latents.ndim != 4 or not latents.dtype.is_floating_point or not bool(torch.isfinite(latents).all()): raise ValueError("final callback latents must be finite floating NCHW")
+    with torch.enable_grad():
+        current = latents.detach().to(torch.float32).requires_grad_(True)
+        rgb = _vae_rgb(pipeline, current)
+        basis, _, _ = rgb_anchor_basis(tuple(rgb.shape[-2:]), detection_key, device=rgb.device, dtype=rgb.dtype)
+        luma = (rgb * torch.tensor(_REC709, device=rgb.device, dtype=rgb.dtype)[None, :, None, None]).sum(1, keepdim=True)
+        objective = (luma * basis).sum()
+        gradient = torch.autograd.grad(objective, current, allow_unused=False)[0]
+    if not bool(torch.isfinite(gradient).all()): raise RuntimeError("Geometry-V4 VAE adjoint gradient is nonfinite")
+    gradient = gradient - gradient.mean(dim=(-2, -1), keepdim=True); norm = torch.linalg.vector_norm(gradient)
+    if not bool(torch.isfinite(norm)) or float(norm) == 0.0: raise RuntimeError("Geometry-V4 VAE adjoint gradient is zero")
+    return latents + (gradient / norm).to(dtype=latents.dtype) * _LATENT_AMPLITUDE
 
 
 def rgb_only_anchor_score(rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> float:
@@ -124,18 +164,9 @@ def rgb_only_anchor_score(rgb: np.ndarray, detection_key: str | bytes | bytearra
         raise ValueError("detector requires finite current ordinary RGB")
     if image.max() > 1.0 or image.min() < 0.0:
         raise ValueError("detector requires RGB normalized to [0,1]")
-    key = derive_geometry_v4_key(normalize_detection_key(detection_key))
-    h, w = image.shape[:2]
-    yy, xx = np.mgrid[:h, :w]
-    luma = image @ _REC709
-    luma = luma - luma.mean()
-    score = 0.0
-    for cycle, orientation in ((8, 0), (16, 45), (32, 90), (16, 135)):
-        phase = (_seed(key, f"{cycle}:{orientation}".encode()) / 2**64) * 2 * math.pi
-        angle = math.radians(orientation)
-        carrier = np.cos(2 * math.pi * cycle * (xx * math.cos(angle) / w + yy * math.sin(angle) / h) + phase)
-        score += abs(float((luma * carrier).mean()))
-    return score / 4.0
+    basis, _, _ = rgb_anchor_basis(image.shape[:2], detection_key)
+    luma = torch.from_numpy((image @ _REC709).astype(np.float32))[None, None]
+    return float((luma - luma.mean()).mul(basis.cpu()).sum().item())
 
 
 def measure_final_rgb(clean_rgb: np.ndarray, marked_rgb: np.ndarray, detection_key: object, wrong_key: object, content_detector: Callable[[np.ndarray, bytes], float]) -> RGBObservability:

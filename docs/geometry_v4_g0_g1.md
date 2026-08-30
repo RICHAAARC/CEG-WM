@@ -10,6 +10,15 @@ decode.  `FinalLatentAnchorCallback` rejects a second invocation.  A clean
 same-seed pass and the marked pass each materialize ordinary final RGB; the
 writer's internal latent update is never itself evidence.
 
+The writer and RGB-only detector now share one deterministic keyed RGB-luma
+basis: twelve signed directional multiscale global components and sixteen
+keyed local tiles, orthogonalized with the frozen .40/.60 energy split. At
+step 19 the writer takes exactly one differentiable SD3 VAE adjoint gradient
+of that same signed objective, removes DC, normalizes it once, and applies the
+unchanged fixed latent amplitude. It fails closed on a missing, nonfinite, or
+zero VAE gradient; it does not search, iterate, observe final comparison
+results, or use truth.
+
 G0 is exactly seeds 5101--5104 with its one predeclared prompt and identity.
 Its unit passes only if correct-key final-RGB anchor score exceeds its
 wrong-key score, PSNR is above 40, SSIM is above .98, Rec.709 luma RMS and peak

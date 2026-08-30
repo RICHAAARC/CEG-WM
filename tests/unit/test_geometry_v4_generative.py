@@ -5,13 +5,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from types import SimpleNamespace
 
 from cegwm.method import geometry_v4_generative as generated
-from cegwm.method.geometry_v4_generative import FrozenWeightedJointContentAdapter, measure_final_rgb, rgb_only_anchor_score, write_final_latent_anchor
+from cegwm.method.geometry_v4_generative import FrozenWeightedJointContentAdapter, measure_final_rgb, rgb_anchor_basis, rgb_only_anchor_score, write_final_latent_anchor
 from cegwm.protocol.geometry_v4_generative import CALLBACK_STEP_INDEX, LUMA_PEAK_CAP, LUMA_RMS_CAP, load_g0_g1_contract
 
 ROOT = Path(__file__).resolve().parents[2]
 KEY, WRONG = "0123456789abcdef", "fedcba9876543210"
+
+class _VAE:
+    config = SimpleNamespace(scaling_factor=1.0, shift_factor=0.0)
+    def decode(self, value, return_dict=True): return SimpleNamespace(sample=value[:, :3])
+class _Pipeline: vae = _VAE()
 
 
 @pytest.mark.unit
@@ -25,12 +31,21 @@ def test_contract_freezes_sole_placement_budget_and_rosters() -> None:
 
 @pytest.mark.unit
 def test_writer_is_keyed_deterministic_and_rejects_non_latent_input() -> None:
-    latents = torch.zeros((1, 4, 8, 8), dtype=torch.float32)
-    first = write_final_latent_anchor(latents, KEY)
-    assert torch.equal(first, write_final_latent_anchor(latents, KEY))
-    assert not torch.equal(first, write_final_latent_anchor(latents, WRONG))
+    latents = torch.zeros((1, 4, 16, 16), dtype=torch.float32)
+    first = write_final_latent_anchor(latents, KEY, _Pipeline())
+    assert torch.equal(first, write_final_latent_anchor(latents, KEY, _Pipeline()))
+    assert not torch.equal(first, write_final_latent_anchor(latents, WRONG, _Pipeline()))
     with pytest.raises(ValueError, match="NCHW"):
-        write_final_latent_anchor(torch.zeros((4, 8, 8)), KEY)
+        write_final_latent_anchor(torch.zeros((4, 8, 8)), KEY, _Pipeline())
+
+@pytest.mark.unit
+def test_shared_basis_is_keyed_and_signed() -> None:
+    basis, global_part, local_part = rgb_anchor_basis((32, 32), KEY)
+    wrong, _, _ = rgb_anchor_basis((32, 32), WRONG)
+    assert torch.equal(basis, rgb_anchor_basis((32, 32), KEY)[0]) and not torch.equal(basis, wrong)
+    assert abs(float((global_part * local_part).sum())) < 1e-5
+    image = np.full((32, 32, 3), .5); image += basis[0, 0].numpy()[..., None] * .001
+    assert rgb_only_anchor_score(image, KEY) > rgb_only_anchor_score(image, WRONG)
 
 
 @pytest.mark.unit
