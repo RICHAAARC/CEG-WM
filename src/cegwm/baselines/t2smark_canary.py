@@ -111,7 +111,9 @@ def establish_contract(run_dir: Path, config: dict[str, Any]) -> dict[str, Any]:
     path = run_dir / "run_config.json"; existing = _read_json(path)
     if existing is None:
         atomic_json(path, config); return config
-    if _identity(existing) != _identity(config):
+    try: same = _identity(existing) == _identity(config)
+    except (KeyError, TypeError) as exc: raise RuntimeError("run_config malformed: fail closed") from exc
+    if not same:
         raise RuntimeError("run_config identity drift: refuse to reuse stable RUN_ID")
     return existing
 
@@ -122,7 +124,7 @@ def valid_file(path: Path, expected_sha256: str | None = None) -> bool:
 
 def valid_generation(run_dir: Path, config: dict[str, Any]) -> bool:
     checkpoint = _read_json(run_dir / "generation_checkpoint.json")
-    if not checkpoint or checkpoint.get("identity") != _identity(config): return False
+    if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("files"), dict) or checkpoint.get("identity") != _identity(config): return False
     return all(valid_file(run_dir / name, checkpoint.get("files", {}).get(name)) for name in ("clean.png", "watermarked.png"))
 
 
@@ -138,7 +140,7 @@ def observation_path(run_dir: Path, condition: str, role: str) -> Path:
 
 def valid_observation(run_dir: Path, config: dict[str, Any], condition: str, role: str) -> bool:
     record = _read_json(observation_path(run_dir, condition, role))
-    if not record or record.get("status") != "ok" or record.get("identity") != _identity(config): return False
+    if not isinstance(record, dict) or record.get("status") != "ok" or record.get("identity") != _identity(config): return False
     expected_image = f"images/{condition}__{role}.png"
     if record.get("source_role") not in ("clean.png", "watermarked.png") or record.get("image") != expected_image: return False
     source = run_dir / record["source_role"]
@@ -212,12 +214,14 @@ def _run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, s
         csv = (run_dir / "partial_scores.csv").read_text(encoding="utf-8")
         csv_sha256 = hashlib.sha256(csv.encode()).hexdigest()
         manifest = {"generation_digest": generation_digest(run_dir), "observation_set_digest": observation_set_digest, "csv_sha256": csv_sha256}
-        atomic_json(run_dir / "final_manifest.json", manifest)
         atomic_text(run_dir / "scores.csv", csv)
         atomic_json(run_dir/"canary_result.json",{"identity":_identity(config),**manifest,"engineering_canary_complete":True,"observations":rows})
+        manifest["result_sha256"] = sha256_file(run_dir / "canary_result.json")
+        manifest["scores_sha256"] = sha256_file(run_dir / "scores.csv")
+        atomic_json(run_dir / "final_manifest.json", manifest)
     else:
         stamp = time.time_ns(); quarantine = run_dir / "quarantine"; quarantine.mkdir(exist_ok=True)
-        for name in ("canary_result.json", "scores.csv"):
+        for name in ("final_manifest.json", "canary_result.json", "scores.csv"):
             path = run_dir / name
             if path.exists(): os.replace(path, quarantine / f"{name}.{stamp}")
 
@@ -226,6 +230,12 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
     """Hold the stable RUN_ID lock across the entire recovery/publish transaction."""
     with RunLock(run_dir):
         _run_canary(run_dir, config, execute, force)
+
+
+def validate_final_publication(run_dir: Path) -> bool:
+    manifest = _read_json(run_dir / "final_manifest.json")
+    if not isinstance(manifest, dict): return False
+    return all(isinstance(manifest.get(key), str) and len(manifest[key]) == 64 for key in ("result_sha256", "scores_sha256")) and valid_file(run_dir / "canary_result.json", manifest["result_sha256"]) and valid_file(run_dir / "scores.csv", manifest["scores_sha256"])
 
 
 def main() -> None:

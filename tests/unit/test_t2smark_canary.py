@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, establish_contract, pending_observations, run_canary, sha256_file, valid_observation
+from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, establish_contract, pending_observations, run_canary, sha256_file, valid_observation, validate_final_publication
 
 
 def config() -> dict:
@@ -74,3 +74,20 @@ def test_persisted_records_exclude_secret_and_raw_key_fixture_values(tmp_path: P
     run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
     text = "\n".join(path.read_text() for path in tmp_path.rglob("*.json"))
     assert "HF_TOKEN" not in text and "master_key" not in text and "session_key" not in text and "message_bits" not in text
+
+
+def test_final_manifest_is_required_and_rejects_hash_mismatch(tmp_path: Path) -> None:
+    prepare_generation(tmp_path)
+    run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    assert validate_final_publication(tmp_path)
+    (tmp_path / "scores.csv").write_text("corrupt")
+    assert not validate_final_publication(tmp_path)
+
+
+def test_malformed_contract_fails_closed_and_malformed_records_retry(tmp_path: Path) -> None:
+    atomic_json(tmp_path / "run_config.json", {"schema": RUN_SCHEMA})
+    try: establish_contract(tmp_path, config())
+    except RuntimeError: pass
+    else: raise AssertionError("malformed contract accepted")
+    (tmp_path / "generation_checkpoint.json").write_text("[]")
+    assert not valid_observation(tmp_path, config(), CONDITIONS[0], "clean_negative")

@@ -47,3 +47,6 @@ automatically removed: after confirming no runtime is active, an operator may
 manually remove only that RUN_ID lock file. Contract drift is rejected.
 Partial artifacts report valid and pending counts; stable final JSON, CSV, and
 manifest appear only after 12 valid observations from one generation.
+Consumers must accept a final result only when `final_manifest.json` exists
+and its recorded JSON and CSV SHA-256 values verify; the manifest is published
+last as the commit pointer. Missing or mismatched manifests are incomplete.
