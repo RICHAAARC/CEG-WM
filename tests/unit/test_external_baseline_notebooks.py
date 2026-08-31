@@ -9,6 +9,6 @@ def test_external_baseline_notebooks_are_thin_and_pinned() -> None:
         code = [c for c in book["cells"] if c["cell_type"] == "code"]
         assert "".join(code[0]["source"]) == "from google.colab import drive\ndrive.mount('/content/drive')"
         text = "\n".join("".join(c["source"]) for c in code)
-        for required in ("Baseline-V1", exact, "--detach", "status", "porcelain", "HF_TOKEN", "RUN_ID", "final_manifest.json", "engineering-only"):
+        for required in ("Baseline-V1", exact, "--detach", "status", "porcelain", "userdata", "child_env", "sys.executable", "pip','install','-e", "FORCE_RERUN_ALL", "--force-rerun-all", "HF_TOKEN", "RUN_ID", "final_manifest.json", "engineering-only"):
             assert required in text
         assert "force_remount" not in text

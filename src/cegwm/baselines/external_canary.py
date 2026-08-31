@@ -54,6 +54,7 @@ def main() -> None:
         raise RuntimeError("CUDA is required for this engineering canary")
     if len(args.project_exact)!=40 or any(c not in "0123456789abcdef" for c in args.project_exact): raise RuntimeError("project exact must be a 40-hex commit")
     run_id=args.run_id or RUN_ID_DEFAULTS[args.method]
+    if run_id != RUN_ID_DEFAULTS[args.method]: raise RuntimeError("run-id must equal the fixed method RUN_ID")
     if root.name != run_id: raise RuntimeError("run-dir basename must equal stable method RUN_ID")
     params={"height":512,"width":512,"guidance_scale":4.5,"num_inference_steps":20,"num_inversion_steps":20,"carrier":args.method}
     if args.method=="tree_ring": params.update({"watermark_seed":999999,"channel":0,"radius":10,"pattern":"ring"})
@@ -66,7 +67,7 @@ def main() -> None:
     def pipe() -> Any:
         if "pipe" not in state:
             from .sd35_runtime import load_sd3_pipeline
-            state["pipe"]=load_sd3_pipeline(MODEL_ID,MODEL_REVISION)
+            state["pipe"]=load_sd3_pipeline(MODEL_ID,MODEL_REVISION,token=os.environ["HF_TOKEN"])
         return state["pipe"]
     def generate() -> None:
         p=pipe(); base=torch.randn(SD35_SHAPE,generator=torch.Generator("cuda").manual_seed(1701),device="cuda",dtype=torch.float16); c=carrier()
@@ -74,11 +75,11 @@ def main() -> None:
             edit_index=16; pre=p.denoise_segment(base,prompt=config["prompt"],guidance=4.5,steps=20,start=0,end=edit_index); marked_edit=c.inject(pre.clone()); clean_lat=p.denoise_segment(pre,prompt=config["prompt"],guidance=1.0,steps=20,start=edit_index,end=20); marked_branch=p.denoise_segment(marked_edit,prompt=config["prompt"],guidance=1.0,steps=20,start=edit_index,end=20); marked_lat=clean_lat.clone(); marked_lat[:,0]=marked_branch[:,0]; clean=p.decode_latents(clean_lat); marked=p.decode_latents(marked_lat)
         else:
             marked_lat=c.inject(base) if args.method=="tree_ring" else c.create_strict_paired_latents(base); common={"prompt":config["prompt"],"height":512,"width":512,"guidance_scale":4.5,"num_inference_steps":20}; clean=p(latents=base,**common).images[0].convert("RGB"); marked=p(latents=marked_lat,**common).images[0].convert("RGB")
-        atomic_png(root/"clean.png",clean); atomic_png(root/"watermarked.png",marked); atomic_json(root/"generation_checkpoint.json",{"identity":{k:config[k] for k in ("schema","project_exact","official_exact","model_id","model_revision","prompt","generation_seed","watermark_seed","parameters")},"files":{"clean.png":sha256_file(root/"clean.png"),"watermarked.png":sha256_file(root/"watermarked.png")}})
+        atomic_png(root/"clean.png",clean); atomic_png(root/"watermarked.png",marked); atomic_json(root/"generation_checkpoint.json",{"identity":{k:config[k] for k in ("schema","project_exact","official_exact","model_id","model_revision","prompt","generation_seed","watermark_seed","parameters")},"carrier_digest":c.digest,"files":{"clean.png":sha256_file(root/"clean.png"),"watermarked.png":sha256_file(root/"watermarked.png")}})
     def execute(condition: str, role: str) -> tuple[Any,float]:
         from PIL import Image
         image=_attack(Image.open(root/("clean.png" if role=="clean_negative" else "watermarked.png")),condition)
-        return image,score_rgb(np.asarray(image,dtype=np.uint8),pipe(),carrier(),inversion_steps=20,prompt=config["prompt"])
+        return image,score_rgb(np.asarray(image,dtype=np.uint8),pipe(),carrier(),inversion_steps=20)
     run_transaction(root,config,generate,execute,force=args.force_rerun_all)
     if not validate_final_publication(root): raise RuntimeError("final publication hash validation failed")
 

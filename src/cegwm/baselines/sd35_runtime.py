@@ -27,11 +27,14 @@ class InversionStableDiffusion3PipelineMixin:
         cfg=self.scheduler.config; kw={}
         if getattr(cfg,"use_dynamic_shifting",False) or (hasattr(cfg,"get") and cfg.get("use_dynamic_shifting",False)):
             get=lambda k,d: cfg.get(k,d) if hasattr(cfg,"get") else getattr(cfg,k,d); seq=(shape[-2]//self.transformer.config.patch_size)*(shape[-1]//self.transformer.config.patch_size); kw["mu"]=seq*((get("max_shift",1.16)-get("base_shift",.5))/(get("max_image_seq_len",4096)-get("base_image_seq_len",256)))+get("base_shift",.5)-get("base_image_seq_len",256)*((get("max_shift",1.16)-get("base_shift",.5))/(get("max_image_seq_len",4096)-get("base_image_seq_len",256)))
-        self.scheduler.set_timesteps(steps,device=self._execution_device,**kw); return self.scheduler.timesteps,self.scheduler.sigmas
+        if getattr(cfg,"stochastic_sampling",False) or (hasattr(cfg,"get") and cfg.get("stochastic_sampling",False)): raise RuntimeError("external baseline requires deterministic FlowMatch Euler schedule")
+        self.scheduler.set_timesteps(steps,device=self._execution_device,**kw); ts, ss = self.scheduler.timesteps,self.scheduler.sigmas
+        if len(ts) != steps or len(ss) != steps + 1: raise RuntimeError("FlowMatch schedule length violates SD3.5 Euler contract")
+        return ts, ss
     def denoise_segment(self, latents: torch.Tensor, *, prompt: str,guidance: float,steps: int,start: int,end: int) -> torch.Tensor:
         ts,ss=self._schedule(steps,tuple(latents.shape)); embeds,pooled,cfg=self._conditioning(prompt,guidance); current=latents.clone()
         with torch.inference_mode():
-            for i in range(start,end): current=(current.float()+(ss[i].float()-ss[i+1].float())*self._velocity(current,ts[i],embeds,pooled,guidance,cfg)).to(latents.dtype)
+            for i in range(start,end): current=(current.float()+(ss[i+1].float()-ss[i].float())*self._velocity(current,ts[i],embeds,pooled,guidance,cfg)).to(latents.dtype)
         return current
     def invert_flow_matching_latent(self,latents: torch.Tensor,*,prompt: str="",num_inference_steps: int=20,guidance_scale: float=4.5) -> torch.Tensor:
         ts,ss=self._schedule(num_inference_steps,tuple(latents.shape)); embeds,pooled,cfg=self._conditioning(prompt,guidance_scale); current=latents.clone()
@@ -47,7 +50,7 @@ class InversionStableDiffusion3PipelineMixin:
         with torch.inference_mode(): return self.image_processor.postprocess(self.vae.decode(latents/self.vae.config.scaling_factor+self.vae.config.shift_factor,return_dict=False)[0],output_type="pil")[0]
 
 
-def load_sd3_pipeline(model_id: str, revision: str) -> Any:
+def load_sd3_pipeline(model_id: str, revision: str, *, token: str) -> Any:
     from diffusers import StableDiffusion3Pipeline
     cls=type("BaselineInversionSD3",(InversionStableDiffusion3PipelineMixin,StableDiffusion3Pipeline),{})
-    pipe=cls.from_pretrained(model_id,revision=revision,torch_dtype=torch.float16,token=None).to("cuda"); pipe.transformer.eval(); pipe.vae.eval(); pipe.set_progress_bar_config(disable=True); return pipe
+    pipe=cls.from_pretrained(model_id,revision=revision,torch_dtype=torch.float16,token=token).to("cuda"); pipe.transformer.eval(); pipe.vae.eval(); pipe.set_progress_bar_config(disable=True); return pipe

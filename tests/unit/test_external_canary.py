@@ -21,3 +21,9 @@ def test_clear_lock_is_available_before_credentials(tmp_path: Path, monkeypatch:
     monkeypatch.setattr("sys.argv", ["external_canary", "--method", "tree_ring", "--run-dir", str(tmp_path), "--project-exact", "a"*40, "--official-source", str(tmp_path), "--clear-stale-lock"])
     (tmp_path / ".run.lock").write_text('{"pid":1,"token":"stale"}')
     external_canary.main()
+
+
+def test_fixed_run_id_and_carrier_commitment_are_required() -> None:
+    source = Path("src/cegwm/baselines/external_canary.py").read_text()
+    assert "run_id != RUN_ID_DEFAULTS[args.method]" in source
+    assert '"carrier_digest":c.digest' in source

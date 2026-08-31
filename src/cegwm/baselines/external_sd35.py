@@ -18,7 +18,9 @@ SD35_SHAPE = (1, 16, 64, 64)
 
 
 def _circle(size: int, radius: int) -> torch.Tensor:
-    y, x = torch.meshgrid(torch.arange(size), torch.arange(size), indexing="ij")
+    # Matches the archived helper's ``y_axis = y_axis[::-1]`` exactly.  On an
+    # even 64x64 latent this places the centre at (y=31, x=32), not (32,32).
+    y, x = torch.meshgrid(torch.arange(size - 1, -1, -1), torch.arange(size), indexing="ij")
     return (x - size // 2).square() + (y - size // 2).square() <= radius * radius
 
 
@@ -134,12 +136,12 @@ class ShallowDiffuseCarrier:
         freq=torch.fft.fftshift(torch.fft.fft2(edit_latents.float()),dim=(-2,-1));return -float(torch.abs(freq[self.mask]-self.patch[self.mask]).mean())
 
 
-def score_rgb(rgb: np.ndarray, pipe: Any, carrier: Any, *, inversion_steps: int = 20, prompt: str = "") -> float:
+def score_rgb(rgb: np.ndarray, pipe: Any, carrier: Any, *, inversion_steps: int = 20) -> float:
     """Blind RGB-only common scorer; pipeline must expose real VAE + selected reverse flow."""
     device=torch.device(getattr(pipe,"_execution_device","cpu")); image=_rgb(rgb,device,torch.float16 if device.type=="cuda" else torch.float32)
     if not callable(getattr(pipe,"get_image_latents",None)): raise TypeError("pipeline must VAE-encode RGB")
     latent=pipe.get_image_latents(image,sample=False)
-    if isinstance(carrier, TreeRingCarrier): reversed_latent=pipe.invert_flow_matching_latent(latent,prompt=prompt,num_inference_steps=inversion_steps,guidance_scale=4.5); return carrier.score(reversed_latent)
-    if isinstance(carrier, GaussianShadingCarrier): reversed_latent=pipe.invert_flow_matching_latent(latent,prompt=prompt,num_inference_steps=inversion_steps,guidance_scale=4.5); return carrier.score(reversed_latent)
-    if isinstance(carrier, ShallowDiffuseCarrier): edit=pipe.invert_to_edit_timestep(latent,prompt=prompt,num_inference_steps=inversion_steps,edit_fraction=.2,guidance_scale=4.5); return carrier.score(edit)
+    if isinstance(carrier, TreeRingCarrier): reversed_latent=pipe.invert_flow_matching_latent(latent,prompt="",num_inference_steps=inversion_steps,guidance_scale=1.0); return carrier.score(reversed_latent)
+    if isinstance(carrier, GaussianShadingCarrier): reversed_latent=pipe.invert_flow_matching_latent(latent,prompt="",num_inference_steps=inversion_steps,guidance_scale=1.0); return carrier.score(reversed_latent)
+    if isinstance(carrier, ShallowDiffuseCarrier): edit=pipe.invert_to_edit_timestep(latent,num_inference_steps=inversion_steps,edit_fraction=.2); return carrier.score(edit)
     raise TypeError("unknown external baseline carrier")
