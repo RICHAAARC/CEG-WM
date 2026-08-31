@@ -55,6 +55,11 @@ def build_baseline_table_row(records: Iterable[BaselineObservation]) -> Baseline
         raise ValueError("wrong-key diagnostics are not main-table inputs")
     if any(item.status == "calibration_observed" for item in items):
         raise ValueError("calibration records are not main-table inputs")
+    if any(item.status == "not_available" for item in items):
+        raise ValueError("not-available records are not main-table inputs")
+    if any(item.sample_role not in {"evaluation_watermarked", "evaluation_unwatermarked_negative"}
+           for item in items):
+        raise ValueError("main-table inputs require evaluation roles")
     evaluation = tuple(item for item in items if item.status == "observed")
     if not evaluation:
         raise ValueError("a baseline table row requires observed evaluation records")
@@ -65,9 +70,12 @@ def build_baseline_table_row(records: Iterable[BaselineObservation]) -> Baseline
     if any((item.source_exact, item.adapter_exact, item.threshold_provenance,
             item.attack_family, item.attack_condition) != identity for item in evaluation):
         raise ValueError("evaluation records must share source, adapter, threshold, and attack identity")
-    if any(item.sample_role not in {"evaluation_watermarked", "evaluation_unwatermarked_negative"}
-           for item in evaluation):
-        raise ValueError("main-table evaluations require watermarked or unwatermarked-negative roles")
+    if any((item.attack_family, item.attack_condition) != identity[3:] for item in items):
+        raise ValueError("all table inputs must share attack identity")
+    if any(item.status == "failed" and (
+        item.source_exact not in {None, identity[0]} or item.adapter_exact not in {None, identity[1]}
+    ) for item in items):
+        raise ValueError("failed records must match the row source and adapter when present")
     true_positive = sum(item.sample_role == "evaluation_watermarked" and item.decision for item in evaluation)
     false_negative = sum(item.sample_role == "evaluation_watermarked" and not item.decision for item in evaluation)
     false_positive = sum(item.sample_role == "evaluation_unwatermarked_negative" and item.decision for item in evaluation)

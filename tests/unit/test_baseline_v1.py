@@ -144,6 +144,18 @@ def test_main_table_uses_unwatermarked_fpr_and_rejects_wrong_key(monkeypatch: py
     assert (row.true_positive, row.false_negative, row.false_positive, row.true_negative) == (1, 0, 0, 1)
     with pytest.raises(ValueError, match="wrong-key diagnostics"):
         build_baseline_table_row((replace(watermarked, sample_role="wrong_key_diagnostic"), negative))
+    unrelated_failure = replace(
+        watermarked,
+        attack_condition="different_pending_user_freeze",
+        continuous_score=None,
+        score_direction=None,
+        threshold_provenance=None,
+        decision=None,
+        status="failed",
+        failure_reason="adapter stopped",
+    )
+    with pytest.raises(ValueError, match="share attack identity"):
+        build_baseline_table_row((watermarked, negative, unrelated_failure))
 
 
 @pytest.mark.unit
