@@ -1,7 +1,7 @@
 """Fail-closed baseline-only main-table rows.
 
-This builder aggregates only post-calibration evaluation records. It never
-chooses attack strengths, a target FPR, a threshold, or a proposed-method row.
+This builder aggregates only post-calibration evaluation records under the
+frozen protocol. It never admits a proposed-method row.
 """
 
 from __future__ import annotations
@@ -55,11 +55,15 @@ def build_baseline_table_row(records: Iterable[BaselineObservation]) -> Baseline
         raise ValueError("wrong-key diagnostics are not main-table inputs")
     if any(item.status == "calibration_observed" for item in items):
         raise ValueError("calibration records are not main-table inputs")
+    if any(item.status == "confirmation_observed" for item in items):
+        raise ValueError("confirmation records are not main-table inputs")
     if any(item.status == "not_available" for item in items):
         raise ValueError("not-available records are not main-table inputs")
     if any(item.sample_role not in {"evaluation_watermarked", "evaluation_unwatermarked_negative"}
            for item in items):
         raise ValueError("main-table inputs require evaluation roles")
+    if any(item.protocol_partition != "evaluation" for item in items):
+        raise ValueError("main-table inputs require evaluation partition")
     evaluation = tuple(item for item in items if item.status == "observed")
     if not evaluation:
         raise ValueError("a baseline table row requires observed evaluation records")

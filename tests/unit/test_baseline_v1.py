@@ -17,6 +17,7 @@ def _record(**changes: object) -> BaselineObservation:
         seed=7,
         base_latent_commitment="sha256:latent",
         split="test",
+        protocol_partition="evaluation",
         sample_role="evaluation_watermarked",
         attack_family="clean",
         attack_condition="pending_user_freeze",
