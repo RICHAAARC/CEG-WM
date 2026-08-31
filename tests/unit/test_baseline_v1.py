@@ -114,6 +114,40 @@ def test_method_first_observations_allow_optional_identity_metadata() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("invalid_score", ["placeholder", float("nan"), True, float("inf"), float("-inf")])
+def test_observation_scores_must_be_finite_real_numbers(invalid_score: object) -> None:
+    calibration = _record(
+        protocol_partition="threshold_freeze", sample_role="calibration_unwatermarked_negative",
+        continuous_score=invalid_score, score_direction="lower_is_watermarked", decision=None,
+        status="calibration_observed", artifact_digests={},
+    )
+    observed = _record(
+        source_exact=None, adapter_exact=None, continuous_score=invalid_score,
+        score_direction="lower_is_watermarked", threshold_provenance="tree_ring:calibration:future",
+        decision=True, status="observed", artifact_digests={},
+    )
+    confirmation = replace(
+        observed, protocol_partition="clean_confirmation", sample_role="confirmation_unwatermarked_negative",
+        attack_condition="clean_no_attack", status="confirmation_observed",
+    )
+    for record in (calibration, observed, confirmation):
+        with pytest.raises(ValueError, match="finite real score"):
+            validate_observation(record)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("invalid_threshold", [123, object(), ""])
+def test_observed_threshold_provenance_requires_nonempty_string(invalid_threshold: object) -> None:
+    observed = _record(
+        source_exact=None, adapter_exact=None, continuous_score=0.25,
+        score_direction="lower_is_watermarked", threshold_provenance=invalid_threshold,
+        decision=True, status="observed", artifact_digests={},
+    )
+    with pytest.raises(ValueError, match="non-empty method-specific threshold"):
+        validate_observation(observed)
+
+
+@pytest.mark.unit
 def test_observed_rotation_still_requires_scientific_attack_provenance() -> None:
     observed = _record(
         source_exact=None, adapter_exact=None, continuous_score=0.25, score_direction="lower_is_watermarked",

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
+from numbers import Real
 from typing import Mapping
 
 from cegwm.baselines.registry import baseline_by_id
@@ -70,8 +72,8 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
     if observation.status == "calibration_observed":
         if observation.sample_role != "calibration_unwatermarked_negative" or observation.protocol_partition != "threshold_freeze":
             raise ValueError("calibration records require unwatermarked-negative role")
-        if observation.continuous_score is None or observation.decision is not None:
-            raise ValueError("calibration records require a score and no decision")
+        if not _is_finite_real_score(observation.continuous_score) or observation.decision is not None:
+            raise ValueError("calibration records require a finite real score and no decision")
         if observation.threshold_provenance is not None:
             raise ValueError("calibration records cannot claim a frozen threshold")
         if observation.score_direction != baseline.score_direction:
@@ -81,8 +83,8 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
             raise ValueError("confirmation records require clean-confirmation unwatermarked-negative role")
         if observation.attack_family != "clean" or observation.attack_condition != "clean_no_attack":
             raise ValueError("confirmation records must be clean")
-        if observation.continuous_score is None or not isinstance(observation.decision, bool):
-            raise ValueError("confirmation records require a score and decision")
+        if not _is_finite_real_score(observation.continuous_score) or not isinstance(observation.decision, bool):
+            raise ValueError("confirmation records require a finite real score and decision")
     if observation.status in {"observed", "confirmation_observed"}:
         if observation.protocol_partition != "evaluation":
             if observation.status == "observed":
@@ -91,10 +93,10 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
             "evaluation_watermarked", "evaluation_unwatermarked_negative", "wrong_key_diagnostic",
         }:
             raise ValueError("observed records require an evaluation sample role")
-        if not observation.threshold_provenance:
-            raise ValueError("observed records require a method-specific threshold identity")
-        if observation.continuous_score is None or not isinstance(observation.decision, bool):
-            raise ValueError("observed records require a continuous score and decision")
+        if not isinstance(observation.threshold_provenance, str) or not observation.threshold_provenance:
+            raise ValueError("observed records require a non-empty method-specific threshold identity")
+        if not _is_finite_real_score(observation.continuous_score) or not isinstance(observation.decision, bool):
+            raise ValueError("observed records require a finite real score and decision")
         if baseline.score_direction is None:
             raise ValueError("method detector score direction is unresolved")
         if observation.score_direction != baseline.score_direction:
@@ -113,6 +115,10 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
     if observation.status == "observed" and observation.attack_condition == "rotation_10_bicubic_reflect_center_crop_v1":
         _validate_rotation_provenance(observation.attack_provenance)
     return observation
+
+
+def _is_finite_real_score(value: object) -> bool:
+    return isinstance(value, Real) and not isinstance(value, bool) and math.isfinite(float(value))
 
 
 def _validate_rotation_provenance(provenance: Mapping[str, object] | None) -> None:
