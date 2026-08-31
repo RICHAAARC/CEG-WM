@@ -41,6 +41,7 @@ from cegwm.protocol.geometry_v4_g1r import (
     RGB_CHANNEL_RMS_CAP,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
     SPARSE_CHIP_RADIUS_FRACTION,
+    SPARSE_DOMAIN_SUPPORT_GRID,
     SPARSE_LOCAL_ACTIVE_MODULUS,
     SPARSE_LOCAL_GRID,
     SPARSE_SEARCH_ACTIVE_MODULUS,
@@ -105,16 +106,33 @@ def _seed(key: bytes, label: bytes) -> int:
     return int.from_bytes(hmac.new(key, label, hashlib.sha256).digest()[:8], "big")
 
 
-def _unit(field: np.ndarray) -> np.ndarray:
+def _unit_on_support(field: np.ndarray, support: np.ndarray) -> np.ndarray:
+    """Mean-center and normalize only fixed support, preserving exact zeros."""
     value = np.asarray(field, dtype=np.float64)
-    value = value - float(np.mean(value))
-    norm = float(np.linalg.norm(value))
+    mask = np.asarray(support, dtype=bool)
+    active_mask = mask & (value != 0.0)
+    if value.shape != mask.shape or int(active_mask.sum()) < 2:
+        raise RuntimeError("V4-G1R anchor support is degenerate")
+    active = value[active_mask] - float(np.mean(value[active_mask]))
+    norm = float(np.linalg.norm(active))
     if not math.isfinite(norm) or norm <= 1e-12:
-        raise RuntimeError("V4-G1R anchor field is degenerate")
-    return value / norm
+        raise RuntimeError("V4-G1R supported anchor field is degenerate")
+    answer = np.zeros_like(value)
+    answer[active_mask] = active / norm
+    return answer
 
 
-def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid: int, active_modulus: int) -> np.ndarray:
+def _domain_support_masks(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Fixed key-independent compact supports spanning every canonical region."""
+    height, width = shape
+    yy, xx = np.mgrid[:height, :width]
+    cell_y = np.minimum(SPARSE_DOMAIN_SUPPORT_GRID - 1, yy * SPARSE_DOMAIN_SUPPORT_GRID // height)
+    cell_x = np.minimum(SPARSE_DOMAIN_SUPPORT_GRID - 1, xx * SPARSE_DOMAIN_SUPPORT_GRID // width)
+    search = (cell_y + cell_x) % 2 == 0
+    return search, ~search
+
+
+def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid: int, active_modulus: int, *, support: np.ndarray | None = None) -> np.ndarray:
     """Fixed scale-normalized signed Gaussian chips; no image-dependent inputs."""
     height, width = shape
     field = np.zeros((height, width), dtype=np.float64)
@@ -136,7 +154,8 @@ def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid
             yy, xx = np.mgrid[y0:y1, x0:x1]
             chip = np.exp(-((xx - center_x) ** 2 + (yy - center_y) ** 2) / (2.0 * sigma * sigma))
             field[y0:y1, x0:x1] += sign * chip
-    return _unit(field)
+    fixed_support = np.ones(shape, dtype=bool) if support is None else np.asarray(support, dtype=bool)
+    return _unit_on_support(field, fixed_support)
 
 
 def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> G1RAnchorFields:
@@ -145,33 +164,46 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
         raise ValueError("V4-G1R anchor requires at least 32 pixels per side")
     if set(domain_keys) != {"search", "fit", "validate"} or any(not isinstance(value, bytes) or not value for value in domain_keys.values()):
         raise TypeError("V4-G1R requires three non-empty domain keys")
+    search_support, local_support = _domain_support_masks(shape)
     search_components = _search_macro_fields(shape, domain_keys["search"])
-    search = _unit(np.sum(search_components, axis=0))
+    search = _unit_on_support(np.sum(search_components, axis=0), search_support)
 
     def partition(name: str, tile_ids: tuple[int, ...]) -> np.ndarray:
         answer = np.zeros_like(search)
+        domain_support = np.zeros_like(search_support)
         for tile_id in tile_ids:
             row, column = divmod(tile_id, 4)
             y0, y1 = row * height // 4, (row + 1) * height // 4
             x0, x1 = column * width // 4, (column + 1) * width // 4
             label = f"{name}:tile:{tile_id}".encode("ascii")
-            tile = _sparse_prn_component((y1 - y0, x1 - x0), domain_keys[name], label, SPARSE_LOCAL_GRID, SPARSE_LOCAL_ACTIVE_MODULUS)
+            tile_support = local_support[y0:y1, x0:x1]
+            tile = _sparse_prn_component((y1 - y0, x1 - x0), domain_keys[name], label, SPARSE_LOCAL_GRID, SPARSE_LOCAL_ACTIVE_MODULUS, support=tile_support)
             answer[y0:y1, x0:x1] = tile
-        return _unit(answer)
+            domain_support[y0:y1, x0:x1] = tile_support
+        return _unit_on_support(answer, domain_support)
 
     fit = partition("fit", FIT_TILE_IDS)
     validate = partition("validate", VALIDATE_TILE_IDS)
-    combined = _unit(math.sqrt(ENERGY_SHARES[0]) * search + math.sqrt(ENERGY_SHARES[1]) * fit + math.sqrt(ENERGY_SHARES[2]) * validate)
+    fields = (search, fit, validate)
+    gram = np.asarray([[float(np.sum(left * right)) for right in fields] for left in fields])
+    if not np.allclose(gram, np.eye(3), atol=2e-14, rtol=0.0):
+        raise RuntimeError("V4-G1R domain fields lost exact orthogonality")
+    components = tuple(math.sqrt(share) * field for share, field in zip(ENERGY_SHARES, fields, strict=True))
+    combined = sum(components, start=np.zeros_like(search))
+    component_energies = tuple(float(np.sum(component * component)) for component in components)
+    if not np.allclose(component_energies, ENERGY_SHARES, atol=2e-14, rtol=0.0) or not math.isclose(float(np.sum(combined * combined)), 1.0, abs_tol=2e-14, rel_tol=0.0):
+        raise RuntimeError("V4-G1R physical energy shares differ")
     return G1RAnchorFields(combined, search, fit, validate)
 
 
 def _search_macro_fields(shape: tuple[int, int], search_key: bytes) -> tuple[np.ndarray, ...]:
     """Return the fixed 3-scale x 4-group sparse search atlas components."""
+    search_support, _ = _domain_support_masks(shape)
     fields: list[np.ndarray] = []
     for grid in SPARSE_SEARCH_GRIDS:
         for group in range(SPARSE_SEARCH_GROUPS):
             label = f"search:sparse:grid:{grid}:group:{group}".encode("ascii")
-            fields.append(_sparse_prn_component(shape, search_key, label, grid, SPARSE_SEARCH_ACTIVE_MODULUS))
+            fields.append(_sparse_prn_component(shape, search_key, label, grid, SPARSE_SEARCH_ACTIVE_MODULUS, support=search_support))
     return tuple(fields)
 
 
@@ -198,7 +230,9 @@ def _carrier_plane(rgb: np.ndarray) -> np.ndarray:
 def _g1r_scalar_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
     """Return the single fixed scalar anchor shared by both writer placements."""
     anchor = g1r_anchor_fields(shape, detection_key).combined
-    target = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP
+    # Fixed downward rounding guard keeps reconstructed float RGB at or below
+    # the unchanged hard cap; it is not image/key adaptive.
+    target = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP * (1.0 - 1e-12)
     scale = min(target * math.sqrt(anchor.size), LUMA_PEAK_CAP / max(1e-12, float(np.max(np.abs(anchor)))))
     delta = scale * anchor
     rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))

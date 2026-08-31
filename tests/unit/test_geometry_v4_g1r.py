@@ -28,6 +28,7 @@ from cegwm.protocol.geometry_v4_g1r import (
     RGB_CHANNEL_RMS_CAP,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
     SPARSE_CHIP_RADIUS_FRACTION,
+    SPARSE_DOMAIN_SUPPORT_GRID,
     SPARSE_LOCAL_ACTIVE_MODULUS,
     SPARSE_LOCAL_GRID,
     SPARSE_SEARCH_ACTIVE_MODULUS,
@@ -86,7 +87,8 @@ def test_contract_freezes_domains_tiles_rosters_and_old_seed_rejection() -> None
     assert SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION == .1
     assert SPARSE_SEARCH_GRIDS == (8, 12, 16) and SPARSE_SEARCH_GROUPS == 4
     assert SPARSE_SEARCH_ACTIVE_MODULUS == SPARSE_LOCAL_ACTIVE_MODULUS == 2
-    assert SPARSE_LOCAL_GRID == 8 and SPARSE_CHIP_RADIUS_FRACTION == .2 and SPARSE_SUPPORT_FRACTION == .18
+    assert SPARSE_LOCAL_GRID == SPARSE_DOMAIN_SUPPORT_GRID == 8
+    assert SPARSE_CHIP_RADIUS_FRACTION == .2 and SPARSE_SUPPORT_FRACTION == .18
     assert FIT_PATCH_WINDOW_DIVISOR == 20
     assert HOLDOUT_PATCH_WINDOW_DIVISORS == (20, 24) and HOLDOUT_FREQUENCY_RADIUS == (12.0, 31.0)
     assert HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION == .1
@@ -101,15 +103,20 @@ def test_contract_freezes_domains_tiles_rosters_and_old_seed_rejection() -> None
 def test_key_domains_and_anchor_energy_are_separate_and_deterministic() -> None:
     keys = derive_g1r_keys(KEY)
     assert len(set(keys.values())) == 3
-    fields = method.g1r_anchor_fields((64, 64), KEY)
-    repeated = method.g1r_anchor_fields((64, 64), KEY)
-    assert np.array_equal(fields.combined, repeated.combined)
-    assert np.linalg.norm(fields.search) == pytest.approx(1.0)
-    assert np.linalg.norm(fields.fit) == pytest.approx(1.0)
-    assert np.linalg.norm(fields.validate) == pytest.approx(1.0)
-    assert abs(float(np.sum(fields.search * fields.fit))) < .08
-    assert abs(float(np.sum(fields.search * fields.validate))) < .08
-    assert np.sum(fields.fit * fields.validate) == pytest.approx(0.0, abs=1e-7)
+    for shape in ((64, 64), (128, 128), (512, 512)):
+        for key in (KEY, b"separate-key-0001", b"separate-key-0002"):
+            fields = method.g1r_anchor_fields(shape, key)
+            repeated = method.g1r_anchor_fields(shape, key)
+            assert np.array_equal(fields.combined, repeated.combined)
+            domains = (fields.search, fields.fit, fields.validate)
+            gram = np.asarray([[np.sum(left * right) for right in domains] for left in domains])
+            assert gram == pytest.approx(np.eye(3), abs=2e-14)
+            assert np.linalg.norm(fields.combined) == pytest.approx(1.0, abs=2e-14)
+            components = tuple(np.sqrt(share) * field for share, field in zip(ENERGY_SHARES, domains, strict=True))
+            assert tuple(float(np.sum(component * component)) for component in components) == pytest.approx(ENERGY_SHARES, abs=2e-14)
+            assert tuple(float(np.sum(fields.combined * field)) ** 2 for field in domains) == pytest.approx(ENERGY_SHARES, abs=2e-14)
+            assert not np.any((fields.search != 0.0) & ((fields.fit != 0.0) | (fields.validate != 0.0)))
+            assert not np.any((fields.fit != 0.0) & (fields.validate != 0.0))
 
     direct = {"search": b"search-a", "fit": b"fit-a", "validate": b"validate-a"}
     baseline = method._domain_fields((64, 64), direct)

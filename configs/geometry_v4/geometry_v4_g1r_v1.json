@@ -329,6 +329,10 @@
   "schema_version": "cegwm_geometry_v4_g1r_v1",
   "sparse_fiducial": {
     "chip_radius_fraction_of_cell": 0.2,
+    "combined_normalization": "none_exact_orthogonal_energy_identity",
+    "domain_support_grid": 8,
+    "domain_support_partition": "fixed_canonical_checkerboard_search_vs_local",
+    "exact_disjoint_support": true,
     "generation": "deterministic_keyed_signed_gaussian_prn_atlas",
     "image_adaptive": false,
     "local_active_modulus": 2,

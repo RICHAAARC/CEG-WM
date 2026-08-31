@@ -114,6 +114,16 @@ comes solely from key and canonical coordinates and is warped by the candidate
 H, never selected from RGB. Every tile still supplies at most one match. Total
 energy shares remain .40/.36/.24.
 
+The three payload fields also use a fixed key-independent canonical 8x8
+checkerboard support partition. Search occupies one parity across the entire
+image; fit/validate occupy the other parity inside their already disjoint tile
+sets. Mean removal and unit normalization occur only inside each field's own
+compact support, so zeros remain exact and no field reads another domain key.
+The three unit fields are therefore pairwise orthogonal by construction. Their
+final sum uses coefficients `sqrt(.40)`, `sqrt(.36)`, and `sqrt(.24)` with no
+subsequent normalization; runtime invariants require unit combined norm and
+exact physical component energies .40/.36/.24.
+
 Fit uses the fixed divisor-20 local window so translated edge tiles remain
 eligible without changing their canonical identity or any gate. Holdout uses
 fixed divisor-20 and divisor-24 windows and computes its fixed-H correlation
