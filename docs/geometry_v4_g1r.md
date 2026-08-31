@@ -73,12 +73,26 @@ drift below .05 are unchanged; the writer is never content-adaptive. CPU tests u
 decoder module; real final-RGB observability requires separate GPU authorization.
 
 Before casting the decoder update, one fixed dtype-only multiplier
-`1 - 2*torch.finfo(decoded.dtype).eps` is applied uniformly to the combined
+`1 - 24*torch.finfo(decoded.dtype).eps` is applied uniformly to the combined
 field. It cannot change the `.40/.36/.24` domain ratio and does not inspect the
 image, seed, key, or domain. After the single cast and decoder addition, the
 actual final-RGB-equivalent update `(updated-decoded)/2` is accumulated in
-float64; any per-channel RMS or peak above the unchanged caps fails closed.
+float64; any per-channel RMS above `.5/255` or peak above `8/255` fails closed.
+The same actual dtype-lattice update is projected onto the three fixed
+orthogonal domains; a share outside its `.40/.36/.24` target by more than the
+fixed maximum of `1e-6` and one dtype epsilon also fails closed.
 There is no retry, data-dependent rescale, or cap relaxation.
+
+The fixed sparse supports use exact balanced counts in the integer ratio
+`10 search : 9 fit : 6 validate`. Each domain field is unit norm, so the
+weighted combined field has one common nonzero magnitude across all three
+domains. The shared count unit is the even floor of the smaller image
+dimension divided by four; it is key-independent, so changing one domain key
+cannot change either other domain. This key/shape-only dtype-lattice identity preserves `.40/.36/.24`
+after a uniform cast without inspecting decoder content. Regional quotas keep
+all four search macro regions and all eight fit/holdout tile identities active.
+Any real decoder tensor whose addition lattice still violates the frozen
+budget or share tolerance fails closed.
 
 ## Blind detector
 
@@ -93,7 +107,12 @@ under the same valid mask and Hann window. Magnitude-only FFT evidence is not a
 candidate control quantity. The search field is a deterministic keyed sparse
 PRN atlas with keyed balanced bipolar microcode on fixed 8, 12, and 16 grids, four
 independent groups per scale, fixed one-half cell duty, and scale-normalized
-chip radius .20 of a cell. Coarse search uses all eight grid-8/grid-12 groups
+chip radius .20 of a cell. Every active support pixel receives its own
+domain-keyed HMAC rank. An odd support deterministically leaves exactly one
+key-selected pixel at zero; all remaining pixels are exactly half `+1` and
+half `-1` before fixed normalization. No checkerboard or scalar cell sign is
+reused as a code, and no runtime candidate is screened for a favorable PRN.
+Coarse search uses all eight grid-8/grid-12 groups
 and a fixed trimmed component consensus; fine search jointly uses all twelve
 grid groups. No single low-energy component can substitute for the joint
 atlas. Each component's normalized cross-power is restricted to its keyed
@@ -170,11 +189,20 @@ domain scores only on the fixed REC709-luma projection of the paired final-RGB
 residual `(marked-clean)`; this paired
 writer evaluator is forbidden from the blind detector. It requires every
 correct domain score to beat its corresponding wrong-key score, PSNR above 40,
-SSIM above .98, luma RMS and peak within 2/255 and 8/255, per-channel RGB RMS
-within `.25 * 2/255`, RGB peak within 8/255, and unchanged-content
+SSIM above .98, luma RMS and peak within 2/255 and 8/255, RGB peak within
+8/255, and unchanged-content
 score drift below .05. The real gate requires 4/4 observable sources, 20/20
 safe correct-key recoveries, zero unsafe result in every arm, and zero retained
 failure.
+
+The writer hard-budget proof and the PIL-pair measurement are separate source
+records. The decoder hook records its actual post-cast, pre-PIL float64
+per-channel RMS/peak and domain-share proof. The later PIL-pair per-channel RMS
+is named `post_quantization_rgb_channel_rms_max` and is diagnostic only because
+8-bit quantization can exceed `.5/255`; it never substitutes for or invalidates
+the hook proof. PIL PSNR, SSIM, luma RMS/peak, RGB peak, content drift, and all
+three domain-evidence requirements remain gates. Paired clean/marked RGB is
+available only to this source evaluator and never enters a blind detector arm.
 
 Truth is attached only after all arm outputs are frozen. A `RELIABLE` result is
 unsafe if maximum mapped-corner error or center reprojection error exceeds .02,
@@ -189,8 +217,16 @@ It serializes no key, phase, field, pattern, RGB, latent, or secret material.
 
 The CPU engineering exit is synthetic-only with formal denominator zero: four
 fixed ordinary-RGB carriers crossed with five attacks, at least 18/20 safe
-correct recoveries and at least 3/4 per attack, zero correct unsafe, and zero
-wrong unsafe. The later real GPU exit additionally requires 4/4 unique-source
+correct recoveries and at least 3/4 per attack, zero unsafe in all three arms,
+correct-key rotation/scale truth present in the already-frozen top five for at
+least 18/20 and 3/4 per attack, and identity selected-fit translation PSR at
+least 8 for 3/4 carriers. Truth is attached only after all three blind outputs
+and diagnostics freeze. `top5_hit` is then computed by the runner within the
+unchanged 2-degree/.03-log-scale tolerances; identity PSR is read from the
+single predeclared `correct.engineering_diagnostics.selected_fit.translation_psr`
+field, with no missing-value default or alternate-PSR selection. The only pass
+status is `CPU_SYNTHETIC_ENGINEERING_EXIT`; otherwise it is
+`CPU_METHOD_PARTIAL`. The later real GPU exit additionally requires 4/4 unique-source
 final-RGB observability, 20 safe correct recoveries with all five attack types,
 and zero unsafe across all arms. This window cannot execute or claim that GPU
 exit, content flips, robustness, or a scientific result.

@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from PIL import Image
 
-from cegwm.method.geometry_v4_g1r import write_g1r_decoder_output
+from cegwm.method.geometry_v4_g1r import _write_g1r_decoder_output_with_budget
 from cegwm.protocol.geometry_v4_g1r import DECODER_HOOK_CALLS_REQUIRED
 from cegwm.runtime.observation import require_ordinary_rgb_image
 
@@ -16,19 +16,23 @@ class G1RDecoderOutputHook:
     def __init__(self, detection_key: object) -> None:
         self._key = detection_key
         self.calls = 0
+        self.writer_budget: dict[str, object] | None = None
 
     def __call__(self, module: Any, inputs: tuple[Any, ...], output: Any) -> torch.Tensor:
         del module, inputs
         self.calls += 1
         if self.calls > DECODER_HOOK_CALLS_REQUIRED:
             raise RuntimeError("V4-G1R decoder hook was invoked more than once")
-        return write_g1r_decoder_output(output, self._key)
+        updated, budget = _write_g1r_decoder_output_with_budget(output, self._key)
+        self.writer_budget = dict(budget)
+        return updated
 
 
 @dataclass(frozen=True, slots=True)
 class G1RGeneratedPair:
     clean: Image.Image
     marked: Image.Image
+    writer_budget: dict[str, object]
 
 
 def run_g1r_sd35_pair(pipeline: Any, prompt: str, detection_key: object, *, height: int, width: int, generator: torch.Generator) -> G1RGeneratedPair:
@@ -49,6 +53,6 @@ def run_g1r_sd35_pair(pipeline: Any, prompt: str, detection_key: object, *, heig
     finally:
         handle.remove()
     clean, marked = getattr(clean_result, "images", None), getattr(marked_result, "images", None)
-    if hook.calls != DECODER_HOOK_CALLS_REQUIRED or not isinstance(clean, (list, tuple)) or not isinstance(marked, (list, tuple)) or len(clean) != 1 or len(marked) != 1:
+    if hook.calls != DECODER_HOOK_CALLS_REQUIRED or hook.writer_budget is None or hook.writer_budget.get("passed") is not True or not isinstance(clean, (list, tuple)) or not isinstance(marked, (list, tuple)) or len(clean) != 1 or len(marked) != 1:
         raise RuntimeError("V4-G1R SD3.5 pair did not materialize exactly one RGB per arm")
-    return G1RGeneratedPair(require_ordinary_rgb_image(clean[0]), require_ordinary_rgb_image(marked[0]))
+    return G1RGeneratedPair(require_ordinary_rgb_image(clean[0]), require_ordinary_rgb_image(marked[0]), hook.writer_budget)

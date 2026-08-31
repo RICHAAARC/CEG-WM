@@ -55,10 +55,12 @@
     "attacks_per_carrier": 5,
     "correct_safe_reliable_min": 18,
     "correct_unsafe_max": 0,
+    "correct_rs_top5_per_attack_min": 3,
     "evidence_class": "synthetic_only",
     "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT",
     "formal_denominator": 0,
     "identity_translation_psr_ge_8_min": 3,
+    "identity_translation_psr_source": "correct.engineering_diagnostics.selected_fit.translation_psr",
     "minimum_safe_per_attack": 3,
     "ordinary_rgb_carriers": 4,
     "carrier_ids": [
@@ -68,6 +70,9 @@
       "colored_texture"
     ],
     "correct_rs_top5_min": 18,
+    "negative_unsafe_max": 0,
+    "passed_status": "CPU_SYNTHETIC_ENGINEERING_EXIT",
+    "partial_status": "CPU_METHOD_PARTIAL",
     "wrong_unsafe_max": 0
   },
   "development_runner": {
@@ -82,7 +87,7 @@
     "final_rgb_luma_peak_max": 0.03137254901960784,
     "final_rgb_luma_rms_max": 0.00784313725490196,
     "final_rgb_channel_peak_max": 0.03137254901960784,
-    "final_rgb_channel_rms_max": 0.00196078431372549,
+    "post_quantization_rgb_channel_rms_diagnostic_only": true,
     "final_rgb_psnr_min_exclusive": 40.0,
     "final_rgb_ssim_min_exclusive": 0.98,
     "notebook_identity": "geometry_v4_g0_g1_colab_v4_g1r_development_v1",
@@ -92,7 +97,9 @@
     "truth_probe": "post_arm_freeze_record_only_noninterfering",
     "unit_failures_max": 0,
     "units": 20,
-    "unsafe_per_arm_max": 0
+    "unsafe_per_arm_max": 0,
+    "writer_hard_budget_rgb_channel_rms_max": 0.00196078431372549,
+    "writer_hard_budget_source": "decoder_hook_actual_post_cast_pre_PIL_float64"
   },
   "evaluation": {
     "center_reprojection_error_max": 0.02,
@@ -329,13 +336,14 @@
     "units_per_split": 20
   },
   "runtime": {
-    "decoder_dtype_guard": "one_minus_2_times_torch_finfo_eps",
-    "decoder_dtype_guard_eps_multiplier": 2.0,
+    "decoder_dtype_guard": "one_minus_24_times_torch_finfo_eps",
+    "decoder_dtype_guard_eps_multiplier": 24.0,
     "decoder_output_hook_calls_required": 1,
     "hook_module": "AutoencoderKL.decoder",
     "model_id": "stabilityai/stable-diffusion-3.5-medium",
     "placement": "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess",
     "post_cast_budget_accumulation": "float64_actual_update_fail_closed",
+    "post_cast_domain_share_check": "target_within_max_1e-6_or_dtype_eps_fail_closed",
     "single_fixed_update": true
   },
   "schema_version": "cegwm_geometry_v4_g1r_v1",
@@ -346,6 +354,11 @@
     "domain_support_partition": "fixed_canonical_checkerboard_search_vs_local",
     "exact_disjoint_support": true,
     "generation": "deterministic_keyed_balanced_bipolar_prn_microcode_atlas",
+    "bipolar_balance": "per_cell_exact_half_plus_half_minus",
+    "odd_support_policy": "keyed_deterministic_one_zero",
+    "per_pixel_sequence": "HMAC_SHA256_rank_for_every_active_support_pixel",
+    "dtype_lattice_support_ratio": "10_search_9_fit_6_validate_balanced_counts",
+    "dtype_lattice_count_unit": "even_floor_min_dimension_divided_by_4",
     "image_adaptive": false,
     "local_active_modulus": 2,
     "local_grid": 8,

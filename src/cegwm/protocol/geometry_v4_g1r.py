@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "157c8d0b3766fabd648af73b5f364a9da59c360bd2aebc20968c28ad2dd083d7"
+CONFIG_SHA256 = "954a1ebb35876eb71bb60f6a3ecb08a12fbc6f56cbb490c7301e1d55efa81fac"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"
@@ -34,7 +34,12 @@ SPARSE_LOCAL_ACTIVE_MODULUS = 2
 SPARSE_CHIP_RADIUS_FRACTION = 0.20
 SPARSE_SUPPORT_FRACTION = 0.18
 SPARSE_DOMAIN_SUPPORT_GRID = 8
-DECODER_DTYPE_GUARD_EPS_MULTIPLIER = 2.0
+DECODER_DTYPE_GUARD_EPS_MULTIPLIER = 24.0
+CPU_CARRIER_IDS = ("gradient_shapes", "crosshatch", "radial_objects", "colored_texture")
+CPU_CORRECT_SAFE_MIN = 18
+CPU_PER_ATTACK_MIN = 3
+CPU_TOP5_MIN = 18
+CPU_IDENTITY_PSR_MIN_COUNT = 3
 FIT_TILE_IDS = (0, 2, 5, 7, 8, 10, 13, 15)
 VALIDATE_TILE_IDS = (1, 3, 4, 6, 9, 11, 12, 14)
 ATTACKS = ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9")
@@ -101,10 +106,12 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     sparse = value.get("sparse_fiducial", {})
     if tuple(sparse.get("search_scale_grids", ())) != SPARSE_SEARCH_GRIDS or sparse.get("search_component_groups") != SPARSE_SEARCH_GROUPS or sparse.get("search_active_modulus") != SPARSE_SEARCH_ACTIVE_MODULUS or sparse.get("local_grid") != SPARSE_LOCAL_GRID or sparse.get("local_active_modulus") != SPARSE_LOCAL_ACTIVE_MODULUS or sparse.get("chip_radius_fraction_of_cell") != SPARSE_CHIP_RADIUS_FRACTION or sparse.get("reference_support_fraction") != SPARSE_SUPPORT_FRACTION or sparse.get("generation") != "deterministic_keyed_balanced_bipolar_prn_microcode_atlas" or sparse.get("whitening") != "fixed_cubic_detrend_then_narrow_band" or sparse.get("image_adaptive") is not False:
         raise ValueError("V4-G1R sparse fiducial contract differs")
-    if sparse.get("domain_support_partition") != "fixed_canonical_checkerboard_search_vs_local" or sparse.get("domain_support_grid") != SPARSE_DOMAIN_SUPPORT_GRID or sparse.get("exact_disjoint_support") is not True or sparse.get("combined_normalization") != "none_exact_orthogonal_energy_identity":
+    if sparse.get("per_pixel_sequence") != "HMAC_SHA256_rank_for_every_active_support_pixel" or sparse.get("bipolar_balance") != "per_cell_exact_half_plus_half_minus" or sparse.get("odd_support_policy") != "keyed_deterministic_one_zero":
+        raise ValueError("V4-G1R keyed bipolar microcode differs")
+    if sparse.get("domain_support_partition") != "fixed_canonical_checkerboard_search_vs_local" or sparse.get("domain_support_grid") != SPARSE_DOMAIN_SUPPORT_GRID or sparse.get("exact_disjoint_support") is not True or sparse.get("combined_normalization") != "none_exact_orthogonal_energy_identity" or sparse.get("dtype_lattice_support_ratio") != "10_search_9_fit_6_validate_balanced_counts" or sparse.get("dtype_lattice_count_unit") != "even_floor_min_dimension_divided_by_4":
         raise ValueError("V4-G1R sparse domain support differs")
     runtime = value.get("runtime", {})
-    if runtime.get("decoder_dtype_guard") != "one_minus_2_times_torch_finfo_eps" or runtime.get("post_cast_budget_accumulation") != "float64_actual_update_fail_closed" or runtime.get("decoder_dtype_guard_eps_multiplier") != DECODER_DTYPE_GUARD_EPS_MULTIPLIER:
+    if runtime.get("decoder_dtype_guard") != "one_minus_24_times_torch_finfo_eps" or runtime.get("post_cast_budget_accumulation") != "float64_actual_update_fail_closed" or runtime.get("decoder_dtype_guard_eps_multiplier") != DECODER_DTYPE_GUARD_EPS_MULTIPLIER or runtime.get("post_cast_domain_share_check") != "target_within_max_1e-6_or_dtype_eps_fail_closed":
         raise ValueError("V4-G1R decoder dtype budget guard differs")
     if tuple(rosters.get("attacks", ())) != ATTACKS or tuple(rosters.get("development", {}).get("seeds", ())) != DEVELOPMENT_SEEDS or tuple(rosters.get("confirmation", {}).get("seeds", ())) != CONFIRMATION_SEEDS or tuple(rosters.get("forbidden_legacy_seeds", ())) != LEGACY_SEEDS or rosters.get("units_per_split") != 20:
         raise ValueError("V4-G1R roster differs")
@@ -127,10 +134,15 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     if (holdout.get("primary_patch_window_divisor"), holdout.get("secondary_patch_window_divisor"), tuple(holdout.get("narrow_band_frequency_radius", ())), holdout.get("strong_keyed_frequency_support_min_fraction")) != (*HOLDOUT_PATCH_WINDOW_DIVISORS, HOLDOUT_FREQUENCY_RADIUS, HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION):
         raise ValueError("V4-G1R holdout preprocessing differs")
     development = value.get("development_runner", {})
-    if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("final_rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or development.get("final_rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
+    if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("final_rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
         raise ValueError("V4-G1R development runner differs")
+    if development.get("writer_hard_budget_rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or development.get("writer_hard_budget_source") != "decoder_hook_actual_post_cast_pre_PIL_float64" or development.get("post_quantization_rgb_channel_rms_diagnostic_only") is not True:
+        raise ValueError("V4-G1R writer and post-quantization measurement boundary differs")
     if development.get("truth_probe") != "post_arm_freeze_record_only_noninterfering":
         raise ValueError("V4-G1R truth probe boundary differs")
+    cpu_exit = value.get("cpu_exit", {})
+    if tuple(cpu_exit.get("carrier_ids", ())) != CPU_CARRIER_IDS or cpu_exit.get("ordinary_rgb_carriers") != 4 or cpu_exit.get("attacks_per_carrier") != 5 or cpu_exit.get("formal_denominator") != 0 or cpu_exit.get("correct_safe_reliable_min") != CPU_CORRECT_SAFE_MIN or cpu_exit.get("minimum_safe_per_attack") != CPU_PER_ATTACK_MIN or cpu_exit.get("correct_rs_top5_min") != CPU_TOP5_MIN or cpu_exit.get("correct_rs_top5_per_attack_min") != CPU_PER_ATTACK_MIN or cpu_exit.get("identity_translation_psr_ge_8_min") != CPU_IDENTITY_PSR_MIN_COUNT or cpu_exit.get("identity_translation_psr_source") != "correct.engineering_diagnostics.selected_fit.translation_psr" or cpu_exit.get("correct_unsafe_max") != 0 or cpu_exit.get("wrong_unsafe_max") != 0 or cpu_exit.get("negative_unsafe_max") != 0 or cpu_exit.get("passed_status") != "CPU_SYNTHETIC_ENGINEERING_EXIT" or cpu_exit.get("partial_status") != "CPU_METHOD_PARTIAL":
+        raise ValueError("V4-G1R CPU engineering exit differs")
     runtime = value.get("runtime", {})
     if runtime.get("model_id") != MODEL_ID or runtime.get("placement") != PLACEMENT or runtime.get("hook_module") != "AutoencoderKL.decoder" or runtime.get("decoder_output_hook_calls_required") != DECODER_HOOK_CALLS_REQUIRED or runtime.get("single_fixed_update") is not True:
         raise ValueError("V4-G1R runtime identity differs")

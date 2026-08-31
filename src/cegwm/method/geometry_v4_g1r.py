@@ -81,7 +81,7 @@ class G1RFinalRGBObservability:
     ssim: float
     luma_rms: float
     luma_peak: float
-    rgb_channel_rms_max: float
+    post_quantization_rgb_channel_rms_max: float
     rgb_channel_peak: float
     content_score_drift: float
     correct_domain_scores: Mapping[str, float]
@@ -94,7 +94,6 @@ class G1RFinalRGBObservability:
             and self.ssim > FINAL_RGB_SSIM_MIN
             and self.luma_rms <= LUMA_RMS_CAP
             and self.luma_peak <= LUMA_PEAK_CAP
-            and self.rgb_channel_rms_max <= RGB_CHANNEL_RMS_CAP
             and self.rgb_channel_peak <= RGB_CHANNEL_PEAK_CAP
             and self.content_score_drift < CONTENT_SCORE_DRIFT_MAX
             and set(self.correct_domain_scores) == {"search", "fit", "validate"}
@@ -133,18 +132,95 @@ def _domain_support_masks(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarra
     return search, ~search
 
 
+def _balanced_bipolar_code(mask: np.ndarray, key: bytes, label: bytes) -> np.ndarray:
+    """Generate one complete keyed per-pixel balanced code on fixed support."""
+    support = np.asarray(mask, dtype=bool)
+    coordinates = [tuple(int(value) for value in item) for item in np.argwhere(support)]
+    answer = np.zeros(support.shape, dtype=np.float64)
+    if len(coordinates) < 2:
+        return answer
+
+    def keyed_rank(prefix: bytes, coordinate: tuple[int, int]) -> tuple[int, int, int]:
+        y, x = coordinate
+        pixel = f":pixel:{y}:{x}".encode("ascii")
+        return _seed(key, label + prefix + pixel), y, x
+
+    if len(coordinates) % 2:
+        zero_coordinate = min(coordinates, key=lambda item: keyed_rank(b":zero", item))
+        coordinates.remove(zero_coordinate)
+    ordered = sorted(coordinates, key=lambda item: keyed_rank(b":rank", item))
+    half = len(ordered) // 2
+    for y, x in ordered[:half]:
+        answer[y, x] = 1.0
+    for y, x in ordered[half:]:
+        answer[y, x] = -1.0
+    if int(np.count_nonzero(answer > 0.0)) != int(np.count_nonzero(answer < 0.0)) or float(np.sum(answer)) != 0.0:
+        raise RuntimeError("V4-G1R keyed bipolar code lost exact balance")
+    return answer
+
+
+def _quantization_balanced_field(
+    source: np.ndarray,
+    key: bytes,
+    label: bytes,
+    target_count: int,
+    regions: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    """Select a fixed balanced compact support with one constant magnitude."""
+    value = np.asarray(source, dtype=np.float64)
+    if target_count < 2 * len(regions) or target_count % 2:
+        raise RuntimeError("V4-G1R quantization-balanced support count is invalid")
+    capacities = tuple(2 * min(int(np.count_nonzero((value > 0.0) & region)), int(np.count_nonzero((value < 0.0) & region))) for region in regions)
+    quotas = [2 for _ in regions]
+    if any(capacity < 2 for capacity in capacities) or sum(capacities) < target_count:
+        raise RuntimeError("V4-G1R quantization-balanced regional support is insufficient")
+    remaining = target_count - sum(quotas)
+    region_order = sorted(range(len(regions)), key=lambda index: (_seed(key, label + f":region:{index}".encode("ascii")), index))
+    while remaining:
+        changed = False
+        for index in region_order:
+            if remaining == 0:
+                break
+            if quotas[index] + 2 <= capacities[index]:
+                quotas[index] += 2
+                remaining -= 2
+                changed = True
+        if not changed:
+            raise RuntimeError("V4-G1R quantization-balanced quota allocation failed")
+
+    answer = np.zeros_like(value)
+
+    def rank(prefix: bytes, coordinate: np.ndarray) -> tuple[int, int, int]:
+        y, x = (int(item) for item in coordinate)
+        return _seed(key, label + prefix + f":pixel:{y}:{x}".encode("ascii")), y, x
+
+    for index, (region, quota) in enumerate(zip(regions, quotas, strict=True)):
+        prefix = f":region:{index}".encode("ascii")
+        positive = sorted(np.argwhere((value > 0.0) & region), key=lambda coordinate: rank(prefix + b":positive", coordinate))[: quota // 2]
+        negative = sorted(np.argwhere((value < 0.0) & region), key=lambda coordinate: rank(prefix + b":negative", coordinate))[: quota // 2]
+        for y, x in positive:
+            answer[int(y), int(x)] = 1.0
+        for y, x in negative:
+            answer[int(y), int(x)] = -1.0
+    if int(np.count_nonzero(answer)) != target_count or float(np.sum(answer)) != 0.0:
+        raise RuntimeError("V4-G1R quantization-balanced field lost count or balance")
+    return answer / math.sqrt(target_count)
+
+
 def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid: int, active_modulus: int, *, support: np.ndarray | None = None) -> np.ndarray:
     """Fixed keyed jittered balanced-bipolar PRN microcode; no image inputs."""
     height, width = shape
     field = np.zeros((height, width), dtype=np.float64)
     cell_height, cell_width = height / grid, width / grid
     radius = max(1, int(round(min(cell_height, cell_width) * SPARSE_CHIP_RADIUS_FRACTION)))
+    fixed_support = np.ones(shape, dtype=bool) if support is None else np.asarray(support, dtype=bool)
+    if fixed_support.shape != shape:
+        raise ValueError("V4-G1R sparse support shape differs")
     for cell_y in range(grid):
         for cell_x in range(grid):
             cell = f":{cell_y}:{cell_x}".encode("ascii")
             if _seed(key, label + b":active" + cell) % active_modulus:
                 continue
-            sign = 1.0 if _seed(key, label + b":sign" + cell) & 1 else -1.0
             jitter_x = ((_seed(key, label + b":jx" + cell) % 1024) / 1023.0 - 0.5) * 0.30
             jitter_y = ((_seed(key, label + b":jy" + cell) % 1024) / 1023.0 - 0.5) * 0.30
             center_x = (cell_x + 0.5 + jitter_x) * cell_width
@@ -152,11 +228,8 @@ def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid
             x0, x1 = max(0, int(math.floor(center_x)) - radius), min(width, int(math.floor(center_x)) + radius + 1)
             y0, y1 = max(0, int(math.floor(center_y)) - radius), min(height, int(math.floor(center_y)) + radius + 1)
             yy, xx = np.mgrid[y0:y1, x0:x1]
-            # A keyed checkerboard has exact balanced signs and lower displacement sidelobes than a Gaussian blob.
-            code = np.where(((xx - int(round(center_x))) + (yy - int(round(center_y)))) % 2 == 0, 1.0, -1.0)
-            phase_flip = 1.0 if _seed(key, label + b":phase" + cell) & 1 else -1.0
-            field[y0:y1, x0:x1] += sign * phase_flip * code * (((xx-center_x)**2+(yy-center_y)**2) <= radius*radius)
-    fixed_support = np.ones(shape, dtype=bool) if support is None else np.asarray(support, dtype=bool)
+            cell_mask = (((xx - center_x) ** 2 + (yy - center_y) ** 2) <= radius * radius) & fixed_support[y0:y1, x0:x1]
+            field[y0:y1, x0:x1] += _balanced_bipolar_code(cell_mask, key, label + b":cell" + cell)
     return _unit_on_support(field, fixed_support)
 
 
@@ -168,10 +241,10 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
         raise TypeError("V4-G1R requires three non-empty domain keys")
     search_support, local_support = _domain_support_masks(shape)
     search_components = _search_macro_fields(shape, domain_keys["search"])
-    search = _unit_on_support(np.sum(search_components, axis=0), search_support)
+    raw_search = _unit_on_support(np.sum(search_components, axis=0), search_support)
 
     def partition(name: str, tile_ids: tuple[int, ...]) -> np.ndarray:
-        answer = np.zeros_like(search)
+        answer = np.zeros_like(raw_search)
         domain_support = np.zeros_like(search_support)
         for tile_id in tile_ids:
             row, column = divmod(tile_id, 4)
@@ -184,9 +257,37 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
             domain_support[y0:y1, x0:x1] = tile_support
         return _unit_on_support(answer, domain_support)
 
-    fit = partition("fit", FIT_TILE_IDS)
-    validate = partition("validate", VALIDATE_TILE_IDS)
-    fields = (search, fit, validate)
+    raw_fit = partition("fit", FIT_TILE_IDS)
+    raw_validate = partition("validate", VALIDATE_TILE_IDS)
+
+    def rectangles(tile_ids: tuple[int, ...]) -> tuple[np.ndarray, ...]:
+        result = []
+        for tile_id in tile_ids:
+            row, column = divmod(tile_id, 4)
+            region = np.zeros(shape, dtype=bool)
+            region[row * height // 4:(row + 1) * height // 4, column * width // 4:(column + 1) * width // 4] = True
+            result.append(region)
+        return tuple(result)
+
+    quadrants_list = []
+    for macro_row in range(2):
+        for macro_column in range(2):
+            region = np.zeros(shape, dtype=bool)
+            region[macro_row * height // 2:(macro_row + 1) * height // 2, macro_column * width // 2:(macro_column + 1) * width // 2] = True
+            quadrants_list.append(region)
+    quadrants = tuple(quadrants_list)
+    fit_regions, validate_regions = rectangles(FIT_TILE_IDS), rectangles(VALIDATE_TILE_IDS)
+    raw_fields, regions = (raw_search, raw_fit, raw_validate), (quadrants, fit_regions, validate_regions)
+    share_units = (10, 9, 6)
+    count_unit = min(shape) // 4
+    count_unit -= count_unit % 2
+    if count_unit < 2:
+        raise RuntimeError("V4-G1R quantization-balanced domain capacity is insufficient")
+    fields = tuple(
+        _quantization_balanced_field(field, domain_keys[name], f"{name}:dtype-lattice".encode("ascii"), count_unit * unit, domain_regions)
+        for name, field, unit, domain_regions in zip(("search", "fit", "validate"), raw_fields, share_units, regions, strict=True)
+    )
+    search, fit, validate = fields
     gram = np.asarray([[float(np.sum(left * right)) for right in fields] for left in fields])
     if not np.allclose(gram, np.eye(3), atol=2e-14, rtol=0.0):
         raise RuntimeError("V4-G1R domain fields lost exact orthogonality")
@@ -317,8 +418,8 @@ def measure_g1r_final_rgb(
     return G1RFinalRGBObservability(values[0], values[1], values[2], values[3], values[4], values[5], values[6], correct_scores, wrong_scores)
 
 
-def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> torch.Tensor:
-    """Apply one fixed update to the real VAE decoder output before RGB postprocess."""
+def _write_g1r_decoder_output_with_budget(decoded: torch.Tensor, detection_key: object) -> tuple[torch.Tensor, Mapping[str, object]]:
+    """Apply one fixed update and return its pre-PIL hard-budget proof."""
     if not isinstance(decoded, torch.Tensor) or decoded.ndim != 4 or decoded.shape[0] != 1 or decoded.shape[1] != 3 or not decoded.dtype.is_floating_point or not bool(torch.isfinite(decoded).all()):
         raise ValueError("V4-G1R decoder output must be finite floating 1x3xHxW")
     scalar_delta = _g1r_scalar_delta((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
@@ -337,7 +438,33 @@ def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> to
     peak = torch.max(torch.abs(actual_final_rgb_delta))
     if not bool(torch.isfinite(channel_rms).all()) or not bool(torch.isfinite(peak)) or float(torch.max(channel_rms).item()) > RGB_CHANNEL_RMS_CAP or float(peak.item()) > RGB_CHANNEL_PEAK_CAP:
         raise RuntimeError("V4-G1R post-cast decoder update exceeded the frozen RGB budget")
-    return updated
+    carrier = sum(actual_final_rgb_delta[:, channel] * float(_REC709[channel]) for channel in range(3))
+    fields = g1r_anchor_fields((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
+    projections = torch.stack(tuple(torch.sum(carrier * torch.as_tensor(getattr(fields, name), dtype=torch.float64, device=decoded.device)) for name in ("search", "fit", "validate")))
+    projection_energy = projections * projections
+    actual_shares = projection_energy / torch.sum(projection_energy)
+    share_tolerance = max(1e-6, float(torch.finfo(decoded.dtype).eps))
+    targets = torch.as_tensor(ENERGY_SHARES, dtype=torch.float64, device=decoded.device)
+    if not bool(torch.isfinite(actual_shares).all()) or not bool(torch.all(torch.abs(actual_shares - targets) <= share_tolerance)):
+        raise RuntimeError("V4-G1R post-cast decoder update changed physical energy shares")
+    budget = {
+        "passed": True,
+        "measurement": "actual_post_cast_pre_PIL_final_RGB_equivalent_float64",
+        "rgb_channel_rms_max": float(torch.max(channel_rms).item()),
+        "rgb_channel_rms_cap": RGB_CHANNEL_RMS_CAP,
+        "rgb_channel_peak": float(peak.item()),
+        "rgb_channel_peak_cap": RGB_CHANNEL_PEAK_CAP,
+        "domain_energy_shares": {name: float(actual_shares[index].item()) for index, name in enumerate(("search", "fit", "validate"))},
+        "domain_energy_share_targets": {name: share for name, share in zip(("search", "fit", "validate"), ENERGY_SHARES, strict=True)},
+        "domain_energy_share_tolerance": share_tolerance,
+        "dtype": str(decoded.dtype),
+    }
+    return updated, budget
+
+
+def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> torch.Tensor:
+    """Apply one fixed update to the real VAE decoder output before RGB postprocess."""
+    return _write_g1r_decoder_output_with_budget(decoded, detection_key)[0]
 
 
 def _valid_warp(image: np.ndarray, output_to_input: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -707,7 +834,7 @@ def _detect_g1r_engineering_from_image(image: np.ndarray, detection_key: object)
         "inlier_ratio": finite(fit.get("inlier_ratio", 0.0)),
         "reprojection": finite(fit.get("reprojection", math.inf)),
         "condition": finite(fit.get("condition", math.inf)),
-        "translation_psr": finite(search.get("translation_psr", 0.0)),
+        "translation_psr": None if "translation_psr" not in search else finite(search["translation_psr"]),
         "ncc": finite(search.get("ncc", -1.0)),
     }
     prethreshold_summary = []

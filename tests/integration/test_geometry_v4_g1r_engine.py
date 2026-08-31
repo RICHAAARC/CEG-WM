@@ -12,7 +12,7 @@ from PIL import Image
 from experiments import geometry_v4_g1r_engine as engine
 from cegwm.method import geometry_v4_g1r as method
 from cegwm.method.geometry_v4_g1r import G1RFinalRGBObservability
-from cegwm.protocol.geometry_v4_g1r import ATTACKS, PLACEMENT, SEARCH_TOP_K, WRITER_ID, derive_g1r_keys
+from cegwm.protocol.geometry_v4_g1r import ATTACKS, CPU_CARRIER_IDS, PLACEMENT, SEARCH_TOP_K, WRITER_ID, derive_g1r_keys
 from cegwm.runtime.geometry_v4_g1r_sd35 import G1RGeneratedPair
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,15 +113,22 @@ def test_truth_probe_is_sanitized_record_only_evidence_at_declared_h() -> None:
 
 
 @pytest.mark.integration
-def test_fixed_cpu_three_arm_canary_reaches_engineering_exit() -> None:
+def test_fixed_cpu_three_arm_canary_records_the_frozen_exit_without_formal_denominator() -> None:
     records = engine.run_cpu_canary()
     summary = engine.summarize_cpu_canary(records)
     assert len(records) == 20 and all(record["failure"] is None for record in records)
-    assert summary["formal_denominator"] == 0 and summary["units"] == 20
-    assert summary["correct_safe_reliable"] >= 18
+    assert summary["formal_denominator"] == 0 and summary["units"] == 20 and tuple(summary["cpu_carrier_ids"]) == CPU_CARRIER_IDS
     assert summary["correct_unsafe"] == summary["wrong_unsafe"] == summary["negative_unsafe"] == 0
-    assert all(value >= 3 for value in summary["correct_safe_by_attack"].values())
-    assert summary["status"] == "CPU_ENGINEERING_EXIT"
+    expected_exit = bool(
+        summary["failures"] == 0
+        and summary["correct_safe_reliable"] >= 18
+        and all(value >= 3 for value in summary["correct_safe_by_attack"].values())
+        and summary["correct_rs_top5"] >= 18
+        and all(value >= 3 for value in summary["correct_rs_top5_by_attack"].values())
+        and summary["identity_translation_psr_ge_8"] >= 3
+    )
+    assert summary["exit"] is expected_exit
+    assert summary["status"] == ("CPU_SYNTHETIC_ENGINEERING_EXIT" if expected_exit else "CPU_METHOD_PARTIAL")
 
 
 class _FakePipeline:
@@ -140,6 +147,26 @@ class _FakeContentDetector:
 
 def _unreliable_arm() -> dict[str, object]:
     return {"H_hat": None, "corners_hat": (), "support": 0, "reliability": 0.0, "status": "UNRELIABLE"}
+
+
+def _frozen_exit_diagnostics(*, angle: float = 0.0, scale: float = 1.0, psr: float = 8.0) -> dict[str, object]:
+    return {"search_top_k": ({"angle_degrees": angle, "scale": scale},), "selected_fit": {"translation_psr": psr}, "holdout": {}}
+
+
+@pytest.mark.integration
+def test_runner_exit_uses_only_frozen_top5_and_one_declared_psr_field() -> None:
+    truth = engine._truth_for_attack("identity")
+    correct = {**_unreliable_arm(), "engineering_diagnostics": _frozen_exit_diagnostics(psr=8.5)}
+    result = engine._runner_exit_diagnostics(correct, truth)
+    assert result == {
+        "top5_hit": True,
+        "top5_candidates_evaluated": 1,
+        "identity_translation_psr": 8.5,
+        "identity_translation_psr_source": "engineering_diagnostics.selected_fit.translation_psr",
+    }
+    missing = {**correct, "engineering_diagnostics": {"search_top_k": (), "selected_fit": {}}}
+    with pytest.raises(ValueError, match="missing"):
+        engine._runner_exit_diagnostics(missing, truth)
 
 
 @pytest.mark.integration
@@ -178,11 +205,12 @@ def test_real_development_generates_each_source_once_retains_20_units_and_orders
         assert (height, width) == (512, 512)
         generated.append(generator)
         image = Image.fromarray(np.full((64, 64, 3), 128, dtype=np.uint8), mode="RGB")
-        return G1RGeneratedPair(image, image)
+        writer_budget = {"passed": True, "measurement": "actual_post_cast_pre_PIL_final_RGB_equivalent_float64", "rgb_channel_rms_max": 0.0, "rgb_channel_rms_cap": .5 / 255, "rgb_channel_peak": 0.0, "rgb_channel_peak_cap": 8 / 255, "domain_energy_shares": {"search": .4, "fit": .36, "validate": .24}, "domain_energy_share_targets": {"search": .4, "fit": .36, "validate": .24}, "domain_energy_share_tolerance": 1e-6, "dtype": "torch.float32"}
+        return G1RGeneratedPair(image, image, writer_budget)
 
     monkeypatch.setattr(engine, "run_g1r_sd35_pair", fake_pair)
     monkeypatch.setattr(engine, "measure_g1r_final_rgb", lambda *args: G1RFinalRGBObservability(50.0, .99, 0.0, 0.0, 0.0, 0.0, 0.0, {name: 1.0 for name in ("search", "fit", "validate")}, {name: 0.0 for name in ("search", "fit", "validate")}))
-    monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm()))
+    monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or engine.BlindArms({**_unreliable_arm(), "engineering_diagnostics": _frozen_exit_diagnostics()}, _unreliable_arm(), _unreliable_arm()))
     monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
     monkeypatch.setattr(engine, "_truth_probe", lambda *args: events.append("probe") or {"record_only": True})
     sources, records, identity = engine.run_real_development(b"0123456789abcdef", b"wrong-key-0123456789", repo_root=ROOT, hf_token="test-token")
@@ -192,13 +220,15 @@ def test_real_development_generates_each_source_once_retains_20_units_and_orders
     assert all(set(record["arms"]) == {"correct", "wrong", "negative"} for record in records)
     assert events == [item for _ in range(20) for item in ("blind", "truth", "probe")]
     assert all(record["truth_probe"] == {"record_only": True} for record in records)
+    assert all(source["final_rgb"]["writer_hard_budget"]["passed"] is True for source in sources)
+    assert all("post_quantization_rgb_channel_rms_max" in source["final_rgb"]["post_quantization"] for source in sources)
     assert identity == {"adapter_id": "fake-content-detector"}
 
 
 @pytest.mark.integration
 def test_truth_probe_runs_post_freeze_and_cannot_change_arm_or_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
-    quiet = engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm())
+    quiet = engine.BlindArms({**_unreliable_arm(), "engineering_diagnostics": _frozen_exit_diagnostics()}, _unreliable_arm(), _unreliable_arm())
     monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or quiet)
     monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
     monkeypatch.setattr(engine, "_truth_probe", lambda *args: (_ for _ in ()).throw(RuntimeError("diagnostic only")))

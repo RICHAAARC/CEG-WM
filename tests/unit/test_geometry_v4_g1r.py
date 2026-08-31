@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,8 +117,15 @@ def test_key_domains_and_anchor_energy_are_separate_and_deterministic() -> None:
             components = tuple(np.sqrt(share) * field for share, field in zip(ENERGY_SHARES, domains, strict=True))
             assert tuple(float(np.sum(component * component)) for component in components) == pytest.approx(ENERGY_SHARES, abs=2e-14)
             assert tuple(float(np.sum(fields.combined * field)) ** 2 for field in domains) == pytest.approx(ENERGY_SHARES, abs=2e-14)
+            counts = tuple(int(np.count_nonzero(field)) for field in domains)
+            assert counts[0] // 10 == counts[1] // 9 == counts[2] // 6 and counts[0] % 10 == counts[1] % 9 == counts[2] % 6 == 0
+            assert len(np.unique(np.round(np.abs(fields.combined[fields.combined != 0.0]), 14))) == 1
             assert not np.any((fields.search != 0.0) & ((fields.fit != 0.0) | (fields.validate != 0.0)))
             assert not np.any((fields.fit != 0.0) & (fields.validate != 0.0))
+            height, width = shape
+            assert all(np.count_nonzero(fields.search[row * height // 2:(row + 1) * height // 2, column * width // 2:(column + 1) * width // 2]) for row in range(2) for column in range(2))
+            for field, tile_ids in ((fields.fit, FIT_TILE_IDS), (fields.validate, VALIDATE_TILE_IDS)):
+                assert all(np.count_nonzero(field[(tile_id // 4) * height // 4:(tile_id // 4 + 1) * height // 4, (tile_id % 4) * width // 4:(tile_id % 4 + 1) * width // 4]) for tile_id in tile_ids)
 
     direct = {"search": b"search-a", "fit": b"fit-a", "validate": b"validate-a"}
     baseline = method._domain_fields((64, 64), direct)
@@ -127,6 +135,29 @@ def test_key_domains_and_anchor_energy_are_separate_and_deterministic() -> None:
         for field_name in direct:
             equal = np.array_equal(getattr(baseline, field_name), getattr(perturbed, field_name))
             assert equal is (field_name != changed_name)
+
+
+@pytest.mark.unit
+def test_keyed_bipolar_microcode_is_per_pixel_balanced_and_has_bounded_sidelobes() -> None:
+    mask = np.ones((5, 5), dtype=bool)
+    first = method._balanced_bipolar_code(mask, b"domain-a", b"component:cell")
+    repeated = method._balanced_bipolar_code(mask, b"domain-a", b"component:cell")
+    other_domain = method._balanced_bipolar_code(mask, b"domain-b", b"component:cell")
+    assert np.array_equal(first, repeated) and not np.array_equal(first, other_domain)
+    assert np.count_nonzero(first > 0.0) == np.count_nonzero(first < 0.0) == 12
+    assert np.count_nonzero(first == 0.0) == 1 and float(np.sum(first)) == 0.0
+    assert np.linalg.norm(first) == pytest.approx(math.sqrt(24.0))
+
+    search_support, _ = method._domain_support_masks((96, 96))
+    component = method._sparse_prn_component((96, 96), b"domain-a", b"search:component", 8, 2, support=search_support)
+    assert np.linalg.norm(component) == pytest.approx(1.0, abs=2e-14)
+    assert float(np.sum(component)) == pytest.approx(0.0, abs=2e-14)
+    correlations = [float(np.sum(component * np.roll(component, shift, axis=(0, 1)))) for shift in ((0, 1), (1, 0), (1, 1), (2, 3))]
+    assert max(abs(value) for value in correlations) < .75
+    for row in range(2):
+        for column in range(2):
+            patch = component[row * 48:(row + 1) * 48, column * 48:(column + 1) * 48]
+            assert np.count_nonzero(patch) > 0
 
 
 @pytest.mark.unit
@@ -153,12 +184,14 @@ def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> 
 
     hook = G1RDecoderOutputHook(KEY)
     assert not torch.equal(hook(None, (), decoded), decoded)
+    assert hook.writer_budget is not None and hook.writer_budget["passed"] is True
     with pytest.raises(RuntimeError, match="more than once"):
         hook(None, (), decoded)
 
     pipeline = _Pipeline()
     pair = run_g1r_sd35_pair(pipeline, "an ordinary test scene", KEY, height=256, width=256, generator=torch.Generator().manual_seed(6201))
     assert pipeline.calls == 2 and pair.clean.tobytes() != pair.marked.tobytes()
+    assert pair.writer_budget["measurement"] == "actual_post_cast_pre_PIL_final_RGB_equivalent_float64"
     assert len(pipeline.vae.decoder._forward_hooks) == 0
     assert torch.equal(pipeline.vae.decoder(decoded), decoded)
 
@@ -171,14 +204,14 @@ def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> 
 
 @pytest.mark.unit
 def test_decoder_post_cast_update_stays_inside_caps_and_preserves_uniform_domain_shares() -> None:
-    assert DECODER_DTYPE_GUARD_EPS_MULTIPLIER == 2.0
+    assert DECODER_DTYPE_GUARD_EPS_MULTIPLIER == 24.0
     dtypes = (torch.float32, torch.float16, torch.bfloat16)
     for size in (32, 64, 128, 512):
         fields = method.g1r_anchor_fields((size, size), KEY)
         domains = (fields.search, fields.fit, fields.validate)
         for dtype in dtypes:
             decoded = torch.full((1, 3, size, size), .37, dtype=dtype)
-            updated = method.write_g1r_decoder_output(decoded, KEY)
+            updated, budget = method._write_g1r_decoder_output_with_budget(decoded, KEY)
             actual = (updated.to(torch.float64) - decoded.to(torch.float64)) / 2.0
             rms = torch.sqrt(torch.mean(actual * actual, dim=(0, 2, 3)))
             assert float(torch.max(rms)) <= RGB_CHANNEL_RMS_CAP
@@ -189,6 +222,11 @@ def test_decoder_post_cast_update_stays_inside_caps_and_preserves_uniform_domain
             post_cast_shares = post_cast_projections * post_cast_projections / np.sum(post_cast_projections * post_cast_projections)
             share_tolerance = max(1e-6, float(torch.finfo(dtype).eps))
             assert tuple(post_cast_shares.tolist()) == pytest.approx(ENERGY_SHARES, abs=share_tolerance)
+            assert budget["passed"] is True
+            assert budget["rgb_channel_rms_max"] <= budget["rgb_channel_rms_cap"] == RGB_CHANNEL_RMS_CAP
+            assert budget["rgb_channel_peak"] <= budget["rgb_channel_peak_cap"] == RGB_CHANNEL_PEAK_CAP
+            assert tuple(budget["domain_energy_share_targets"].values()) == ENERGY_SHARES
+            assert tuple(budget["domain_energy_shares"].values()) == pytest.approx(ENERGY_SHARES, abs=share_tolerance)
 
             guard = 1.0 - DECODER_DTYPE_GUARD_EPS_MULTIPLIER * float(torch.finfo(dtype).eps)
             guarded = method._g1r_scalar_delta((size, size), KEY) * guard
@@ -206,12 +244,19 @@ def test_final_rgb_observability_uses_all_three_domains_and_frozen_quality_limit
     assert set(observation.correct_domain_scores) == set(observation.wrong_domain_scores) == {"search", "fit", "validate"}
     assert observation.psnr > 40.0 and observation.ssim > .98
     assert observation.luma_rms <= 2 / 255 and observation.luma_peak <= 8 / 255
-    assert observation.rgb_channel_rms_max <= RGB_CHANNEL_RMS_CAP and observation.rgb_channel_peak <= RGB_CHANNEL_PEAK_CAP
+    assert observation.post_quantization_rgb_channel_rms_max <= RGB_CHANNEL_RMS_CAP and observation.rgb_channel_peak <= RGB_CHANNEL_PEAK_CAP
     assert observation.content_score_drift == 0.0
     assert observation.passed
     assert all(observation.correct_domain_scores[name] > observation.wrong_domain_scores[name] for name in ("search", "fit", "validate"))
     assert DEVELOPMENT_ARTIFACT_FILES == ("g1r-development-records.json", "g1r-development-summary.json", "g1r-development-manifest.json")
     assert DEVELOPMENT_NOTEBOOK_ID == "geometry_v4_g0_g1_colab_v4_g1r_development_v1"
+    quantized_diagnostic = method.G1RFinalRGBObservability(
+        50.0, .99, 1.0 / 255.0, 1.0 / 255.0, 1.0, 1.0 / 255.0, 0.0,
+        {name: 1.0 for name in ("search", "fit", "validate")},
+        {name: 0.0 for name in ("search", "fit", "validate")},
+    )
+    assert quantized_diagnostic.post_quantization_rgb_channel_rms_max == 1.0
+    assert quantized_diagnostic.passed
 
 
 @pytest.mark.unit

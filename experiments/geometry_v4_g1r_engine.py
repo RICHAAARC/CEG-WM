@@ -23,12 +23,18 @@ from cegwm.method.geometry_v4_generative import build_reused_weighted_joint_cont
 from cegwm.method.geometry_v4_proxy import _sample_h, _similarity_h
 from cegwm.protocol.geometry_v4_g1r import (
     ATTACKS,
+    CPU_CARRIER_IDS,
+    CPU_CORRECT_SAFE_MIN,
+    CPU_IDENTITY_PSR_MIN_COUNT,
+    CPU_PER_ATTACK_MIN,
+    CPU_TOP5_MIN,
     DEVELOPMENT_ARTIFACT_FILES,
     DEVELOPMENT_CORRECT_SAFE_REQUIRED,
     DEVELOPMENT_NOTEBOOK_ID,
     DEVELOPMENT_SOURCE_REQUIRED,
     MODEL_ID,
     PLACEMENT,
+    SAFETY_TOLERANCES,
     WRITER_ID,
     contract_sha256,
     load_contract,
@@ -40,9 +46,6 @@ from cegwm.shared.keys import normalize_detection_key
 
 CPU_KEY = b"geometry-v4-g1r-cpu-key-v1"
 CPU_WRONG_KEY = b"geometry-v4-g1r-cpu-wrong-key-v1"
-CPU_CARRIER_IDS = ("gradient_shapes", "crosshatch", "radial_objects", "colored_texture")
-
-
 @dataclass(frozen=True, slots=True)
 class BlindArms:
     correct: Mapping[str, object]
@@ -155,12 +158,45 @@ def _truth_metrics(arm: Mapping[str, object], truth_attacked_to_canonical: np.nd
     return {"mapped_corner_error": float(np.max(distances[:4])), "center_reprojection_error": float(distances[4]), "rotation_abs_error_degrees": rotation_error, "log_scale_abs_error": abs(math.log(predicted_scale) - math.log(truth_scale))}
 
 
+def _runner_exit_diagnostics(correct_arm: Mapping[str, object], truth_attacked_to_canonical: np.ndarray) -> Mapping[str, object]:
+    """Truth-only evaluator over one already-frozen blind diagnostic record."""
+    diagnostics = correct_arm.get("engineering_diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        raise ValueError("V4-G1R runner exit diagnostics are missing")
+    search_top_k = diagnostics.get("search_top_k")
+    selected_fit = diagnostics.get("selected_fit")
+    if not isinstance(search_top_k, (tuple, list)) or not isinstance(selected_fit, Mapping) or "translation_psr" not in selected_fit or selected_fit["translation_psr"] is None:
+        raise ValueError("V4-G1R frozen exit fields are missing")
+    truth_canonical_to_attacked = np.linalg.inv(np.asarray(truth_attacked_to_canonical, dtype=np.float64))
+    truth_angle, truth_scale = _angle_scale(truth_canonical_to_attacked)
+
+    def rs_hit(item: object) -> bool:
+        if not isinstance(item, Mapping) or item.get("angle_degrees") is None or item.get("scale") is None:
+            return False
+        angle, scale = float(item["angle_degrees"]), float(item["scale"])
+        if not math.isfinite(angle) or not math.isfinite(scale) or scale <= 0.0:
+            return False
+        rotation_error = abs((angle - truth_angle + 90.0) % 180.0 - 90.0)
+        return rotation_error <= SAFETY_TOLERANCES["rotation_degrees"] and abs(math.log(scale) - math.log(truth_scale)) <= SAFETY_TOLERANCES["log_scale"]
+
+    translation_psr = float(selected_fit["translation_psr"])
+    if not math.isfinite(translation_psr):
+        raise ValueError("V4-G1R selected-fit translation PSR is invalid")
+    return {
+        "top5_hit": any(rs_hit(item) for item in search_top_k),
+        "top5_candidates_evaluated": len(search_top_k),
+        "identity_translation_psr": translation_psr,
+        "identity_translation_psr_source": "engineering_diagnostics.selected_fit.translation_psr",
+    }
+
+
 def _evaluate_frozen_arms(arms: BlindArms, truth_attacked_to_canonical: np.ndarray) -> Mapping[str, object]:
     evaluated = {}
     for name in ("correct", "wrong", "negative"):
         arm = getattr(arms, name)
         metrics = _truth_metrics(arm, truth_attacked_to_canonical)
         evaluated[name] = {**arm, "truth_metrics": metrics, "unsafe": unsafe_geometry(str(arm["status"]), metrics)}
+    evaluated["correct"] = {**evaluated["correct"], "runner_exit": _runner_exit_diagnostics(arms.correct, truth_attacked_to_canonical)}
     return evaluated
 
 
@@ -198,10 +234,13 @@ def summarize_cpu_canary(records: tuple[Mapping[str, object], ...]) -> Mapping[s
     wrong_unsafe = sum(record["arms"] is not None and record["arms"]["wrong"]["unsafe"] for record in records)
     negative_unsafe = sum(record["arms"] is not None and record["arms"]["negative"]["unsafe"] for record in records)
     by_attack = {attack: sum(record["attack"] == attack and record["arms"] is not None and record["arms"]["correct"]["status"] == "RELIABLE" and not record["arms"]["correct"]["unsafe"] for record in records) for attack in ATTACKS}
-    top5 = {attack: sum(record["attack"] == attack and record["arms"] is not None and bool(record["arms"]["correct"].get("engineering_diagnostics", {}).get("top5_hit", False)) for record in records) for attack in ATTACKS}
-    identity_psr = sum(record["attack"] == "identity" and record["arms"] is not None and float(record["arms"]["correct"].get("engineering_diagnostics", {}).get("translation_psr", 0.0)) >= 8.0 for record in records)
-    passed = failures == 0 and correct_safe >= 18 and correct_unsafe == wrong_unsafe == negative_unsafe == 0 and sum(top5.values()) >= 18 and all(value >= 3 for value in by_attack.values()) and all(value >= 3 for value in top5.values()) and identity_psr >= 3
-    return {"stage": "V4-G1R", "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT", "evidence": "synthetic_only", "formal_denominator": 0, "cpu_carrier_ids": CPU_CARRIER_IDS, "units": 20, "failures": failures, "stops": failures, "correct_safe_reliable": correct_safe, "correct_unsafe": correct_unsafe, "wrong_unsafe": wrong_unsafe, "negative_unsafe": negative_unsafe, "correct_safe_by_attack": by_attack, "correct_rs_top5_by_attack": top5, "correct_rs_top5": sum(top5.values()), "identity_translation_psr_ge_8": identity_psr, "exit": passed, "status": "CPU_ENGINEERING_EXIT" if passed else "CPU_METHOD_PARTIAL"}
+    complete = tuple(record for record in records if record["arms"] is not None)
+    if any(not isinstance(record["arms"]["correct"].get("runner_exit"), Mapping) for record in complete):
+        raise ValueError("V4-G1R CPU runner exit record is missing")
+    top5 = {attack: sum(record["attack"] == attack and bool(record["arms"]["correct"]["runner_exit"]["top5_hit"]) for record in complete) for attack in ATTACKS}
+    identity_psr = sum(record["attack"] == "identity" and float(record["arms"]["correct"]["runner_exit"]["identity_translation_psr"]) >= 8.0 for record in complete)
+    passed = failures == 0 and correct_safe >= CPU_CORRECT_SAFE_MIN and correct_unsafe == wrong_unsafe == negative_unsafe == 0 and sum(top5.values()) >= CPU_TOP5_MIN and all(value >= CPU_PER_ATTACK_MIN for value in by_attack.values()) and all(value >= CPU_PER_ATTACK_MIN for value in top5.values()) and identity_psr >= CPU_IDENTITY_PSR_MIN_COUNT
+    return {"stage": "V4-G1R", "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT", "evidence": "synthetic_only", "formal_denominator": 0, "cpu_carrier_ids": CPU_CARRIER_IDS, "units": 20, "failures": failures, "stops": failures, "correct_safe_reliable": correct_safe, "correct_unsafe": correct_unsafe, "wrong_unsafe": wrong_unsafe, "negative_unsafe": negative_unsafe, "correct_safe_by_attack": by_attack, "correct_rs_top5_by_attack": top5, "correct_rs_top5": sum(top5.values()), "identity_translation_psr_ge_8": identity_psr, "exit": passed, "status": "CPU_SYNTHETIC_ENGINEERING_EXIT" if passed else "CPU_METHOD_PARTIAL"}
 
 
 def _rgb(image: Image.Image) -> np.ndarray:
@@ -273,7 +312,10 @@ def run_real_development(
             continue
         try:
             observation = measure_g1r_final_rgb(clean_rgb, marked_rgb, normalized, normalized_wrong, content_detector)
-            final_rgb: Mapping[str, object] = {"passed": observation.passed, **asdict(observation)}
+            writer_budget = dict(pair.writer_budget)
+            if writer_budget.get("passed") is not True:
+                raise RuntimeError("V4-G1R source lacks a writer hard-budget proof")
+            final_rgb: Mapping[str, object] = {"passed": observation.passed, "writer_hard_budget": writer_budget, "post_quantization": asdict(observation)}
             source_failure = None
         except Exception as error:
             final_rgb = {"passed": False, "failure": _failure(error, "final_rgb_observability")}
