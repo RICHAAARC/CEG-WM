@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, establish_contract, pending_observations, run_canary, sha256_file, valid_observation, validate_final_publication
+from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, clear_stale_lock, establish_contract, generation_digest, pending_observations, run_canary, run_transaction, sha256_file, valid_generation, valid_observation, validate_final_publication
 
 
 def config() -> dict:
@@ -91,3 +91,30 @@ def test_malformed_contract_fails_closed_and_malformed_records_retry(tmp_path: P
     else: raise AssertionError("malformed contract accepted")
     (tmp_path / "generation_checkpoint.json").write_text("[]")
     assert not valid_observation(tmp_path, config(), CONDITIONS[0], "clean_negative")
+
+
+def test_transaction_locks_generation_and_quarantines_final_on_failure(tmp_path: Path) -> None:
+    prepare_generation(tmp_path); run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    (tmp_path / "generation_checkpoint.json").write_text("{}")
+    def generate():
+        assert (tmp_path / ".run.lock").exists()
+        try:
+            with RunLock(tmp_path): pass
+        except RuntimeError: pass
+        else: raise AssertionError("nested lock acquired")
+        raise RuntimeError("generation failed")
+    try: run_transaction(tmp_path, config(), generate, lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    except RuntimeError: pass
+    assert not (tmp_path / ".run.lock").exists()
+    assert list((tmp_path / "quarantine").glob("canary_result.json.*"))
+
+
+def test_malformed_generation_returns_false_without_exception(tmp_path: Path) -> None:
+    for payload in ([], {}, {"identity": {}}, {"identity": config(), "files": {}}, {"identity": config(), "files": {"clean.png": 3}}):
+        atomic_json(tmp_path / "generation_checkpoint.json", payload)
+        assert not valid_generation(tmp_path, config()) and generation_digest(tmp_path) is None
+
+
+def test_clear_stale_lock_returns_owner(tmp_path: Path) -> None:
+    atomic_json(tmp_path / ".run.lock", {"pid": 1, "token": "old"})
+    assert clear_stale_lock(tmp_path)["token"] == "old" and not (tmp_path / ".run.lock").exists()

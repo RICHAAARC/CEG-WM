@@ -260,8 +260,10 @@ def validate_final_publication(run_dir: Path) -> bool:
     if not isinstance(manifest, dict) or not isinstance(result, dict) or result.get("engineering_canary_complete") is not True or not isinstance(result.get("observations"), list) or len(result["observations"]) != 12: return False
     keys = ("generation_digest", "observation_set_digest", "csv_sha256")
     if any(not isinstance(manifest.get(key), str) or manifest.get(key) != result.get(key) for key in keys): return False
-    if hashlib.sha256((run_dir / "scores.csv").read_bytes()).hexdigest() != manifest["csv_sha256"]: return False
-    return all(isinstance(manifest.get(key), str) and len(manifest[key]) == 64 for key in ("result_sha256", "scores_sha256")) and valid_file(run_dir / "canary_result.json", manifest["result_sha256"]) and valid_file(run_dir / "scores.csv", manifest["scores_sha256"])
+    try:
+        if hashlib.sha256((run_dir / "scores.csv").read_bytes()).hexdigest() != manifest["csv_sha256"]: return False
+        return all(isinstance(manifest.get(key), str) and len(manifest[key]) == 64 for key in ("result_sha256", "scores_sha256")) and valid_file(run_dir / "canary_result.json", manifest["result_sha256"]) and valid_file(run_dir / "scores.csv", manifest["scores_sha256"])
+    except OSError: return False
 
 
 def main() -> None:
