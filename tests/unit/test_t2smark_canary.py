@@ -67,3 +67,10 @@ def test_lock_rejects_second_runner_and_releases_own_token(tmp_path: Path) -> No
         except RuntimeError as exc: assert "locked" in str(exc)
         else: raise AssertionError("second runner acquired lock")
     assert not (tmp_path / ".run.lock").exists()
+
+
+def test_persisted_records_exclude_secret_and_raw_key_fixture_values(tmp_path: Path) -> None:
+    prepare_generation(tmp_path)
+    run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    text = "\n".join(path.read_text() for path in tmp_path.rglob("*.json"))
+    assert "HF_TOKEN" not in text and "master_key" not in text and "session_key" not in text and "message_bits" not in text
