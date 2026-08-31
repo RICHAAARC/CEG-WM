@@ -26,10 +26,23 @@ class AttackCondition:
 
 FORMAL_ATTACK_CONDITIONS = (
     AttackCondition("clean", "clean_no_attack", ()),
-    AttackCondition("compression", "jpeg_q50", (("quality", "50"),)),
-    AttackCondition("geometric", "resize_50_bicubic_restore", (("scale", "0.50"), ("restore", "bicubic"))),
-    AttackCondition("geometric", "center_crop_80_restore", (("retained_area", "0.80"), ("restore", "resize"))),
-    AttackCondition("photometric", "gaussian_blur_sigma_1px", (("sigma_px", "1.0"),)),
+    AttackCondition("compression", "jpeg_q50", (
+        ("format", "JPEG"), ("quality", "50"), ("subsampling", "2 (4:2:0)"),
+        ("optimize", "false"), ("progressive", "false"),
+    )),
+    AttackCondition("geometric", "resize_50_bicubic_restore", (
+        ("scale", "0.50"), ("rounding", "python_round_ties_to_even"),
+        ("downsample_interpolation", "PIL.Image.Resampling.BICUBIC"),
+        ("restore_interpolation", "PIL.Image.Resampling.BICUBIC"),
+    )),
+    AttackCondition("geometric", "center_crop_80_restore", (
+        ("retained_area_target", "0.80"), ("linear_scale", "sqrt(0.80)"),
+        ("rounding", "python_round_ties_to_even"),
+        ("restore_interpolation", "PIL.Image.Resampling.BICUBIC"),
+    )),
+    AttackCondition("photometric", "gaussian_blur_sigma_1px", (
+        ("sigma_px", "1.0"), ("pillow_radius", "1.0"),
+    )),
     AttackCondition("geometric", "rotation_10_bicubic_reflect_center_crop_v1", (("degrees", "10"), ("fill_crop_policy", "reflect_center_crop_v1"))),
 )
 

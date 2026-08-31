@@ -25,7 +25,20 @@ from cegwm.baselines.protocol import (
     per_method_scale,
     rotation_execution_blocker,
 )
-from cegwm.baselines.attacks import ROTATION_ATTACK_ID, RotationAttackResult, rotation_10_bicubic_reflect_center_crop
+from cegwm.baselines.attacks import (
+    CENTER_CROP_80_RESTORE_ATTACK_ID,
+    GAUSSIAN_BLUR_SIGMA_1PX_ATTACK_ID,
+    JPEG_Q50_ATTACK_ID,
+    RESIZE_50_BICUBIC_RESTORE_ATTACK_ID,
+    ROTATION_ATTACK_ID,
+    FrozenAttackResult,
+    RotationAttackResult,
+    center_crop_80_restore,
+    gaussian_blur_sigma_1px,
+    jpeg_q50,
+    resize_50_bicubic_restore,
+    rotation_10_bicubic_reflect_center_crop,
+)
 
 __all__ = [
     "PRIMARY_BASELINES",
@@ -34,6 +47,11 @@ __all__ = [
     "FINAL_BASELINE_LONG_TABLE_FIELDS",
     "FINAL_BASELINE_PRIMARY_CONDITION_ORDER",
     "ROTATION_ATTACK_ID",
+    "JPEG_Q50_ATTACK_ID",
+    "RESIZE_50_BICUBIC_RESTORE_ATTACK_ID",
+    "CENTER_CROP_80_RESTORE_ATTACK_ID",
+    "GAUSSIAN_BLUR_SIGMA_1PX_ATTACK_ID",
+    "FrozenAttackResult",
     "RotationAttackResult",
     "CLEAN_CONFIRMATION_NEGATIVES",
     "EVALUATION_PHYSICAL_UNITS",
@@ -50,5 +68,9 @@ __all__ = [
     "per_method_scale",
     "rotation_execution_blocker",
     "rotation_10_bicubic_reflect_center_crop",
+    "jpeg_q50",
+    "resize_50_bicubic_restore",
+    "center_crop_80_restore",
+    "gaussian_blur_sigma_1px",
     "validate_observation",
 ]

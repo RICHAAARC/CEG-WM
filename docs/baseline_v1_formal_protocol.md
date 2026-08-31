@@ -36,6 +36,21 @@ and unwatermarked-negative images: clean; JPEG quality 50; resize to 50% then
 bicubic restore; center crop retaining 80% area then restore; Gaussian blur
 sigma 1.0 px; rotation 10 degrees.
 
+`jpeg_q50` is a Pillow RGB JPEG round trip with `format=JPEG`, `quality=50`,
+`subsampling=2` (4:2:0), `optimize=False`, and `progressive=False`.
+`resize_50_bicubic_restore` computes `max(1, round(W*0.50))` and
+`max(1, round(H*0.50))` using Python's ties-to-even `round`, downsamples with
+Pillow BICUBIC, then restores to `(W,H)` with Pillow BICUBIC.
+`center_crop_80_restore` uses linear scale `sqrt(0.80)`, computes each crop size
+as `max(1, round(dimension*sqrt(0.80)))` with the same rounding, takes
+`(left, top, left+crop_w, top+crop_h)` where `left=(W-crop_w)//2` and
+`top=(H-crop_h)//2`, then restores with Pillow BICUBIC. `gaussian_blur_sigma_1px`
+uses `ImageFilter.GaussianBlur(radius=1.0)`; this protocol names that radius
+`sigma_px=1.0`. Each attack records its actual sizes/crop and frozen parameters.
+Pillow and JPEG codec output bytes may vary by library version, so provenance
+records library versions and the output digest; this protocol does not claim
+cross-version byte identity.
+
 Rotation uses attack ID `rotation_10_bicubic_reflect_center_crop_v1`: ordinary
 uint8 sRGB H×W×3 input (`H,W>=3`) whose computed `p_x<W,p_y<H`, +10.0 degrees in Pillow's visual
 counter-clockwise convention, pixel-center center `(W-1)/2,(H-1)/2`, bicubic
