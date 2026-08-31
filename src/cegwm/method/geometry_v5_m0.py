@@ -237,7 +237,7 @@ def estimate_rotation_scale_from_peak_pairs(
 def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTemplatePoint]) -> Any:
     """Torch FFT writer with the same relative coefficient and postcast checks."""
 
-    if getattr(latents, "ndim", None) != 4 or tuple(latents.shape[1:]) != (4, 64, 64):
+    if getattr(latents, "ndim", None) != 4 or tuple(latents.shape) != (1, 4, 64, 64):
         raise ValueError("M0 torch latents must be 1x4x64x64")
     torch = __import__("torch")
     if not bool(latents.dtype.is_floating_point) or not bool(torch.isfinite(latents).all()):

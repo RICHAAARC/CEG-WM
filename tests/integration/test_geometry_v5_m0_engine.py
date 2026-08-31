@@ -70,6 +70,31 @@ def test_concrete_estimator_fails_closed_for_flat_or_ambiguous_spectra_when_torc
 
 
 @pytest.mark.integration
+def test_concrete_estimator_rejects_batch_before_fft_or_candidate_scoring_when_torch_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    calls = {"fft2": 0, "candidate_score": 0}
+    original_fft2 = torch.fft.fft2
+    original_candidate_score = runtime._normalized_template_match_torch
+
+    def counted_fft2(*args: object, **kwargs: object) -> object:
+        calls["fft2"] += 1
+        return original_fft2(*args, **kwargs)
+
+    def counted_candidate_score(*args: object, **kwargs: object) -> tuple[float, float]:
+        calls["candidate_score"] += 1
+        return original_candidate_score(*args, **kwargs)
+
+    monkeypatch.setattr(torch.fft, "fft2", counted_fft2)
+    monkeypatch.setattr(runtime, "_normalized_template_match_torch", counted_candidate_score)
+    recovered = torch.randn((2, 4, 64, 64), dtype=torch.float32)
+
+    assert estimate_bound_blind_rst(recovered).status.value == "FAILED"
+    assert calls == {"fft2": 0, "candidate_score": 0}
+
+
+@pytest.mark.integration
 def test_concrete_estimator_returns_signed_translation_after_identity_normalization_when_torch_available() -> None:
     torch = pytest.importorskip("torch")
     functional = torch.nn.functional

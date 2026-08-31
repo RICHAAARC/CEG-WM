@@ -199,6 +199,25 @@ def test_torch_template_injection_rejects_bad_entries_and_nonfinite_weights_when
 
 
 @pytest.mark.unit
+def test_torch_template_injection_rejects_batch_before_fft_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    torch = pytest.importorskip("torch")
+    calls = {"fft2": 0}
+    original_fft2 = torch.fft.fft2
+
+    def counted_fft2(*args: object, **kwargs: object) -> object:
+        calls["fft2"] += 1
+        return original_fft2(*args, **kwargs)
+
+    monkeypatch.setattr(torch.fft, "fft2", counted_fft2)
+    latents = torch.randn((2, 4, 64, 64), dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="1x4x64x64"):
+        method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
+
+    assert calls == {"fft2": 0}
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("dtype_name", ("float32", "float16"))
 def test_torch_template_injection_accepts_seeded_random_cpu_latent_when_available(dtype_name: str) -> None:
     torch = pytest.importorskip("torch")

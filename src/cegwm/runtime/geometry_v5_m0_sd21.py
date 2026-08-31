@@ -219,7 +219,7 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
     try:
         identity = _validate_frozen_identity(identity)
         torch = __import__("torch")
-        if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape[1:]) != (4, 64, 64) or not bool(torch.isfinite(recovered_z_t).all()):
+        if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape) != (1, 4, 64, 64) or not bool(torch.isfinite(recovered_z_t).all()):
             raise ValueError("recovered z_T shape or finiteness differs")
         from cegwm.method.geometry_v5_m0 import assemble_attacked_to_canonical_similarity, build_hermitian_x_template
 
