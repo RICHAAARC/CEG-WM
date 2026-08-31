@@ -1,0 +1,169 @@
+{
+  "contract_version": "geometry_v5_p0_contract_v1",
+  "contract_id": "cegwm-geometry-v5-p0-governance-validation-plane-v1",
+  "method_id": "geometry_v5_training_free_initial_noise_sync",
+  "stage": {
+    "current_stage": "V5-P0",
+    "kind": "governance_validation_plane_only",
+    "preferred_progression": [
+      "V5-M0_SD2_1_faithful_global_RST_reproduction",
+      "V5-M1_key_domain_separation_and_holdout_safety",
+      "V5-C0_keyed_local_latent_tiles_for_crop_crop_rescale",
+      "V5-I0_unchanged_content_detector_integration",
+      "V5-SD35_after_method_freeze_and_separately_proven_fixed_repeatable_inversion"
+    ]
+  },
+  "method_semantics": {
+    "route": "training_free_initial_noise_latent_space",
+    "frozen_components": [
+      "pretrained_diffusion",
+      "VAE",
+      "detector_components"
+    ],
+    "forbidden": [
+      "training",
+      "tuning",
+      "fine_tuning",
+      "learned_synchronization",
+      "model_parameter_updates",
+      "per_image_optimization",
+      "search_budget_adaptation"
+    ]
+  },
+  "key_hierarchy": {
+    "root": "geometry_root_key",
+    "derivation": "HKDF-SHA256",
+    "domains": [
+      "k_search",
+      "k_fit",
+      "k_validate"
+    ],
+    "source_forbidden": [
+      "content_subkey"
+    ],
+    "raw_key_or_pattern_export": "forbidden"
+  },
+  "writer_conceptual_flow": [
+    "geometry_root_key",
+    "k_search_k_fit_k_validate",
+    "initial_z_T_writes_global_X_shaped_multiscale_spectrum",
+    "keyed_canonical_local_fit_tiles",
+    "disjoint_holdout_tiles",
+    "normal_frozen_diffusion",
+    "final_RGB"
+  ],
+  "detector_boundary": {
+    "allowed_inputs": [
+      "attacked_ordinary_RGB",
+      "geometry_root_key",
+      "frozen_model_scheduler_inversion_identities"
+    ],
+    "forbidden_inputs": [
+      "clean_RGB",
+      "pre_attack_RGB",
+      "original_z_T",
+      "writer_tensors",
+      "writer_residuals",
+      "true_transform_parameters",
+      "true_crop_parameters",
+      "true_attack_parameters",
+      "content_scores",
+      "content_keys",
+      "evaluation_truth",
+      "retry",
+      "fallback"
+    ],
+    "inversion": "fixed_and_later_frozen_recovers_z_T"
+  },
+  "roles": {
+    "k_search": {
+      "purpose": "propose_fixed_R_S_T_candidates_only",
+      "may_make_RELIABLE": false
+    },
+    "k_fit": {
+      "purpose": "at_most_one_correspondence_per_local_tile_and_deterministic_similarity_fit",
+      "missing_tiles": "allowed",
+      "truth_selected_correspondence_or_candidate": "forbidden"
+    },
+    "k_validate": {
+      "purpose": "disjoint_holdout_safety_validation_only",
+      "may_participate_in": [],
+      "forbidden_participation": [
+        "candidate_proposal",
+        "correspondence",
+        "parameter_estimation",
+        "tie_break",
+        "threshold_tuning",
+        "fallback"
+      ]
+    }
+  },
+  "public_output": {
+    "fields": [
+      "H_hat",
+      "corners_hat",
+      "support",
+      "reliability",
+      "status"
+    ],
+    "H_hat": "finite_normalized_3x3_attacked_to_canonical_similarity_matrix",
+    "corners_hat": "TL_TR_BR_BL_normalized_coordinates",
+    "status_enum": [
+      "RELIABLE",
+      "UNRELIABLE",
+      "STOPPED"
+    ]
+  },
+  "reliable_structure": {
+    "meaning": "safe_rectification_only_never_watermark_presence",
+    "required": [
+      "search_candidate",
+      "fit_support",
+      "macro_region_coverage",
+      "residual",
+      "holdout_correlation_and_PSR",
+      "cross_scale_R_S_consistency",
+      "valid_corners",
+      "legal_conditioning"
+    ],
+    "numeric_gates": "unbound_until_later_exact_bound_pre_run_contract"
+  },
+  "failure_policy": {
+    "operational_failures": [
+      "missing",
+      "nonfinite",
+      "identity_mismatch",
+      "holdout_failure",
+      "regeneration_destruction"
+    ],
+    "outcome": "UNRELIABLE_or_STOPPED_according_to_predeclared_operational_failure",
+    "forbidden": [
+      "fabricated_H",
+      "identity_H_fallback",
+      "retry",
+      "replacement",
+      "alternate_inversion",
+      "geometry_voting",
+      "geometry_positive_evidence"
+    ]
+  },
+  "content_integration": {
+    "content_and_geometry_keys": "strictly_separated",
+    "content_detector_preprocessing_score_and_tau": "unchanged",
+    "geometry_may_add_positive_evidence": false,
+    "rectification_condition": "geometry_RELIABLE_and_later_frozen_original_s0_boundary_interval",
+    "s1": "exact_same_content_path_and_tau",
+    "tau_or_delta": "unbound"
+  },
+  "later_pre_run_contracts": [
+    "numeric_gates_and_thresholds",
+    "tile_layout",
+    "X_template_parameters",
+    "inversion_schedule",
+    "fixed_seeds",
+    "attack_roster",
+    "denominators"
+  ],
+  "evidence_ceiling": "P0_local_static_engineering_only_science_denominator_0",
+  "base_identity": "direct_child_of_clean_main_5af1fadd6a8025c6b2664703d519606238a89143_parallel_to_Geometry_V4_not_derived_from_Geometry_V4_method_code"
+}
