@@ -31,7 +31,7 @@ def _passing_raw(case: dict[str, object]) -> GeometryV5M0RawRecord:
     )
 
 
-def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, fail_generation: bool = False, fail_case: str | None = None, generation_output: object | None = None) -> diagnostic._Bindings:
+def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, fail_generation: bool = False, fail_case: str | None = None, generation_output: object | None = None, fail_preflight: bool = False) -> diagnostic._Bindings:
     contract = load_geometry_v5_m0_contract(_ROOT)
     cases = [case for case in contract.config["development"]["attacks"] if case["attack_id"] in {"identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"}]
 
@@ -63,8 +63,14 @@ def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, f
         calls["detect"].append(attacked_rgb)
         return _passing_raw(cases[attacked_rgb])
 
+    def preflight(_repo_root: Path) -> tuple[list[dict[str, object]], bool]:
+        calls.setdefault("preflight", []).append("preflight")
+        if fail_preflight:
+            return ([{"stage": "known_latent_rst", "case_id": "scale_1.1", "status": "METHOD_PREFLIGHT_FAILED", "raw_estimates": None, "diagnostics": {"error_class": "ValueError"}}], False)
+        return ([{"stage": "direct_initial_z_t_identity", "case_id": "identity", "status": "METHOD_PREFLIGHT_PASSED", "raw_estimates": {"rotation_degrees": 0.0, "scale": 1.0, "tx": 0.0, "ty": 0.0, "H_hat": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))}, "diagnostics": {"science_denominator": 0}}], True)
+
     calls.setdefault("attack_image", [])
-    return diagnostic._Bindings(load, initial, generate, attack, detect)
+    return diagnostic._Bindings(load, initial, generate, attack, detect, preflight)
 
 
 @pytest.mark.integration
@@ -74,6 +80,7 @@ def test_fake_diagnostic_runs_one_generation_four_independent_cases_and_freezes_
     output = tmp_path / "diagnostic.json"
     result, complete = diagnostic.run_diagnostic(_ROOT, output, _fake_bindings(calls), events.append)
     assert complete and calls["load"] == ["load"] and calls["initial"] == calls["generate"] == [7501]
+    assert calls["preflight"] == ["preflight"]
     assert calls["attack"] == ["identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"] and len(calls["attack_image"]) == len(calls["detect"]) == 4
     assert all(events[index:index + 2] == ["raw_frozen", "truth_evaluated"] for index in range(0, 8, 2))
     assert result["diagnostic_denominator"] == 4 and result["science_denominator"] == 0 and result["claim"] == "nonformal_colab_method_diagnostic_only"
@@ -81,6 +88,16 @@ def test_fake_diagnostic_runs_one_generation_four_independent_cases_and_freezes_
     assert text == diagnostic._canonical_json(json.loads(text)).decode("utf-8") and "secret" not in text
     with pytest.raises(FileExistsError):
         diagnostic.run_diagnostic(_ROOT, output, _fake_bindings(calls))
+
+
+@pytest.mark.integration
+def test_preflight_failure_writes_create_only_evidence_and_never_loads_or_generates(tmp_path: Path) -> None:
+    calls: dict[str, list[object]] = {name: [] for name in ("load", "initial", "generate", "attack", "detect")}
+    result, complete = diagnostic.run_diagnostic(_ROOT, tmp_path / "preflight-failed.json", _fake_bindings(calls, fail_preflight=True))
+    assert not complete and calls["preflight"] == ["preflight"]
+    assert calls["load"] == calls["initial"] == calls["generate"] == calls["attack"] == calls["detect"] == []
+    assert len(result["cases"]) == 4 and all(case["failure_stage"] == "method_preflight" and case["raw"] is None for case in result["cases"])
+    assert result["method_preflight"][0]["stage"] == "known_latent_rst"
 
 
 @pytest.mark.integration
@@ -126,3 +143,5 @@ def test_diagnostic_module_is_lazy_concrete_and_has_no_formal_gate() -> None:
     assert all(name in source for name in ("load_bound_sd21_pipeline", "generate_bound_sd21", "recover_and_estimate_bound_sd21"))
     assert "aggregate" not in source and "GeometryV5Observation" not in source and "RELIABLE" not in source
     assert "diagnostic_only_not_a_gate" in source and "fake" not in diagnostic._DIAGNOSTIC_ID
+    assert diagnostic._METHOD_SOURCE_EXACT == "fb48ad94a1aedd8b30adbc90918cdebe4973b20b"
+    assert "method_preflight" in source and "_preflight_blocked_case" in source

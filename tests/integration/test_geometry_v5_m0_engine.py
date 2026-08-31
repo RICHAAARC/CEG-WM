@@ -104,7 +104,7 @@ def test_known_latent_rotation_scale_direction_is_attacked_to_canonical_when_tor
     functional = torch.nn.functional
     from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
 
-    scale, phi = 1.1, 10.0
+    scale, phi = 1.0 / 1.1, 10.0
     rotation = -phi
     forward_t = (0.08, 0.0)
     angle = math.radians(rotation)

@@ -71,12 +71,12 @@ def test_m0_direct_injected_z_t_writer_detector_closure_uses_relative_setting_on
 
 @pytest.mark.unit
 def test_known_latent_rotation_scale_direction_is_attacked_to_canonical_and_blind() -> None:
-    size, forward_rotation_degrees, forward_scale = 32, 10.0, 1.1
+    size, forward_rotation_degrees, attacked_to_canonical_scale = 32, 10.0, 1.0 / 1.1
     spectrum = [[0j for _ in range(size)] for _ in range(size)]
     angle = math.radians(forward_rotation_degrees)
     for point in method.build_hermitian_x_template():
-        observed_x = forward_scale * (math.cos(angle) * point.frequency_x - math.sin(angle) * point.frequency_y)
-        observed_y = forward_scale * (math.sin(angle) * point.frequency_x + math.cos(angle) * point.frequency_y)
+        observed_x = attacked_to_canonical_scale * (math.cos(angle) * point.frequency_x - math.sin(angle) * point.frequency_y)
+        observed_y = attacked_to_canonical_scale * (math.sin(angle) * point.frequency_x + math.cos(angle) * point.frequency_y)
         if not (-0.5 <= observed_x <= 0.5 and -0.5 <= observed_y <= 0.5):
             continue
         y, x = method._frequency_bin(observed_y, size), method._frequency_bin(observed_x, size)
@@ -84,10 +84,10 @@ def test_known_latent_rotation_scale_direction_is_attacked_to_canonical_and_blin
     plane = tuple(tuple(value.real for value in row) for row in method._idft2(spectrum))
     recovered = tuple(plane if channel == 3 else tuple(tuple(0.0 for _ in range(size)) for _ in range(size)) for channel in range(4))
     estimate = method.estimate_rotation_scale_from_recovered_z_t(
-        recovered, ((0.0, 1.0), (10.0, 1.1), (8.0, 1.1), (10.0, 1.0)),
+        recovered, ((0.0, 1.0), (10.0, attacked_to_canonical_scale), (8.0, attacked_to_canonical_scale), (10.0, 1.0)),
     )
     assert estimate.rotation_degrees == pytest.approx(-10.0)
-    assert estimate.scale == pytest.approx(1.1)
+    assert estimate.scale == pytest.approx(attacked_to_canonical_scale)
     assert estimate.diagnostics["nms_runner_up_score"] < estimate.score
     flat = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
     with pytest.raises(ValueError, match="usable"):

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -13,7 +15,7 @@ from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord, load_geometry_v
 
 
 _DIAGNOSTIC_ID = "geometry_v5_m0_sd21_small_canary_v1"
-_METHOD_SOURCE_EXACT = "8bbf0b41dfc54efa88628e768dc4048ce599bf8c"
+_METHOD_SOURCE_EXACT = "fb48ad94a1aedd8b30adbc90918cdebe4973b20b"
 _CASE_IDS = ("identity", "rotation_+10", "scale_1.1", "translation_x_+0.08")
 
 
@@ -26,6 +28,7 @@ class _Bindings:
     generate: Callable[[Any, str, Any], Any]
     attack: Callable[[Any, Mapping[str, Any]], Any]
     detect: Callable[[Any, Any], GeometryV5M0RawRecord]
+    method_preflight: Callable[[Path], tuple[list[dict[str, Any]], bool]] | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,16 +89,23 @@ def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, even
     identity = SD21M0Identity()
     records: list[dict[str, Any]] = []
     try:
+        preflight, preflight_passed = (bindings.method_preflight or _run_method_preflight)(repo_root)
+    except Exception as error:
+        preflight, preflight_passed = [_preflight_failure("method_preflight_setup", None, error)], False
+    if not preflight_passed:
+        records = [_preflight_blocked_case(case["attack_id"]) for case in cases]
+        return _write_result(output_json, unit, identity, records, preflight)
+    try:
         pipeline = bindings.load_pipeline()
     except Exception as error:
         records = [_failed_case(case["attack_id"], "model_load", error, event_sink) for case in cases]
-        return _write_result(output_json, unit, identity, records)
+        return _write_result(output_json, unit, identity, records, preflight)
     try:
         initial_z_t = bindings.initial_z_t(pipeline, unit.seed)
         final_rgb = _extract_single_rgb_image(bindings.generate(pipeline, unit.prompt, initial_z_t))
     except Exception as error:
         records = [_failed_case(case["attack_id"], "generation", error, event_sink) for case in cases]
-        return _write_result(output_json, unit, identity, records)
+        return _write_result(output_json, unit, identity, records, preflight)
     for case in cases:
         try:
             attacked_rgb = bindings.attack(final_rgb, case)
@@ -110,7 +120,127 @@ def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, even
             records.append(_record_after_raw_freeze(case, raw, event_sink))
         except Exception as error:
             records.append(_failed_case(case["attack_id"], "detector", error, event_sink))
-    return _write_result(output_json, unit, identity, records)
+    return _write_result(output_json, unit, identity, records, preflight)
+
+
+def _run_method_preflight(repo_root: Path) -> tuple[list[dict[str, Any]], bool]:
+    """Exercise only the deterministic initial-zT method before model load.
+
+    These are engineering preflights, not image evidence: each result is kept
+    under ``method_preflight`` and the science denominator remains zero.
+    """
+
+    method = _load_method_module(repo_root)
+    records: list[dict[str, Any]] = []
+    try:
+        size = 16
+        latent = tuple(
+            tuple(tuple(math.sin((channel + 1) * (row + 1) * (column + 2)) for column in range(size)) for row in range(size))
+            for channel in range(4)
+        )
+        injected = method.inject_initial_z_t_x_template(latent, method.build_hermitian_x_template())
+        estimate = method.estimate_rotation_scale_from_recovered_z_t(
+            injected, ((0.0, 1.0), (10.0, 1.0 / 1.1), (-10.0, 1.0)),
+        )
+        if estimate.rotation_degrees != 0.0 or estimate.scale != 1.0:
+            raise ValueError("direct writer detector identity closure differs")
+        records.append(_preflight_success("direct_initial_z_t_identity", "identity", estimate, 0.0, 0.0, {"latent_side": size}))
+    except Exception as error:
+        records.append(_preflight_failure("direct_initial_z_t_identity", "identity", error))
+    for case_id, spectral_rotation, spectral_scale, expected_rotation, expected_scale in (
+        ("rotation_+10", 10.0, 1.0, -10.0, 1.0),
+        ("scale_1.1", 0.0, 1.0 / 1.1, 0.0, 1.0 / 1.1),
+    ):
+        try:
+            recovered = _known_spectral_latent(method, 32, spectral_rotation, spectral_scale)
+            estimate = method.estimate_rotation_scale_from_recovered_z_t(
+                recovered, ((0.0, 1.0), (spectral_rotation, spectral_scale), (spectral_rotation - 2.0, spectral_scale)),
+            )
+            if estimate.rotation_degrees != expected_rotation or estimate.scale != expected_scale:
+                raise ValueError("known latent attacked_to_canonical R/S differs")
+            records.append(_preflight_success("known_latent_rst", case_id, estimate, 0.0, 0.0, {"latent_side": 32}))
+        except Exception as error:
+            records.append(_preflight_failure("known_latent_rst", case_id, error))
+    try:
+        side, requested_tx, grid_shift = 64, 0.08, 5
+        spectrum = [[0j for _ in range(side)] for _ in range(side)]
+        for y, x in method._template_support(method.build_hermitian_x_template(), side, side):
+            spectrum[y][x] = 1.0 + 0j
+        canonical = tuple(tuple(value.real for value in row) for row in method._idft2(spectrum))
+        observed = tuple(
+            tuple(canonical[row][(column + grid_shift) % side] for column in range(side))
+            for row in range(side)
+        )
+        tx, ty = method.estimate_translation_phase_correlation(canonical, observed)
+        if abs(tx - requested_tx) > 1.0 / side or ty != 0.0:
+            raise ValueError("known latent attacked_to_canonical T differs")
+        H = method.assemble_attacked_to_canonical_similarity(0.0, 1.0, tx, ty)
+        records.append({
+            "stage": "known_latent_rst", "case_id": "translation_x_+0.08", "status": "METHOD_PREFLIGHT_PASSED",
+            "raw_estimates": {"rotation_degrees": 0.0, "scale": 1.0, "tx": tx, "ty": ty, "H_hat": H},
+            "diagnostics": {"requested_tx": requested_tx, "translation_grid_resolution": 1.0 / side},
+        })
+    except Exception as error:
+        records.append(_preflight_failure("known_latent_rst", "translation_x_+0.08", error))
+    return records, all(record["status"] == "METHOD_PREFLIGHT_PASSED" for record in records)
+
+
+def _load_method_module(repo_root: Path) -> Any:
+    """Load the isolated pure method file without importing optional torch code."""
+
+    source = repo_root / "src" / "cegwm" / "method" / "geometry_v5_m0.py"
+    spec = importlib.util.spec_from_file_location("_geometry_v5_m0_preflight", source)
+    if spec is None or spec.loader is None:
+        raise ImportError("method preflight source cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _known_spectral_latent(method: Any, side: int, rotation_degrees: float, scale: float) -> tuple[tuple[tuple[float, ...], ...], ...]:
+    spectrum = [[0j for _ in range(side)] for _ in range(side)]
+    angle = math.radians(rotation_degrees)
+    for point in method.build_hermitian_x_template():
+        x = scale * (math.cos(angle) * point.frequency_x - math.sin(angle) * point.frequency_y)
+        y = scale * (math.sin(angle) * point.frequency_x + math.cos(angle) * point.frequency_y)
+        if -0.5 <= x <= 0.5 and -0.5 <= y <= 0.5:
+            spectrum[method._frequency_bin(y, side)][method._frequency_bin(x, side)] = 100.0 + 0j
+    plane = tuple(tuple(value.real for value in row) for row in method._idft2(spectrum))
+    return tuple(plane if channel == 3 else tuple(tuple(0.0 for _ in range(side)) for _ in range(side)) for channel in range(4))
+
+
+def _preflight_success(stage: str, case_id: str, estimate: Any, tx: float, ty: float, diagnostics: Mapping[str, Any]) -> dict[str, Any]:
+    from_method = estimate.diagnostics
+    H = _load_h_from_estimate(estimate, tx, ty)
+    return {
+        "stage": stage, "case_id": case_id, "status": "METHOD_PREFLIGHT_PASSED",
+        "raw_estimates": {"rotation_degrees": estimate.rotation_degrees, "scale": estimate.scale, "tx": tx, "ty": ty, "H_hat": H},
+        "diagnostics": {**dict(from_method), **dict(diagnostics)},
+    }
+
+
+def _load_h_from_estimate(estimate: Any, tx: float, ty: float) -> tuple[tuple[float, float, float], ...]:
+    rotation = math.radians(float(estimate.rotation_degrees))
+    scale = float(estimate.scale)
+    cosine, sine = scale * math.cos(rotation), scale * math.sin(rotation)
+    return ((cosine, -sine, tx), (sine, cosine, ty), (0.0, 0.0, 1.0))
+
+
+def _preflight_failure(stage: str, case_id: str | None, error: Exception) -> dict[str, Any]:
+    return {
+        "stage": stage, "case_id": case_id, "status": "METHOD_PREFLIGHT_FAILED",
+        "raw_estimates": None, "diagnostics": {"error_class": type(error).__name__},
+    }
+
+
+def _preflight_blocked_case(attack_id: str) -> dict[str, Any]:
+    """Retain the four final cases without inventing a detector raw result."""
+
+    return {
+        "attack_id": attack_id, "raw": None, "truth_errors": _failed_truth_errors(),
+        "failure_stage": "method_preflight", "error_class": "MethodPreflightFailed",
+    }
 
 
 def _extract_single_rgb_image(generation_output: Any) -> Any:
@@ -194,12 +324,12 @@ def _corner_rms(estimated: tuple[tuple[float, float, float], ...], truth: tuple[
     return math.sqrt(squared / 4.0)
 
 
-def _write_result(output_json: Path, unit: Any, identity: Any, cases: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
-    result = {"diagnostic_id": _DIAGNOSTIC_ID, "method_source_exact": _METHOD_SOURCE_EXACT, "model": {"id": identity.model_family, "revision": identity.model_revision}, "seed": unit.seed, "unit_id": unit.unit_id, "cases": cases, "diagnostic_denominator": 4, "science_denominator": 0, "claim": "nonformal_colab_method_diagnostic_only"}
+def _write_result(output_json: Path, unit: Any, identity: Any, cases: list[dict[str, Any]], preflight: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+    result = {"diagnostic_id": _DIAGNOSTIC_ID, "method_source_exact": _METHOD_SOURCE_EXACT, "model": {"id": identity.model_family, "revision": identity.model_revision}, "seed": unit.seed, "unit_id": unit.unit_id, "method_preflight": preflight, "cases": cases, "diagnostic_denominator": 4, "science_denominator": 0, "claim": "nonformal_colab_method_diagnostic_only"}
     if len(cases) != 4:
         raise RuntimeError("diagnostic retention differs")
     _exclusive_json(output_json, result)
-    return result, all(case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in cases)
+    return result, all(case["raw"] is not None and case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in cases)
 
 
 def _canonical_json(value: Any) -> bytes:
