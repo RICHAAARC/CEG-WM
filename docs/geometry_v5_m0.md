@@ -53,6 +53,12 @@ model. Its one concrete combined entry accepts only a bound pipeline, attacked
 ordinary RGB, and the frozen runtime identity. It has no parameter for truth,
 clean RGB, original latent, prompt, or attack values.
 
+The runtime accepts only the exact frozen `SD21M0Identity`: model family and
+revision, 512×512/4×64×64 shapes, 50 steps, eta 0, generation guidance 7.5,
+inversion guidance 1, empty inversion prompt, and VAE mode encoding. A changed
+identity is rejected before scheduler or model calls; the loader binds the same
+single identity rather than a separate hard-coded model/revision pair.
+
 For spatial forward `A=sR(theta)`, the spectral relation is
 `k_observed=A^-T k_canonical=(1/s)R(theta)k_canonical`. The blind spectral
 candidate `cR(phi)` therefore produces the public attacked-to-canonical spatial
@@ -71,6 +77,15 @@ phase peak, PSR, and zero-padding overlap as diagnostics; these never establish
 RELIABLE. Flat, non-finite, insufficiently separated spectral candidates,
 inadequate overlap, or degenerate phase surfaces return `FAILED` rather than an
 equal-score tie-break estimate.
+
+Public `H` and attack translations use centered unit-image coordinates: 1.0 is
+one full width or height, and a phase displacement of `p` latent pixels is
+`p/64`. `grid_sample(align_corners=True)` instead uses endpoint `[-1,1]`
+coordinates; the sole runtime helper converts public translation `t` to grid
+delta `2*64/(64-1)*t` (and inversely). Thus a pixel displacement maps to
+`2*p/(64-1)` in a fixture grid while retaining `p/64` in public `H`. Centered
+similarity R/S has the same linear components in both bases because their
+coordinate scales differ only by a common scalar.
 
 The real runner is create-only and retains 44 raw/evaluation records, including
 seed-wide generation failures and attack/inversion failures. Truth is read only

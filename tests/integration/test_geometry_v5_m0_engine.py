@@ -7,6 +7,9 @@ import pytest
 from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord
 from cegwm.runtime import geometry_v5_m0_sd21 as runtime
 from cegwm.runtime.geometry_v5_m0_sd21 import (
+    SD21M0Identity,
+    _grid_translation_to_unit_image,
+    _unit_image_translation_to_grid,
     estimate_bound_blind_rst,
     invert_bound_sd21_attacked_rgb,
     public_runtime_capabilities,
@@ -14,6 +17,19 @@ from cegwm.runtime.geometry_v5_m0_sd21 import (
     recover_and_estimate_from_attacked_rgb,
     run_generation_with_initial_z_t,
 )
+
+
+@pytest.mark.integration
+def test_private_coordinate_helpers_are_finite_and_match_the_public_H_basis() -> None:
+    unit = 3 / 64
+    grid = _unit_image_translation_to_grid(unit)
+    assert grid == pytest.approx(6 / 63)
+    assert _grid_translation_to_unit_image(grid) == pytest.approx(unit)
+    for invalid in (True, float("nan"), float("inf"), "0.1"):
+        with pytest.raises(ValueError, match="finite non-bool"):
+            _unit_image_translation_to_grid(invalid)
+        with pytest.raises(ValueError, match="finite non-bool"):
+            _grid_translation_to_unit_image(invalid)
 
 
 @pytest.mark.integration
@@ -56,20 +72,29 @@ def test_concrete_estimator_fails_closed_for_flat_or_ambiguous_spectra_when_torc
 @pytest.mark.integration
 def test_concrete_estimator_returns_signed_translation_after_identity_normalization_when_torch_available() -> None:
     torch = pytest.importorskip("torch")
+    functional = torch.nn.functional
     from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
 
     canonical = inject_initial_z_t_x_template_torch(
         torch.zeros((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
     )
-    # g(x)=f(x+u): a right/down canonical u appears as a negative tensor roll.
+    # g(x)=f(x+u): unit-image H translation is converted once for the grid.
+    unit_u = (3 / 64, 4 / 64)
+    coordinates = torch.linspace(-1.0, 1.0, 64)
+    observed_y, observed_x = torch.meshgrid(coordinates, coordinates, indexing="ij")
+    canonical_x = observed_x + _unit_image_translation_to_grid(unit_u[0])
+    canonical_y = observed_y + _unit_image_translation_to_grid(unit_u[1])
+    grid = torch.stack((canonical_x, canonical_y), dim=-1).unsqueeze(0)
     recovered = canonical.clone()
-    recovered[:, 3] = torch.roll(canonical[:, 3], shifts=(-4, -3), dims=(-2, -1))
+    recovered[:, 3] = functional.grid_sample(
+        canonical[:, 3].unsqueeze(1), grid, mode="bilinear", padding_mode="zeros", align_corners=True,
+    )[:, 0]
     raw = estimate_bound_blind_rst(recovered)
     assert raw.status.value == "ESTIMATE_AVAILABLE"
     assert raw.rotation_degrees == pytest.approx(0.0)
     assert raw.scale == pytest.approx(1.0)
-    assert raw.tx == pytest.approx(3 / 64)
-    assert raw.ty == pytest.approx(4 / 64)
+    assert raw.tx == pytest.approx(unit_u[0])
+    assert raw.ty == pytest.approx(unit_u[1])
 
 
 @pytest.mark.integration
@@ -92,8 +117,8 @@ def test_concrete_estimator_uses_B_times_forward_translation_in_compound_fixture
     )
     coordinates = torch.linspace(-1.0, 1.0, 64)
     observed_y, observed_x = torch.meshgrid(coordinates, coordinates, indexing="ij")
-    canonical_x = scale * (cosine * observed_x - sine * observed_y) + expected_u[0]
-    canonical_y = scale * (sine * observed_x + cosine * observed_y) + expected_u[1]
+    canonical_x = scale * (cosine * observed_x - sine * observed_y) + _unit_image_translation_to_grid(expected_u[0])
+    canonical_y = scale * (sine * observed_x + cosine * observed_y) + _unit_image_translation_to_grid(expected_u[1])
     grid = torch.stack((canonical_x, canonical_y), dim=-1).unsqueeze(0)
     recovered = canonical.clone()
     recovered[:, 3] = functional.grid_sample(
@@ -149,8 +174,8 @@ def test_concrete_combined_entry_exercises_fake_vae_ddim_components_when_availab
 
     class Scheduler:
         def __init__(self) -> None:
-            self.timesteps = [2, 1, 0]
-            self.alphas_cumprod = torch.tensor([0.9, 0.8, 0.7], dtype=torch.float32)
+            self.timesteps = list(range(50))
+            self.alphas_cumprod = torch.linspace(0.99, 0.50, 50, dtype=torch.float32)
             self.calls = 0
 
         def set_timesteps(self, _steps: int, **_kwargs: object) -> None:
@@ -160,8 +185,20 @@ def test_concrete_combined_entry_exercises_fake_vae_ddim_components_when_availab
     pipeline.device = torch.device("cpu")
     pipeline.vae, pipeline.tokenizer, pipeline.text_encoder = VAE(), Tokenizer(), TextEncoder()
     pipeline.unet, pipeline.scheduler = UNet(), Scheduler()
+    for bad_identity in (
+        SD21M0Identity(steps=1),
+        SD21M0Identity(steps=50.0),
+        SD21M0Identity(eta=0.1),
+        SD21M0Identity(model_revision="0" * 40),
+        SD21M0Identity(inversion_guidance_scale=2.0),
+    ):
+        with pytest.raises(ValueError, match="frozen SD2.1"):
+            invert_bound_sd21_attacked_rgb(pipeline, image, bad_identity)
+        assert pipeline.scheduler.calls == 0 and pipeline.vae.calls == 0 and pipeline.unet.calls == 0
+        assert recover_and_estimate_bound_sd21(pipeline, image, bad_identity).status.value == "FAILED"
+        assert pipeline.scheduler.calls == 0 and pipeline.vae.calls == 0 and pipeline.unet.calls == 0
     inverted = invert_bound_sd21_attacked_rgb(pipeline, image)
     assert inverted.shape == (1, 4, 64, 64)
-    assert pipeline.vae.calls == 1 and pipeline.unet.calls == 2 and pipeline.scheduler.calls == 1
+    assert pipeline.vae.calls == 1 and pipeline.unet.calls == 49 and pipeline.scheduler.calls == 1
     raw = recover_and_estimate_bound_sd21(pipeline, image)
     assert raw.status.value == "FAILED"

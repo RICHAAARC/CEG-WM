@@ -7,7 +7,9 @@ the network. Concrete adapters are implemented but unexecuted locally.
 from __future__ import annotations
 
 import importlib
+import math
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Callable, Mapping
 
 from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord
@@ -26,6 +28,49 @@ class SD21M0Identity:
     inversion_guidance_scale: float = 1.0
     inversion_prompt: str = ""
     vae_encoding: str = "mode_not_sampling"
+
+
+_FROZEN_IDENTITY = SD21M0Identity()
+_LATENT_SIDE = 64
+
+
+def _validate_frozen_identity(identity: Any) -> SD21M0Identity:
+    """Reject every production identity except the byte-bound M0 default."""
+
+    if type(identity) is not SD21M0Identity or not _exact_value(identity, _FROZEN_IDENTITY):
+        raise ValueError("M0 concrete runtime identity must equal the frozen SD2.1 default")
+    return identity
+
+
+def _exact_value(received: Any, expected: Any) -> bool:
+    if type(received) is not type(expected):
+        return False
+    if isinstance(expected, SD21M0Identity):
+        return all(_exact_value(getattr(received, name), getattr(expected, name)) for name in SD21M0Identity.__dataclass_fields__)
+    if isinstance(expected, tuple):
+        return len(received) == len(expected) and all(_exact_value(left, right) for left, right in zip(received, expected, strict=True))
+    return received == expected
+
+
+def _unit_image_translation_to_grid(value: Any) -> float:
+    """Convert finite public unit-image translation to align-corners grid units.
+
+    Public H translations use centered unit-image coordinates: one full image is
+    1.0 and a p-pixel shift is p/64. ``grid_sample(align_corners=True)`` uses
+    endpoint coordinates, so this is the sole unit-to-grid conversion.
+    """
+
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+        raise ValueError("unit-image translation must be finite non-bool real")
+    return (2.0 * _LATENT_SIDE / (_LATENT_SIDE - 1)) * float(value)
+
+
+def _grid_translation_to_unit_image(value: Any) -> float:
+    """Convert finite align-corners grid translation back to public H units."""
+
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+        raise ValueError("grid translation must be finite non-bool real")
+    return ((_LATENT_SIDE - 1) / (2.0 * _LATENT_SIDE)) * float(value)
 
 
 def require_sd21_optional_dependencies() -> None:
@@ -47,6 +92,7 @@ def run_generation_with_initial_z_t(
 ) -> Any:
     """Call an injected frozen generator once with fixed M0 generation identity."""
 
+    identity = _validate_frozen_identity(identity)
     if not callable(generator) or not isinstance(prompt, str) or not prompt.strip():
         raise TypeError("M0 generator adapter must be callable")
     if initial_z_t is None:
@@ -70,6 +116,7 @@ def recover_and_estimate_from_attacked_rgb(
 ) -> GeometryV5M0RawRecord:
     """Use only attacked ordinary RGB and frozen inversion identities at M0 boundary."""
 
+    identity = _validate_frozen_identity(identity)
     if attacked_ordinary_rgb is None:
         raise ValueError("attacked ordinary RGB is required")
     if not callable(inverter) or not callable(estimator):
@@ -140,6 +187,7 @@ def invert_bound_sd21_attacked_rgb(pipeline: Any, attacked_ordinary_rgb: Any, id
     The reverse DDIM update follows the Tree-Ring referenced flow but is an
     independent implementation: x_next=sqrt(a_next)x0+sqrt(1-a_next)epsilon.
     """
+    identity = _validate_frozen_identity(identity)
     torch = __import__("torch")
     scheduler = pipeline.scheduler
     scheduler.set_timesteps(identity.steps, device=pipeline.device)
@@ -170,6 +218,7 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
     in ``H=B x+u``. Ambiguous or degenerate estimates fail closed.
     """
     try:
+        identity = _validate_frozen_identity(identity)
         torch = __import__("torch")
         if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape[1:]) != (4, 64, 64) or not bool(torch.isfinite(recovered_z_t).all()):
             raise ValueError("recovered z_T shape or finiteness differs")
@@ -216,10 +265,11 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
         corr = torch.fft.ifft2(cross / cross.abs().clamp_min(1e-12)).real[0]
         if not bool(torch.isfinite(corr).all()) or float(corr.abs().max().item()) <= 0.0:
             raise ValueError("phase correlation is degenerate")
-        peak = int(corr.argmax().item()); y, x = divmod(peak, 64)
-        observed_shift_x = x if x <= 32 else x - 64
-        observed_shift_y = y if y <= 32 else y - 64
-        tx = -observed_shift_x / 64.0; ty = -observed_shift_y / 64.0
+        peak = int(corr.argmax().item()); y, x = divmod(peak, _LATENT_SIDE)
+        observed_shift_x = x if x <= _LATENT_SIDE // 2 else x - _LATENT_SIDE
+        observed_shift_y = y if y <= _LATENT_SIDE // 2 else y - _LATENT_SIDE
+        # A p-pixel phase shift is p/64 in the public centered unit-image H basis.
+        tx = -observed_shift_x / _LATENT_SIDE; ty = -observed_shift_y / _LATENT_SIDE
         H = assemble_attacked_to_canonical_similarity(rotation, scale, tx, ty)
         phase_peak = float(corr.max().item())
         psr = float(phase_peak / corr.abs().mean().clamp_min(1e-12).item())
@@ -280,6 +330,7 @@ def _resample_recovered_to_canonical(observed_plane: Any, scale: float, rotation
 
 def recover_and_estimate_bound_sd21(pipeline: Any, attacked_ordinary_rgb: Any, identity: SD21M0Identity = SD21M0Identity()) -> GeometryV5M0RawRecord:
     try:
+        identity = _validate_frozen_identity(identity)
         return estimate_bound_blind_rst(invert_bound_sd21_attacked_rgb(pipeline, attacked_ordinary_rgb, identity), identity)
     except Exception:
         return GeometryV5M0RawRecord("FAILED", None, None, None, None, None, {})
@@ -287,19 +338,19 @@ def recover_and_estimate_bound_sd21(pipeline: Any, attacked_ordinary_rgb: Any, i
 
 def load_bound_sd21_pipeline() -> Any:
     """Real-only lazy model binding; callers need CUDA and explicit authorization."""
+    identity = _validate_frozen_identity(_FROZEN_IDENTITY)
     torch = importlib.import_module("torch")
     diffusers = importlib.import_module("diffusers")
     if not bool(torch.cuda.is_available()):
         raise RuntimeError("M0 real SD2.1 runner requires CUDA")
-    model_id = "sd2-community/stable-diffusion-2-1-base"
-    revision = "4e63672c03103b6c636b8fb4119ba982469b2955"
-    scheduler = diffusers.DDIMScheduler.from_pretrained(model_id, subfolder="scheduler", revision=revision)
-    pipeline = diffusers.StableDiffusionPipeline.from_pretrained(model_id, revision=revision, scheduler=scheduler, torch_dtype=torch.float16)
+    scheduler = diffusers.DDIMScheduler.from_pretrained(identity.model_family, subfolder="scheduler", revision=identity.model_revision)
+    pipeline = diffusers.StableDiffusionPipeline.from_pretrained(identity.model_family, revision=identity.model_revision, scheduler=scheduler, torch_dtype=torch.float16)
     return pipeline.to("cuda")
 
 
-def generate_bound_sd21(pipeline: Any, prompt: str, initial_z_t: Any) -> Any:
+def generate_bound_sd21(pipeline: Any, prompt: str, initial_z_t: Any, identity: SD21M0Identity = SD21M0Identity()) -> Any:
     """Use the manifest prompt and initial-zT-only template injection once."""
+    identity = _validate_frozen_identity(identity)
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("generation requires the manifest unit prompt")
     from cegwm.method.geometry_v5_m0 import (
@@ -308,7 +359,7 @@ def generate_bound_sd21(pipeline: Any, prompt: str, initial_z_t: Any) -> Any:
     )
 
     injected = inject_initial_z_t_x_template_torch(initial_z_t, build_hermitian_x_template())
-    return pipeline(prompt=prompt, latents=injected, num_inference_steps=50, eta=0.0, guidance_scale=7.5)
+    return pipeline(prompt=prompt, latents=injected, num_inference_steps=identity.steps, eta=identity.eta, guidance_scale=identity.guidance_scale)
 
 
 def invert_bound_sd21_empty_prompt(inverter: Callable[..., Any], attacked_ordinary_rgb: Any) -> Any:
