@@ -33,6 +33,13 @@ def test_t2smark_canary_notebook_contract() -> None:
     assert "mock" not in text.lower() and "placeholder" not in text.lower()
     assert "'watermark_seed':WATERMARK_SEED" not in text
     assert "'watermark_key_material':'not persisted'" in text
+    persistence_cells = [
+        "".join(cell["source"])
+        for cell in code
+        if "write_text" in "".join(cell["source"]) or "to_csv" in "".join(cell["source"])
+    ]
+    for secret_variable in ("WATERMARK_SEED", "master_key", "session_key", "message_bits"):
+        assert all(secret_variable not in cell for cell in persistence_cells)
     assert "TPR" in text and "FPR" in text and "threshold" in text
 
 
