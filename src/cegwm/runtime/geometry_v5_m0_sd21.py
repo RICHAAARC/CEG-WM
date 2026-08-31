@@ -1,7 +1,7 @@
-"""Dependency-injected, frozen-SD2.1-facing M0 adapter.
+"""Lazy, concrete frozen-SD2.1-facing M0 adapter.
 
 Importing this module never imports torch/diffusers, loads a model, or contacts
-the network. Real adapters remain absent until separately authorized.
+the network. Concrete adapters are implemented but unexecuted locally.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def recover_and_estimate_from_attacked_rgb(
         prompt=identity.inversion_prompt,
         num_inference_steps=identity.steps,
         eta=identity.eta,
-        guidance_scale=identity.guidance_scale,
+        guidance_scale=identity.inversion_guidance_scale,
         vae_encoding=identity.vae_encoding,
     )
     raw = estimator(recovered_z_t)
@@ -161,16 +161,27 @@ def invert_bound_sd21_attacked_rgb(pipeline: Any, attacked_ordinary_rgb: Any, id
 
 
 def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21M0Identity()) -> GeometryV5M0RawRecord:
-    """Blind channel-3 finite-grid R/S then phase-correlation T estimate only."""
+    """Blind channel-3 finite-grid R/S then canonicalized phase-correlation T.
+
+    The selected R/S map is ``B=c R(-phi)`` from attacked to canonical
+    coordinates. Translation is recovered only after resampling the observed
+    plane through ``B^-1`` to the canonical grid. The phase peak is the
+    normalized observed relative shift, so it is negated to return the ``u``
+    in ``H=B x+u``. Ambiguous or degenerate estimates fail closed.
+    """
     try:
         torch = __import__("torch")
         if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape[1:]) != (4, 64, 64) or not bool(torch.isfinite(recovered_z_t).all()):
             raise ValueError("recovered z_T shape or finiteness differs")
-        from cegwm.method.geometry_v5_m0 import assemble_attacked_to_canonical_similarity, build_hermitian_x_template
+        from cegwm.method.geometry_v5_m0 import (
+            assemble_attacked_to_canonical_similarity,
+            build_hermitian_x_template,
+            inject_initial_z_t_x_template_torch,
+        )
 
         magnitude = torch.fft.fft2(recovered_z_t[:, 3].float()).abs()[0]
         template = build_hermitian_x_template()
-        best: tuple[float, float, float] | None = None
+        scored_candidates: list[tuple[float, float, float]] = []
         for phi in range(-15, 16):
             for hundredths in range(85, 116):
                 c = hundredths / 100.0
@@ -180,24 +191,47 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
                     x = c * (__import__("math").cos(angle) * point.frequency_x - __import__("math").sin(angle) * point.frequency_y)
                     y = c * (__import__("math").sin(angle) * point.frequency_x + __import__("math").cos(angle) * point.frequency_y)
                     score += float(_bilinear_periodic(magnitude, y * 64.0, x * 64.0))
-                candidate = (score, float(phi), c)
-                if best is None or candidate[0] > best[0] or (candidate[0] == best[0] and (abs(candidate[1]), candidate[2]) < (abs(best[1]), best[2])):
-                    best = candidate
-        if best is None or not best[0] > 0.0:
-            raise ValueError("blind spectral grid has no peak")
-        score, phi, scale = best
+                scored_candidates.append((score, float(phi), c))
+        ranked = sorted(scored_candidates, key=lambda item: (-item[0], abs(item[1]), item[2]))
+        if len(ranked) < 2:
+            raise ValueError("blind spectral grid is incomplete")
+        score, phi, scale = ranked[0]
+        runner_up_score = ranked[1][0]
+        spectral_margin = score - runner_up_score
+        if (
+            not __import__("math").isfinite(score)
+            or not __import__("math").isfinite(runner_up_score)
+            or score <= 0.0
+            or spectral_margin <= max(1e-6, 0.01 * score)
+        ):
+            raise ValueError("blind spectral grid is flat or ambiguous")
         rotation = -phi
-        reference = torch.zeros_like(recovered_z_t[:, 3])
-        # Carrier-neutral canonical reference is constructed through the same initial-zT template path.
-        from cegwm.method.geometry_v5_m0 import inject_initial_z_t_x_template_torch
         reference_latent = inject_initial_z_t_x_template_torch(torch.zeros_like(recovered_z_t), template)[:, 3]
-        cross = torch.fft.fft2(reference_latent.float()) * torch.fft.fft2(recovered_z_t[:, 3].float()).conj()
+        normalized_observed, overlap = _resample_recovered_to_canonical(recovered_z_t[:, 3].float(), scale, rotation)
+        if not bool(torch.isfinite(normalized_observed).all()) or overlap <= 0.5:
+            raise ValueError("canonicalized observed plane has insufficient overlap")
+        cross = torch.fft.fft2(normalized_observed) * torch.fft.fft2(reference_latent.float()).conj()
+        if not bool(torch.isfinite(cross.real).all()) or float(cross.abs().max().item()) <= 0.0:
+            raise ValueError("phase correlation has no usable spectrum")
         corr = torch.fft.ifft2(cross / cross.abs().clamp_min(1e-12)).real[0]
+        if not bool(torch.isfinite(corr).all()) or float(corr.abs().max().item()) <= 0.0:
+            raise ValueError("phase correlation is degenerate")
         peak = int(corr.argmax().item()); y, x = divmod(peak, 64)
-        tx = -(x if x <= 32 else x - 64) / 64.0; ty = -(y if y <= 32 else y - 64) / 64.0
+        observed_shift_x = x if x <= 32 else x - 64
+        observed_shift_y = y if y <= 32 else y - 64
+        tx = -observed_shift_x / 64.0; ty = -observed_shift_y / 64.0
         H = assemble_attacked_to_canonical_similarity(rotation, scale, tx, ty)
-        psr = float(corr.max().item() / corr.abs().mean().clamp_min(1e-12).item())
-        return GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", rotation, scale, tx, ty, H, {"blind_spectral_score": score, "phase_peak": float(corr.max().item()), "phase_psr": psr})
+        phase_peak = float(corr.max().item())
+        psr = float(phase_peak / corr.abs().mean().clamp_min(1e-12).item())
+        if not __import__("math").isfinite(psr) or psr <= 1.05:
+            raise ValueError("phase correlation has insufficient separation")
+        return GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", rotation, scale, tx, ty, H, {
+            "blind_spectral_score": score,
+            "spectral_margin": spectral_margin,
+            "phase_peak": phase_peak,
+            "phase_psr": psr,
+            "canonical_overlap": overlap,
+        })
     except Exception:
         return GeometryV5M0RawRecord("FAILED", None, None, None, None, None, {})
 
@@ -210,6 +244,38 @@ def _bilinear_periodic(magnitude: Any, y: float, x: float) -> Any:
     y1, x1 = (y0 + 1) % height, (x0 + 1) % width
     fy, fx = y - math.floor(y), x - math.floor(x)
     return (1 - fy) * ((1 - fx) * magnitude[y0, x0] + fx * magnitude[y0, x1]) + fy * ((1 - fx) * magnitude[y1, x0] + fx * magnitude[y1, x1])
+
+
+def _resample_recovered_to_canonical(observed_plane: Any, scale: float, rotation_degrees: float) -> tuple[Any, float]:
+    """Return ``g(B^-1 q)`` on canonical ``q`` coordinates.
+
+    Coordinates are centred normalized ``[-1, 1]`` with
+    ``grid_sample(..., align_corners=True, padding_mode="zeros")``.  For
+    ``B=cR(theta)``, a canonical destination point ``q`` samples source
+    observed coordinates ``B^-1q=R(-theta)q/c``. The sampled all-ones mask is
+    reported as the fixed zero-padding overlap diagnostic.
+    """
+    torch = __import__("torch")
+    functional = torch.nn.functional
+    if getattr(observed_plane, "ndim", None) != 3 or tuple(observed_plane.shape[1:]) != (64, 64):
+        raise ValueError("observed channel-3 plane must be batchx64x64")
+    if not __import__("math").isfinite(scale) or scale <= 0.0 or not __import__("math").isfinite(rotation_degrees):
+        raise ValueError("canonicalization similarity is invalid")
+    angle = __import__("math").radians(rotation_degrees)
+    cosine, sine = __import__("math").cos(angle), __import__("math").sin(angle)
+    coordinates = torch.linspace(-1.0, 1.0, 64, device=observed_plane.device, dtype=observed_plane.dtype)
+    qy, qx = torch.meshgrid(coordinates, coordinates, indexing="ij")
+    # B^-1=R(-theta)/c. x is horizontal grid coordinate, y is vertical.
+    source_x = (cosine * qx + sine * qy) / scale
+    source_y = (-sine * qx + cosine * qy) / scale
+    grid = torch.stack((source_x, source_y), dim=-1).unsqueeze(0).expand(observed_plane.shape[0], -1, -1, -1)
+    normalized = functional.grid_sample(
+        observed_plane.unsqueeze(1), grid, mode="bilinear", padding_mode="zeros", align_corners=True,
+    )[:, 0]
+    support = functional.grid_sample(
+        torch.ones_like(observed_plane).unsqueeze(1), grid, mode="bilinear", padding_mode="zeros", align_corners=True,
+    )[:, 0]
+    return normalized, float(support.mean().item())
 
 
 def recover_and_estimate_bound_sd21(pipeline: Any, attacked_ordinary_rgb: Any, identity: SD21M0Identity = SD21M0Identity()) -> GeometryV5M0RawRecord:

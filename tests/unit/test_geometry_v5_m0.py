@@ -149,3 +149,18 @@ def test_torch_production_boundary_is_lazy_and_validates_template_before_fft_wri
     assert "torch" not in imports
     assert "torch template entries must be XTemplatePoint" in source
     assert "torch Hermitian inverse has non-real residual" in source
+
+
+@pytest.mark.unit
+def test_torch_template_injection_rejects_bad_entries_and_nonfinite_weights_when_available() -> None:
+    torch = pytest.importorskip("torch")
+    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    template = method.build_hermitian_x_template()
+    injected = method.inject_initial_z_t_x_template_torch(latents, template)
+    assert torch.isfinite(injected).all()
+    with pytest.raises(TypeError, match="XTemplatePoint"):
+        method.inject_initial_z_t_x_template_torch(latents, (object(),))
+    with pytest.raises(ValueError, match="finite"):
+        method.inject_initial_z_t_x_template_torch(
+            latents, (method.XTemplatePoint(0.2, 0.2, float("nan")),),
+        )

@@ -47,12 +47,30 @@ uses each manifest prompt, 50 DDIM steps, eta 0, guidance 7.5, CUDA float16.
 Inversion uses empty prompt, guidance 1, 50 steps, eta 0, VAE
 `latent_dist.mode()`, and the bound VAE scaling factor.
 
+The concrete adapter is lazy and has not been executed locally: importing it
+does not import model packages, load weights, contact a network, or execute a
+model. Its one concrete combined entry accepts only a bound pipeline, attacked
+ordinary RGB, and the frozen runtime identity. It has no parameter for truth,
+clean RGB, original latent, prompt, or attack values.
+
 For spatial forward `A=sR(theta)`, the spectral relation is
 `k_observed=A^-T k_canonical=(1/s)R(theta)k_canonical`. The blind spectral
 candidate `cR(phi)` therefore produces the public attacked-to-canonical spatial
 estimate `R(-phi)` with scale `c`: the reciprocal relation is already in the
 frequency candidate. M0-R0 freezes a -15…15 degree, 1-degree spectral grid and
 0.85…1.15, 0.01 spatial-scale grid. This does not use truth or per-unit tuning.
+
+After selecting `B=cR(-phi)`, the recovered channel-3 plane is resampled into
+canonical orientation and scale as `g(B^-1 q)` using bilinear `grid_sample`,
+centered normalized coordinates, `align_corners=True`, and zero padding. Phase
+correlation compares this normalized observed plane with the canonical
+reference. Its signed relative shift is negated to form `u`, so the reported
+transform is exactly `H=B x+u`; for a forward translation `t_forward`, the
+compound fixture relation is `u=-B*t_forward`, not `-t`. The runtime records
+phase peak, PSR, and zero-padding overlap as diagnostics; these never establish
+RELIABLE. Flat, non-finite, insufficiently separated spectral candidates,
+inadequate overlap, or degenerate phase surfaces return `FAILED` rather than an
+equal-score tie-break estimate.
 
 The real runner is create-only and retains 44 raw/evaluation records, including
 seed-wide generation failures and attack/inversion failures. Truth is read only
