@@ -1,0 +1,222 @@
+{
+  "contract_version": "geometry_v5_m0_sd21_v1",
+  "contract_id": "cegwm-geometry-v5-m0-sd21-global-rst-v1",
+  "method_id": "geometry_v5_training_free_initial_noise_sync",
+  "parent_p0_exact": "258b823a35e78d07088bddde0baac91d4069123a",
+  "source_bindings": {
+    "maxsive": {
+      "repository": "Mao718/MaXsive",
+      "exact": "a9554024aed176e705cc15ca1cbd31b9c7f75bfb",
+      "license_status": "record_only_not_stop_condition",
+      "reference": "X_template_geometry_and_parameter_structure"
+    },
+    "tree_ring": {
+      "repository": "YuxinWenRick/tree-ring-watermark",
+      "exact": "3015283d9cf82e90b628f02ad2121bd37408ca9a",
+      "license_status": "record_only_not_stop_condition",
+      "reference": "DDIM_inversion_equations_and_flow"
+    }
+  },
+  "deliberate_v5_adaptation": "MaXsive_Modified_DPMSolver_stepwise_model_output_peak_injection_is_not_copied;_V5_uses_initial_z_T_only_with_Hermitian_real_latent_adaptation_and_does_not_claim_byte_for_byte_official_parity",
+  "translation_extension": "phase_correlation_translation_is_a_minimal_V5_extension_not_attributed_to_inspected_MaXsive_code",
+  "runtime": {
+    "family": "frozen_SD2_1_facing",
+    "model_revision": "unbound_until_future_real_run_authorization",
+    "rgb_shape": [
+      512,
+      512,
+      3
+    ],
+    "latent_shape": [
+      4,
+      64,
+      64
+    ],
+    "generation": "normal_frozen_generation",
+    "preprocessing": "deterministic_attacked_RGB",
+    "vae_encoding": "mode_not_sampling",
+    "inversion_prompt": "empty_prompt_only",
+    "steps": 50,
+    "eta": 0,
+    "guidance_scale": 7.5
+  },
+  "template": {
+    "source_parameter_identity": "MaXsive_X_template_reference",
+    "channel": 3,
+    "scale": 5,
+    "radial_lengths": [
+      0.2,
+      0.3,
+      0.4,
+      0.5
+    ],
+    "V5_adaptation": "Hermitian_initial_noise_template"
+  },
+  "scope": {
+    "implemented": [
+      "global_R",
+      "global_S",
+      "global_T"
+    ],
+    "excluded": [
+      "local_tiles",
+      "holdout_finalization",
+      "content_integration",
+      "crop",
+      "SD3_5",
+      "attention",
+      "affine",
+      "projective",
+      "learned_components",
+      "retries",
+      "fallback"
+    ],
+    "detector_allowed_inputs": [
+      "attacked_ordinary_RGB",
+      "frozen_model_scheduler_inversion_identities"
+    ],
+    "detector_forbidden_inputs": [
+      "original_prompt",
+      "original_z_T",
+      "clean_RGB",
+      "pre_attack_RGB",
+      "true_H",
+      "attack_parameters",
+      "writer_residuals",
+      "content_key",
+      "content_score",
+      "evaluation_truth"
+    ],
+    "raw_statuses": [
+      "ESTIMATE_AVAILABLE",
+      "FAILED"
+    ],
+    "may_emit_RELIABLE": false,
+    "may_rectify": false,
+    "may_vote_content": false
+  },
+  "development": {
+    "manifest": "geometry_v5_m0_development_v1.jsonl",
+    "seeds": [
+      7501,
+      7502,
+      7503,
+      7504
+    ],
+    "attacks": [
+      {
+        "attack_id": "identity",
+        "rotation_degrees": 0,
+        "scale": 1,
+        "tx": 0,
+        "ty": 0
+      },
+      {
+        "attack_id": "rotation_-10",
+        "rotation_degrees": -10,
+        "scale": 1,
+        "tx": 0,
+        "ty": 0
+      },
+      {
+        "attack_id": "rotation_+10",
+        "rotation_degrees": 10,
+        "scale": 1,
+        "tx": 0,
+        "ty": 0
+      },
+      {
+        "attack_id": "scale_0.9",
+        "rotation_degrees": 0,
+        "scale": 0.9,
+        "tx": 0,
+        "ty": 0
+      },
+      {
+        "attack_id": "scale_1.1",
+        "rotation_degrees": 0,
+        "scale": 1.1,
+        "tx": 0,
+        "ty": 0
+      },
+      {
+        "attack_id": "translation_x_-0.08",
+        "rotation_degrees": 0,
+        "scale": 1,
+        "tx": -0.08,
+        "ty": 0
+      },
+      {
+        "attack_id": "translation_x_+0.08",
+        "rotation_degrees": 0,
+        "scale": 1,
+        "tx": 0.08,
+        "ty": 0
+      },
+      {
+        "attack_id": "translation_y_-0.08",
+        "rotation_degrees": 0,
+        "scale": 1,
+        "tx": 0,
+        "ty": -0.08
+      },
+      {
+        "attack_id": "translation_y_+0.08",
+        "rotation_degrees": 0,
+        "scale": 1,
+        "tx": 0,
+        "ty": 0.08
+      },
+      {
+        "attack_id": "compound_rot+7_scale0.93_tx+0.05_ty-0.04",
+        "rotation_degrees": 7,
+        "scale": 0.93,
+        "tx": 0.05,
+        "ty": -0.04
+      },
+      {
+        "attack_id": "compound_rot-7_scale1.07_tx-0.05_ty+0.04",
+        "rotation_degrees": -7,
+        "scale": 1.07,
+        "tx": -0.05,
+        "ty": 0.04
+      }
+    ],
+    "compound_forward_order": [
+      "scale_about_center",
+      "rotate_about_center",
+      "translate"
+    ],
+    "estimate_direction": "attacked_to_canonical_inverse_of_forward_attack",
+    "physical_denominator": 44,
+    "replacement_allowed": false,
+    "retry_allowed": false,
+    "truth_use": "protocol_evaluator_only_after_raw_output_frozen"
+  },
+  "engineering_evaluation": {
+    "per_unit": {
+      "rotation_abs_degrees_max": 2.5,
+      "log_scale_abs_max": 0.04,
+      "tx_abs_max": 0.025,
+      "ty_abs_max": 0.025,
+      "corner_rms_max": 0.03,
+      "finite_H_required": true
+    },
+    "exit": {
+      "identity_required": "4/4",
+      "each_non_identity_stratum_min": "3/4",
+      "total_min": "38/44",
+      "retain_all_records": true
+    },
+    "claim_ceiling": "M0_SD21_global_RST_development_engineering_only_science_denominator_0",
+    "not_established": [
+      "safe_RELIABLE_geometry",
+      "crop",
+      "dual_chain",
+      "SD3_5",
+      "fixed_FPR",
+      "regeneration",
+      "scientific_success"
+    ]
+  }
+}
