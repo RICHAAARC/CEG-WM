@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import inspect
 import math
 
 import pytest
@@ -10,6 +12,8 @@ from cegwm.runtime.geometry_v5_m0_sd21 import (
     SD21M0Identity,
     _grid_translation_to_unit_image,
     _unit_image_translation_to_grid,
+    diagnostic_rs_candidate_landscape,
+    diagnostic_translation_surface_controls,
     estimate_bound_blind_rst,
     invert_bound_sd21_attacked_rgb,
     public_runtime_capabilities,
@@ -30,6 +34,95 @@ def test_private_coordinate_helpers_are_finite_and_match_the_public_H_basis() ->
             _unit_image_translation_to_grid(invalid)
         with pytest.raises(ValueError, match="finite non-bool"):
             _grid_translation_to_unit_image(invalid)
+
+
+@pytest.mark.integration
+def test_production_estimator_signature_and_source_have_no_isolation_inputs() -> None:
+    signature = inspect.signature(estimate_bound_blind_rst)
+    assert tuple(signature.parameters) == ("recovered_z_t", "identity")
+    source = inspect.getsource(estimate_bound_blind_rst)
+    function = ast.parse(source).body[0]
+    assert isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+    names = {node.id for node in ast.walk(function) if isinstance(node, ast.Name)}
+    assert not {"truth", "probe", "probes", "isolation", "controls"} & names
+    assert "diagnostic_rs_candidate_landscape" not in source
+    assert "diagnostic_translation_surface_controls" not in source
+
+
+@pytest.mark.integration
+def test_diagnostic_helpers_reject_nonexact_shape_and_nonfinite_before_scoring_when_torch_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    calls = {"score": 0, "resample": 0}
+
+    def score(*_args: object) -> tuple[float, float]:
+        calls["score"] += 1
+        return 1.0, 1.0
+
+    def resample(*_args: object) -> tuple[object, float]:
+        calls["resample"] += 1
+        raise AssertionError("shape/finiteness rejection must precede canonicalization")
+
+    monkeypatch.setattr(runtime, "_normalized_template_match_torch", score)
+    monkeypatch.setattr(runtime, "_resample_recovered_to_canonical", resample)
+    invalid = [
+        torch.zeros((2, 4, 64, 64), dtype=torch.float32),
+        torch.zeros((1, 3, 64, 64), dtype=torch.float32),
+        torch.zeros((1, 4, 32, 64), dtype=torch.float32),
+        torch.full((1, 4, 64, 64), float("nan"), dtype=torch.float32),
+        torch.full((1, 4, 64, 64), float("inf"), dtype=torch.float32),
+    ]
+    for recovered in invalid:
+        with pytest.raises(ValueError):
+            diagnostic_rs_candidate_landscape(recovered)
+        with pytest.raises(ValueError):
+            diagnostic_translation_surface_controls(recovered, {"control": {"rotation_degrees": 0.0, "scale": 1.0}})
+    assert calls == {"score": 0, "resample": 0}
+
+
+@pytest.mark.integration
+def test_diagnostic_rs_top_k_and_probe_scores_are_deterministic_when_torch_available() -> None:
+    torch = pytest.importorskip("torch")
+    from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
+
+    torch.manual_seed(7512)
+    recovered = inject_initial_z_t_x_template_torch(
+        torch.randn((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
+    )
+    probes = {
+        "expected_forward": {"forward_rotation_degrees": 10.0, "scale": 1.0},
+        "mirror": {"forward_rotation_degrees": -10.0, "scale": 1.0},
+    }
+    first = diagnostic_rs_candidate_landscape(recovered, probes, top_k=5)
+    second = diagnostic_rs_candidate_landscape(recovered, probes, top_k=5)
+    assert first == second and first["grid_size"] == 961 and len(first["top_k"]) == 5
+    assert [item["name"] for item in first["probe_candidates"]] == ["expected_forward", "mirror"]
+    assert first["probe_candidates"][0]["attacked_to_canonical_rotation_degrees"] == -10.0
+    assert all(set(item) == {"forward_rotation_degrees", "attacked_to_canonical_rotation_degrees", "scale", "score", "correlation", "local_contrast"} for item in first["top_k"])
+
+
+@pytest.mark.integration
+def test_translation_surface_controls_are_deterministic_and_do_not_change_raw_when_torch_available() -> None:
+    torch = pytest.importorskip("torch")
+    from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
+
+    torch.manual_seed(7513)
+    recovered = inject_initial_z_t_x_template_torch(
+        torch.randn((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
+    )
+    raw_before = estimate_bound_blind_rst(recovered)
+    controls = {
+        "frozen_raw": {"rotation_degrees": float(raw_before.rotation_degrees), "scale": float(raw_before.scale)},
+        "parsed_inverse_truth": {"rotation_degrees": 0.0, "scale": 1.0},
+    }
+    first = diagnostic_translation_surface_controls(recovered, controls, top_k=5)
+    second = diagnostic_translation_surface_controls(recovered, controls, top_k=5)
+    raw_after = estimate_bound_blind_rst(recovered)
+    assert first == second and raw_after == raw_before
+    assert [item["name"] for item in first["controls"]] == ["frozen_raw", "parsed_inverse_truth"]
+    assert all(len(item["top_k_nonlocal_peaks"]) == 5 for item in first["controls"])
+    assert all("phase_psr" in item and "zero_shift_score" in item and "ambiguity_diagnostics" in item for item in first["controls"])
 
 
 @pytest.mark.integration

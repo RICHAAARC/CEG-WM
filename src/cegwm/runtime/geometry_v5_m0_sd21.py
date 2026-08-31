@@ -292,6 +292,168 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
         return GeometryV5M0RawRecord("FAILED", None, None, None, None, None, {})
 
 
+def diagnostic_rs_candidate_landscape(
+    recovered_z_t: Any,
+    probe_candidates: Mapping[str, Mapping[str, Any]] | None = None,
+    top_k: int = 5,
+) -> Mapping[str, Any]:
+    """Score the frozen blind R/S grid and caller probes without a verdict.
+
+    This diagnostic-only helper has no production-estimator identity argument,
+    does not select or alter a raw record, and returns no recovered latent.
+    ``forward_rotation_degrees`` is the spectral-grid phi; the corresponding
+    public attacked-to-canonical rotation is ``-phi``.
+    """
+
+    torch = __import__("torch")
+    _validate_diagnostic_recovered_z_t(recovered_z_t, torch)
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 31 * 31:
+        raise ValueError("diagnostic R/S top_k must be an integer in [1, 961]")
+    from cegwm.method.geometry_v5_m0 import build_hermitian_x_template
+
+    magnitude = torch.fft.fft2(recovered_z_t[:, 3].float()).abs()[0]
+    global_mean = float(magnitude.mean().item())
+    if not math.isfinite(global_mean) or global_mean <= 1e-12:
+        raise ValueError("diagnostic R/S spectrum is degenerate")
+    template = build_hermitian_x_template()
+
+    def score(phi: float, scale: float) -> dict[str, float]:
+        if not math.isfinite(phi) or not math.isfinite(scale) or scale <= 0.0:
+            raise ValueError("diagnostic R/S candidate must be finite with positive scale")
+        correlation, local_contrast = _normalized_template_match_torch(
+            magnitude, template, phi, scale, global_mean,
+        )
+        return {
+            "forward_rotation_degrees": phi,
+            "attacked_to_canonical_rotation_degrees": -phi,
+            "scale": scale,
+            "score": correlation * local_contrast,
+            "correlation": correlation,
+            "local_contrast": local_contrast,
+        }
+
+    grid = [score(float(phi), hundredths / 100.0) for phi in range(-15, 16) for hundredths in range(85, 116)]
+    ranked = sorted(
+        grid,
+        key=lambda item: (
+            -item["score"],
+            abs(item["forward_rotation_degrees"]),
+            item["scale"],
+        ),
+    )
+    probes: list[dict[str, Any]] = []
+    for name, candidate in (probe_candidates or {}).items():
+        if not isinstance(name, str) or not name or not isinstance(candidate, Mapping):
+            raise ValueError("diagnostic R/S probes require non-empty names and mappings")
+        phi = _finite_diagnostic_real(candidate.get("forward_rotation_degrees"), "forward_rotation_degrees")
+        scale = _finite_diagnostic_real(candidate.get("scale"), "scale")
+        probes.append({"name": name, **score(phi, scale)})
+    return {"grid_size": len(grid), "top_k": ranked[:top_k], "probe_candidates": probes}
+
+
+def diagnostic_translation_surface_controls(
+    recovered_z_t: Any,
+    controls: Mapping[str, Mapping[str, Any]],
+    top_k: int = 5,
+) -> Mapping[str, Any]:
+    """Inspect fixed-template masked phase surfaces for named R/S controls.
+
+    Controls contain public attacked-to-canonical ``rotation_degrees`` and
+    ``scale`` values. Results are measurements only: no threshold, verdict,
+    estimator candidate, or raw record is produced or changed.
+    """
+
+    torch = __import__("torch")
+    _validate_diagnostic_recovered_z_t(recovered_z_t, torch)
+    if not isinstance(controls, Mapping) or not controls:
+        raise ValueError("diagnostic translation controls must be a non-empty mapping")
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k < _LATENT_SIDE * _LATENT_SIDE:
+        raise ValueError("diagnostic translation top_k must be an integer in [1, 4095]")
+    from cegwm.method.geometry_v5_m0 import build_hermitian_x_template
+
+    template = build_hermitian_x_template()
+    results: list[dict[str, Any]] = []
+    for name, control in controls.items():
+        if not isinstance(name, str) or not name or not isinstance(control, Mapping):
+            raise ValueError("diagnostic translation controls require non-empty names and mappings")
+        rotation = _finite_diagnostic_real(control.get("rotation_degrees"), "rotation_degrees")
+        scale = _finite_diagnostic_real(control.get("scale"), "scale")
+        if scale <= 0.0:
+            raise ValueError("diagnostic translation control scale must be positive")
+        normalized_observed, overlap = _resample_recovered_to_canonical(
+            recovered_z_t[:, 3].float(), scale, rotation,
+        )
+        if not bool(torch.isfinite(normalized_observed).all()):
+            raise ValueError("diagnostic canonicalized plane is non-finite")
+        template_reference, template_mask = _fixed_template_spectrum_torch(
+            template, normalized_observed.device, normalized_observed.dtype,
+        )
+        cross = torch.fft.fft2(normalized_observed)[0] * template_reference.conj()
+        cross = torch.where(template_mask, cross, torch.zeros_like(cross))
+        if not bool(torch.isfinite(cross.real).all()) or float(cross.abs().max().item()) <= 0.0:
+            raise ValueError("diagnostic masked phase surface has no usable spectrum")
+        corr = torch.fft.ifft2(cross / cross.abs().clamp_min(1e-12)).real
+        if not bool(torch.isfinite(corr).all()) or float(corr.abs().max().item()) <= 0.0:
+            raise ValueError("diagnostic phase surface is degenerate")
+        peak_index = int(corr.argmax().item())
+        peak_y, peak_x = divmod(peak_index, _LATENT_SIDE)
+        shift_x = peak_x if peak_x <= _LATENT_SIDE // 2 else peak_x - _LATENT_SIDE
+        shift_y = peak_y if peak_y <= _LATENT_SIDE // 2 else peak_y - _LATENT_SIDE
+        phase_peak = float(corr[peak_y, peak_x].item())
+        phase_psr = float(phase_peak / corr.abs().mean().clamp_min(1e-12).item())
+        nonlocal_points: list[tuple[float, int, int]] = []
+        for y in range(_LATENT_SIDE):
+            candidate_shift_y = y if y <= _LATENT_SIDE // 2 else y - _LATENT_SIDE
+            for x in range(_LATENT_SIDE):
+                candidate_shift_x = x if x <= _LATENT_SIDE // 2 else x - _LATENT_SIDE
+                if max(abs(candidate_shift_x - shift_x), abs(candidate_shift_y - shift_y)) <= 1:
+                    continue
+                nonlocal_points.append((float(corr[y, x].item()), candidate_shift_x, candidate_shift_y))
+        ranked_nonlocal = sorted(
+            nonlocal_points,
+            key=lambda item: (-item[0], abs(item[1]) + abs(item[2]), item[2], item[1]),
+        )
+        strongest_nonlocal = ranked_nonlocal[0][0]
+        results.append({
+            "name": name,
+            "rotation_degrees": rotation,
+            "scale": scale,
+            "overlap": overlap,
+            "best_tx": -shift_x / _LATENT_SIDE,
+            "best_ty": -shift_y / _LATENT_SIDE,
+            "peak": phase_peak,
+            "phase_psr": phase_psr,
+            "zero_shift_score": float(corr[0, 0].item()),
+            "top_k_nonlocal_peaks": [
+                {
+                    "tx": -candidate_shift_x / _LATENT_SIDE,
+                    "ty": -candidate_shift_y / _LATENT_SIDE,
+                    "peak": candidate_peak,
+                }
+                for candidate_peak, candidate_shift_x, candidate_shift_y in ranked_nonlocal[:top_k]
+            ],
+            "ambiguity_diagnostics": {
+                "strongest_nonlocal_peak": strongest_nonlocal,
+                "best_minus_strongest_nonlocal_peak": phase_peak - strongest_nonlocal,
+                "nonlocal_to_best_abs_ratio": abs(strongest_nonlocal) / max(abs(phase_peak), 1e-12),
+            },
+        })
+    return {"controls": results}
+
+
+def _validate_diagnostic_recovered_z_t(recovered_z_t: Any, torch: Any) -> None:
+    if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape) != (1, 4, 64, 64):
+        raise ValueError("diagnostic recovered z_T must have shape (1, 4, 64, 64)")
+    if not bool(torch.isfinite(recovered_z_t).all()):
+        raise ValueError("diagnostic recovered z_T must be finite")
+
+
+def _finite_diagnostic_real(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+        raise ValueError(f"diagnostic {name} must be a finite non-bool real")
+    return float(value)
+
+
 def _normalized_template_match_torch(
     magnitude: Any, template: Any, forward_rotation_degrees: float, forward_scale: float, global_mean: float,
 ) -> tuple[float, float]:
