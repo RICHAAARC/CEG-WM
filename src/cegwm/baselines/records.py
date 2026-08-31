@@ -38,6 +38,7 @@ class BaselineObservation:
     status: str
     failure_reason: str | None
     artifact_digests: Mapping[str, str]
+    attack_provenance: Mapping[str, object] | None
 
     def as_dict(self) -> dict[str, object]:
         """Validate before returning data suitable for an append-only JSONL writer."""
@@ -142,4 +143,45 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
         or observation.artifact_digests["threshold"] != baseline.threshold_artifact_digest
     ):
         raise ValueError("observed artifact digests must match the registry")
+    if observation.status == "observed" and observation.attack_condition == "rotation_10_bicubic_reflect_center_crop_v1":
+        _validate_rotation_provenance(observation.attack_provenance)
     return observation
+
+
+def _validate_rotation_provenance(provenance: Mapping[str, object] | None) -> None:
+    if provenance is None:
+        raise ValueError("rotation observations require attack provenance")
+    required = {
+        "attack_id", "angle_degrees", "angle_convention", "center_formula_id", "padding_x", "padding_y",
+        "bicubic_margin_pixels", "padding_mode_rgb", "padding_mode_mask", "rgb_interpolation", "mask_interpolation",
+        "crop_box", "numpy_version", "pillow_version", "input_rgb_digest", "output_rgb_digest",
+        "input_mask_digest", "output_mask_digest", "implementation_exact", "implementation_digest",
+        "positive_negative_pipeline_identical",
+    }
+    if not required.issubset(provenance):
+        raise ValueError("rotation provenance is incomplete")
+    if provenance["attack_id"] != "rotation_10_bicubic_reflect_center_crop_v1":
+        raise ValueError("rotation provenance attack_id mismatch")
+    if provenance["angle_degrees"] != 10.0 or provenance["bicubic_margin_pixels"] != 2:
+        raise ValueError("rotation provenance parameters mismatch")
+    if provenance["angle_convention"] != "Pillow visual counter-clockwise positive angle":
+        raise ValueError("rotation provenance angle convention mismatch")
+    if provenance["center_formula_id"] != "pixel_center_w_minus_1_over_2_v1":
+        raise ValueError("rotation provenance center formula mismatch")
+    if provenance["padding_mode_rgb"] != "numpy.reflect_edge_not_repeated" or provenance["padding_mode_mask"] != "numpy.constant_zero":
+        raise ValueError("rotation provenance padding mode mismatch")
+    if provenance["rgb_interpolation"] != "PIL.Image.Resampling.BICUBIC" or provenance["mask_interpolation"] != "PIL.Image.Resampling.NEAREST":
+        raise ValueError("rotation provenance interpolation mismatch")
+    if provenance["positive_negative_pipeline_identical"] is not True:
+        raise ValueError("rotation provenance must bind shared positive-negative pipeline")
+    if not isinstance(provenance["padding_x"], int) or not isinstance(provenance["padding_y"], int):
+        raise ValueError("rotation provenance padding must be Python integers")
+    if not isinstance(provenance["crop_box"], tuple) or len(provenance["crop_box"]) != 4:
+        raise ValueError("rotation provenance crop box is invalid")
+    if not provenance["numpy_version"] or not provenance["pillow_version"]:
+        raise ValueError("rotation provenance library versions are required")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(provenance["implementation_exact"])):
+        raise ValueError("rotation provenance implementation exact is invalid")
+    for field_name in ("input_rgb_digest", "output_rgb_digest", "input_mask_digest", "output_mask_digest", "implementation_digest"):
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance[field_name])):
+            raise ValueError("rotation provenance digest is invalid")

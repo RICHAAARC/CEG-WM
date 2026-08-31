@@ -30,6 +30,7 @@ def _record(**changes: object) -> BaselineObservation:
         status="not_available",
         failure_reason=None,
         artifact_digests={"status": "sha256:" + "0" * 64},
+        attack_provenance=None,
     )
     return replace(record, **changes)
 
@@ -100,6 +101,13 @@ def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.Mo
                           "threshold": spec.threshold_artifact_digest},
     )
     assert observed.as_dict()["status"] == "observed"
+    with pytest.raises(ValueError, match="rotation observations require attack provenance"):
+        replace(
+            observed,
+            attack_family="geometric",
+            attack_condition="rotation_10_bicubic_reflect_center_crop_v1",
+            attack_provenance=None,
+        ).as_dict()
     with pytest.raises(ValueError, match="source_exact must match"):
         replace(observed, source_exact="f" * 40).as_dict()
     with pytest.raises(ValueError, match="validated source and adapter registry"):

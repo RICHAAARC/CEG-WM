@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -39,16 +41,31 @@ def _require_rgb_uint8(rgb: Any) -> np.ndarray:
     return rgb
 
 
-def _implementation_identity(implementation_exact: str) -> str:
-    if not re.fullmatch(r"[0-9a-f]{40}", implementation_exact):
-        raise ValueError("implementation_exact must be a lowercase 40-character git exact")
-    return implementation_exact
+def _run_git(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(("git", "-C", str(root), *arguments), check=True, capture_output=True, text=True)
+    return completed.stdout.strip()
+
+
+def _verified_implementation_identity() -> tuple[str, str]:
+    """Bind executed module bytes to a clean checked-out Git exact."""
+
+    module = Path(__file__).resolve()
+    root = Path(_run_git(module.parent, "rev-parse", "--show-toplevel"))
+    relative = module.relative_to(root).as_posix()
+    if subprocess.run(("git", "-C", str(root), "diff", "--quiet", "--", relative), check=False).returncode != 0:
+        raise RuntimeError("rotation implementation file must be clean before execution")
+    index_blob = _run_git(root, "ls-files", "-s", "--", relative).split()[1]
+    working_blob = _run_git(root, "hash-object", relative)
+    if index_blob != working_blob:
+        raise RuntimeError("rotation implementation bytes do not match the checked-out index blob")
+    exact = _run_git(root, "rev-parse", "HEAD")
+    if not re.fullmatch(r"[0-9a-f]{40}", exact):
+        raise RuntimeError("rotation implementation checkout exact is invalid")
+    return exact, "sha256:" + hashlib.sha256(module.read_bytes()).hexdigest()
 
 
 def rotation_10_bicubic_reflect_center_crop(
     rgb: Any,
-    *,
-    implementation_exact: str,
 ) -> RotationAttackResult:
     """Apply the frozen +10 degree visual counter-clockwise rotation.
 
@@ -57,7 +74,7 @@ def rotation_10_bicubic_reflect_center_crop(
     """
 
     source = _require_rgb_uint8(rgb)
-    implementation = _implementation_identity(implementation_exact)
+    implementation, module_digest = _verified_implementation_identity()
     height, width = source.shape[:2]
     theta = math.radians(ROTATION_ANGLE_DEGREES)
     a, b = (width - 1) / 2.0, (height - 1) / 2.0
@@ -95,7 +112,6 @@ def rotation_10_bicubic_reflect_center_crop(
     if output.shape != source.shape or output.dtype != np.uint8:
         raise RuntimeError("rotation output must preserve HxWx3 uint8")
 
-    module_digest = "sha256:" + hashlib.sha256(open(__file__, "rb").read()).hexdigest()
     provenance = {
         "attack_id": ROTATION_ATTACK_ID,
         "angle_degrees": ROTATION_ANGLE_DEGREES,

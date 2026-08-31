@@ -21,17 +21,6 @@ from cegwm.baselines.protocol import (
     rotation_execution_blocker,
 )
 from cegwm.baselines.attacks import ROTATION_ATTACK_ID, RotationAttackResult, rotation_10_bicubic_reflect_center_crop
-from cegwm.baselines.protocol import (
-    CLEAN_CONFIRMATION_NEGATIVES,
-    EVALUATION_PHYSICAL_UNITS,
-    FORMAL_ATTACK_CONDITIONS,
-    TARGET_FPR_UPPER_BOUND,
-    THRESHOLD_FREEZE_NEGATIVES,
-    evaluate_clean_confirmation,
-    one_sided_clopper_pearson_upper,
-    per_method_scale,
-    rotation_execution_blocker,
-)
 
 __all__ = [
     "PRIMARY_BASELINES",
@@ -39,11 +28,6 @@ __all__ = [
     "BaselineTableRow",
     "ROTATION_ATTACK_ID",
     "RotationAttackResult",
-    "CLEAN_CONFIRMATION_NEGATIVES",
-    "EVALUATION_PHYSICAL_UNITS",
-    "FORMAL_ATTACK_CONDITIONS",
-    "TARGET_FPR_UPPER_BOUND",
-    "THRESHOLD_FREEZE_NEGATIVES",
     "CLEAN_CONFIRMATION_NEGATIVES",
     "EVALUATION_PHYSICAL_UNITS",
     "FORMAL_ATTACK_CONDITIONS",
@@ -59,9 +43,5 @@ __all__ = [
     "per_method_scale",
     "rotation_execution_blocker",
     "rotation_10_bicubic_reflect_center_crop",
-    "evaluate_clean_confirmation",
-    "one_sided_clopper_pearson_upper",
-    "per_method_scale",
-    "rotation_execution_blocker",
     "validate_observation",
 ]
