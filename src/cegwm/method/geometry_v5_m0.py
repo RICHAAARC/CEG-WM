@@ -151,6 +151,8 @@ def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTempla
         if (conjugate_y, conjugate_x) != (y, x):
             spectrum[:, conjugate_y, conjugate_x] = spectrum[:, conjugate_y, conjugate_x] + weight
     spatial = torch.fft.ifft2(spectrum)
+    if not bool(torch.isfinite(spatial.real).all()) or not bool(torch.isfinite(spatial.imag).all()):
+        raise ValueError("torch Hermitian inverse has non-finite spatial components")
     if float(spatial.imag.abs().max().item()) > _torch_hermitian_residual_tolerance(spatial, torch):
         raise ValueError("torch Hermitian inverse has non-real residual beyond dtype-aware numerical tolerance")
     result = latents.clone()

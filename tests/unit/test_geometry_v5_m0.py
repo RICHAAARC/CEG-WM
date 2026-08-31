@@ -204,3 +204,27 @@ def test_torch_template_injection_rejects_residual_clearly_above_dtype_tolerance
     latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
     with pytest.raises(ValueError, match="non-real residual"):
         method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("component", "nonfinite"),
+    (("real", float("nan")), ("real", float("inf")), ("imag", float("nan")), ("imag", float("inf"))),
+)
+def test_torch_template_injection_rejects_nonfinite_ifft_components_when_available(
+    monkeypatch: pytest.MonkeyPatch, component: str, nonfinite: float,
+) -> None:
+    torch = pytest.importorskip("torch")
+    original_ifft2 = torch.fft.ifft2
+
+    def nonfinite_ifft2(*args: object, **kwargs: object) -> object:
+        spatial = original_ifft2(*args, **kwargs)
+        real, imag = spatial.real.clone(), spatial.imag.clone()
+        target = real if component == "real" else imag
+        target[..., 0, 0] = nonfinite
+        return torch.complex(real, imag)
+
+    monkeypatch.setattr(torch.fft, "ifft2", nonfinite_ifft2)
+    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    with pytest.raises(ValueError, match="non-finite spatial components"):
+        method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
