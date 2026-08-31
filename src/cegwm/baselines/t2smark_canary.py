@@ -9,6 +9,7 @@ import os
 import tempfile
 import time
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +18,7 @@ from PIL import Image, ImageEnhance, ImageFilter
 
 RUN_SCHEMA = "cegwm.t2smark_canary.v1"
 RUN_ID_DEFAULT = "t2smark_sd35_one_unit_v1"
+OFFICIAL_EXACT = "0c1fbfd50fcd1fba135477a2c016e284d5d7914d"
 CONDITIONS = ("clean_no_attack", "gaussian_noise_sigma_0p05_v1", "jpeg_q50_v1",
               "brightness_1p25_v1", "crop_75_resize_bicubic_v1",
               "rotation_10_bicubic_reflect_center_crop_v1")
@@ -63,6 +65,21 @@ def atomic_text(path: Path, value: str) -> None:
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary): os.unlink(temporary)
+
+
+class RunLock:
+    """Exclusive RUN_ID lock; stale locks require explicit operator clearance."""
+    def __init__(self, root: Path) -> None:
+        self.path = root / ".run.lock"; self.token = uuid.uuid4().hex
+    def __enter__(self) -> "RunLock":
+        try: fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError as exc: raise RuntimeError("RUN_ID is locked; use --clear-stale-lock explicitly") from exc
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps({"pid": os.getpid(), "token": self.token})); stream.flush(); os.fsync(stream.fileno())
+        return self
+    def __exit__(self, *_: Any) -> None:
+        record = _read_json(self.path)
+        if record and record.get("token") == self.token: self.path.unlink()
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -162,7 +179,10 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
     run_dir.mkdir(parents=True, exist_ok=True); establish_contract(run_dir,config)
     for condition,role in pending_observations(run_dir,config,force):
         attempt={"attempted_at":time.time(),"condition":condition,"role":role,"identity":_identity(config)}
-        atomic_json(run_dir/"attempts"/f"{condition}__{role}__{time.time_ns()}.json",attempt)
+        attempt_path = run_dir / "attempts" / f"{condition}__{role}__{time.time_ns()}_{uuid.uuid4().hex}.json"
+        attempt_path.parent.mkdir(parents=True, exist_ok=True)
+        with attempt_path.open("x", encoding="utf-8") as stream:
+            json.dump(attempt, stream); stream.flush(); os.fsync(stream.fileno())
         try:
             image,score=execute(condition,role)
             if not math.isfinite(score): raise RuntimeError("native score is non-finite")
@@ -176,14 +196,22 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
     if len(rows)==12 and all(row.get("status")=="ok" for row in rows):
         atomic_json(run_dir/"canary_result.json",{"identity":_identity(config),"engineering_canary_complete":True,"observations":rows})
         os.replace(run_dir/"partial_scores.csv",run_dir/"scores.csv")
-    elif (run_dir / "canary_result.json").exists():
-        os.replace(run_dir / "canary_result.json", run_dir / f"canary_result.stale.{time.time_ns()}.json")
+    else:
+        stamp = time.time_ns(); quarantine = run_dir / "quarantine"; quarantine.mkdir(exist_ok=True)
+        for name in ("canary_result.json", "scores.csv"):
+            path = run_dir / name
+            if path.exists(): os.replace(path, quarantine / f"{name}.{stamp}")
 
 
 def main() -> None:
     parser=argparse.ArgumentParser(); parser.add_argument("--run-dir",required=True); parser.add_argument("--project-exact",required=True)
     parser.add_argument("--run-id",default=RUN_ID_DEFAULT); parser.add_argument("--official-source",required=True); parser.add_argument("--force-rerun-all",action="store_true"); args=parser.parse_args()
     if not os.environ.get("HF_TOKEN"): raise RuntimeError("HF_TOKEN must be supplied only through environment")
+    source = Path(args.official_source)
+    if not (source / ".git").exists(): raise RuntimeError("official source is not a git repository")
+    official_head = os.popen(f"git -C {source} rev-parse HEAD").read().strip()
+    official_branch = os.popen(f"git -C {source} symbolic-ref -q --short HEAD").read().strip()
+    if official_head != OFFICIAL_EXACT or official_branch or os.popen(f"git -C {source} status --porcelain").read().strip(): raise RuntimeError("official source identity is not detached, clean, pinned exact")
     import torch
     sys.path.insert(0, args.official_source)
     from cegwm.baselines.t2smark import embed_t2smark_sd35, score_t2smark_rgb

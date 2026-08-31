@@ -49,7 +49,7 @@ def test_stale_final_is_quarantined_when_repair_fails(tmp_path: Path) -> None:
     (tmp_path / "images" / f"{CONDITIONS[0]}__clean_negative.png").write_bytes(b"bad")
     run_canary(tmp_path, config(), lambda c, r: (_ for _ in ()).throw(RuntimeError("repair failed")))
     assert not (tmp_path / "canary_result.json").exists()
-    assert list(tmp_path.glob("canary_result.stale.*.json"))
+    assert list((tmp_path / "quarantine").glob("canary_result.json.*"))
 
 
 def test_force_recomputes_all_observations_after_generation_rebuild(tmp_path: Path) -> None:
