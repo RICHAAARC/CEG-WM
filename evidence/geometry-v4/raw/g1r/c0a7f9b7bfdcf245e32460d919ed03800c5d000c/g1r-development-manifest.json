@@ -1,0 +1,43 @@
+{
+  "attacks": [
+    "identity",
+    "rotation_5",
+    "scale_0.9",
+    "translation_0.08_0",
+    "crop_0.9"
+  ],
+  "config_sha256": "97b8e4bee02438119e82762062e6b5673277f847928dce981c582492626d6c42",
+  "environment": {
+    "cuda_available": true,
+    "gpu": {
+      "name": "NVIDIA L4",
+      "vram_bytes": 23659151360
+    },
+    "python": "3.13.15",
+    "torch": "2.11.0+cu128"
+  },
+  "files": {
+    "g1r-development-records.json": "d0d9f021f525bc3757db7c666a591ca593343f66a44d049bc015f9ce79afcd44",
+    "g1r-development-summary.json": "9501f631b5f771596e232436c1f144410a22486328fbaae23f2a8b739da02ba8"
+  },
+  "model_id": "stabilityai/stable-diffusion-3.5-medium",
+  "notebook_identity": "geometry_v4_g0_g1_colab_v4_g1r_development_v1",
+  "placement": "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess",
+  "prompts": [
+    "a copper kettle beside a linen napkin",
+    "a green bicycle leaning against a brick wall",
+    "a bowl of oranges on a marble counter",
+    "a wooden sailboat on a calm lake"
+  ],
+  "schema": "cegwm_geometry_v4_g1r_development_artifact_v1",
+  "seeds": [
+    6201,
+    6202,
+    6203,
+    6204
+  ],
+  "source_exact": "c0a7f9b7bfdcf245e32460d919ed03800c5d000c",
+  "stage": "development",
+  "units": 20,
+  "writer_id": "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"
+}

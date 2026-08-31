@@ -1,0 +1,37 @@
+{
+  "correct_rs_top5": 5,
+  "correct_rs_top5_by_attack": {
+    "crop_0.9": 2,
+    "identity": 2,
+    "rotation_5": 0,
+    "scale_0.9": 0,
+    "translation_0.08_0": 1
+  },
+  "correct_safe_by_attack": {
+    "crop_0.9": 0,
+    "identity": 0,
+    "rotation_5": 0,
+    "scale_0.9": 0,
+    "translation_0.08_0": 0
+  },
+  "correct_safe_reliable": 0,
+  "correct_unsafe": 0,
+  "cpu_carrier_ids": [
+    "gradient_shapes",
+    "crosshatch",
+    "radial_objects",
+    "colored_texture"
+  ],
+  "evidence": "synthetic_only",
+  "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT",
+  "exit": false,
+  "failures": 0,
+  "formal_denominator": 0,
+  "identity_translation_psr_ge_8": 2,
+  "negative_unsafe": 0,
+  "stage": "V4-G1R",
+  "status": "CPU_METHOD_PARTIAL",
+  "stops": 0,
+  "units": 20,
+  "wrong_unsafe": 0
+}

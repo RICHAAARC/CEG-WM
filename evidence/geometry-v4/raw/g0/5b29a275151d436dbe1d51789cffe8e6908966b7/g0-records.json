@@ -1,0 +1,126 @@
+{
+  "contract_sha256": "2bc64e4a9f540e6227ebbf23fb2c4e287e4b9fda8a972849dbbd050caa641fc6",
+  "stage": "G0",
+  "content_detector": {
+    "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+    "lf_scorer": "score_content_whitened_lf_image",
+    "hf_scorer": "score_hf_image",
+    "joint_operator": "weighted_joint_score",
+    "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+    "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+  },
+  "records": [
+    {
+      "seed": 5101,
+      "prompt": "a small brass astrolabe on a dark wooden table",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 62.604991249047956,
+        "ssim": 0.9999943586180887,
+        "luma_rms": 0.000569767527831031,
+        "luma_peak": 0.006726274509803977,
+        "correct_key_anchor": 14.962785720825195,
+        "wrong_key_anchor": -1.3536028861999512,
+        "content_score_drift": 0.016011630979342675
+      },
+      "attacked_rgb": {
+        "correct_key_anchor": 14.962785720825195,
+        "wrong_key_anchor": -1.3536028861999512
+      }
+    },
+    {
+      "seed": 5102,
+      "prompt": "a small brass astrolabe on a dark wooden table",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 62.5955636681155,
+        "ssim": 0.9999946106683459,
+        "luma_rms": 0.0005470520707877923,
+        "luma_peak": 0.003921568627451073,
+        "correct_key_anchor": 9.78633975982666,
+        "wrong_key_anchor": -0.017583131790161133,
+        "content_score_drift": 0.0033452846508996714
+      },
+      "attacked_rgb": {
+        "correct_key_anchor": 9.78633975982666,
+        "wrong_key_anchor": -0.017583131790161133
+      }
+    },
+    {
+      "seed": 5103,
+      "prompt": "a small brass astrolabe on a dark wooden table",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 62.51510813851965,
+        "ssim": 0.9999933512368211,
+        "luma_rms": 0.0005617422488381821,
+        "luma_peak": 0.004755294117647042,
+        "correct_key_anchor": 19.977426528930664,
+        "wrong_key_anchor": -2.988802909851074,
+        "content_score_drift": 0.03896789857169369
+      },
+      "attacked_rgb": {
+        "correct_key_anchor": 19.977426528930664,
+        "wrong_key_anchor": -2.988802909851074
+      }
+    },
+    {
+      "seed": 5104,
+      "prompt": "a small brass astrolabe on a dark wooden table",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 62.689511017496,
+        "ssim": 0.999996351224245,
+        "luma_rms": 0.0005572496971568119,
+        "luma_peak": 0.007843137254901933,
+        "correct_key_anchor": 7.096242427825928,
+        "wrong_key_anchor": -1.0936546325683594,
+        "content_score_drift": 0.011761937216277718
+      },
+      "attacked_rgb": {
+        "correct_key_anchor": 7.096242427825928,
+        "wrong_key_anchor": -1.0936546325683594
+      }
+    }
+  ]
+}

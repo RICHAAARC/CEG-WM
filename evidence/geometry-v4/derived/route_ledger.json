@@ -1,0 +1,322 @@
+{
+  "frozen_exact": "12488ad69bd6d2bf8ccc8d0c8d590cfa44bf372b",
+  "method": "geometry_v4_keyed_multiscale_sync_anchor_v1",
+  "routes": [
+    {
+      "failures": 0,
+      "final_rgb_observable": 4,
+      "source_exact": "5b29a275151d436dbe1d51789cffe8e6908966b7",
+      "stage": "G0",
+      "status": "PASS",
+      "units": 4
+    },
+    {
+      "correct_reliable": 19,
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 19,
+      "failures": 0,
+      "legacy_attacked_gate_passed": 2,
+      "source_exact": "22db26de8ad83b125bbe0d58030f93a9554c8112",
+      "source_observability_passed": 2,
+      "sources": 4,
+      "stage": "G1",
+      "status": "G1_METHOD_PARTIAL_NOT_PASSED",
+      "units": 20,
+      "wrong_reliable": 18,
+      "wrong_safe_reliable": 0,
+      "wrong_unsafe": 18
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 0,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "3c83c5dd023bc097368ecf3141042ca66fc62b66cefcbcff0ad954655d8c4577",
+      "route": "initial_g1r_blind_recovery",
+      "selected_fit_support": {
+        "max": null,
+        "median": null,
+        "min": null
+      },
+      "selected_translation_psr": {
+        "max": null,
+        "median": null,
+        "min": null
+      },
+      "source_exact": "331e56539858d06c062ff4211abcb27c516fc180",
+      "source_observability_passed": 2,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": null,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": null,
+        "units": 0
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 0,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "2dd5d11673b179cccafa5a5d40d5c30316d1b8eb93579f0ff04762cf6c74d2fd",
+      "route": "decoder_output_writer",
+      "selected_fit_support": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0
+      },
+      "selected_translation_psr": {
+        "max": 26.95984975238104,
+        "median": 11.00028138589764,
+        "min": 6.96920214040424
+      },
+      "source_exact": "7b8649ae9c775e52deac7daf964f8419c5ce50f2",
+      "source_observability_passed": 2,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": null,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": null,
+        "units": 0
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 10,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 1,
+        "identity": 2,
+        "rotation_5": 3,
+        "scale_0.9": 2,
+        "translation_0.08_0": 2
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "c8513de882dd435c3461ec8c92eb8b04e86d58c0eb81e59c38f9d49522b42a71",
+      "route": "keyed_phase_search",
+      "selected_fit_support": {
+        "max": 2,
+        "median": 0.0,
+        "min": 0
+      },
+      "selected_translation_psr": {
+        "max": 8.667246803430988,
+        "median": 7.6687044400535385,
+        "min": 7.000792776391156
+      },
+      "source_exact": "c5ed4f167a80591f8d0275fc1afdb662be0301ea",
+      "source_observability_passed": 3,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": null,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": null,
+        "units": 0
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 0,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "df2f9957d73b0eac9172fba2ec5f5be76168c750bc436905041455292cdab20f",
+      "route": "diffuse_luma_spread_anchor",
+      "selected_fit_support": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0
+      },
+      "selected_translation_psr": {
+        "max": 7.970675358232285,
+        "median": 6.063488955346401,
+        "min": 5.284379409096883
+      },
+      "source_exact": "a3877d6491308057547caf5993ec9bb1629e791c",
+      "source_observability_passed": 2,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": 2,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": 0.2601966822836666,
+        "units": 20
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 0,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "006384488cc20646a26493185e94e0ab4c1a272c403c2b58d599853c2516a88c",
+      "route": "opponent_color_carrier",
+      "selected_fit_support": {
+        "max": 0,
+        "median": 0.0,
+        "min": 0
+      },
+      "selected_translation_psr": {
+        "max": 7.902372128754276,
+        "median": 6.302454077761048,
+        "min": 4.834655108559189
+      },
+      "source_exact": "40261d26580e439d76ff93d344ac806a8e4744fc",
+      "source_observability_passed": 1,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": 2,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": 0.3382500318326019,
+        "units": 20
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_reliable": 0,
+      "correct_rs_top5": 0,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "failures": 0,
+      "negative_unsafe": 0,
+      "records_sha256": "d0d9f021f525bc3757db7c666a591ca593343f66a44d049bc015f9ce79afcd44",
+      "route": "sparse_gaussian_fiducial_atlas",
+      "selected_fit_support": {
+        "max": 7,
+        "median": 4.0,
+        "min": 3
+      },
+      "selected_translation_psr": {
+        "max": 8.284392817599159,
+        "median": 6.346057499931147,
+        "min": 4.844614980531295
+      },
+      "source_exact": "c0a7f9b7bfdcf245e32460d919ed03800c5d000c",
+      "source_observability_passed": 0,
+      "stage": "G1R_development",
+      "status": "G1R_METHOD_PARTIAL_NOT_PASSED",
+      "truth_probe": {
+        "fit_support_max": 6,
+        "fit_valid": 0,
+        "holdout_passed": 0,
+        "truth_rs_translation_psr_max": 2.678676638803619,
+        "units": 20
+      },
+      "units": 20,
+      "wrong_harmless_reliable": 0,
+      "wrong_reliable": 0,
+      "wrong_unsafe": 0
+    },
+    {
+      "correct_rs_top5": 5,
+      "correct_rs_top5_by_attack": {
+        "crop_0.9": 2,
+        "identity": 2,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 1
+      },
+      "correct_safe_by_attack": {
+        "crop_0.9": 0,
+        "identity": 0,
+        "rotation_5": 0,
+        "scale_0.9": 0,
+        "translation_0.08_0": 0
+      },
+      "correct_safe_reliable": 0,
+      "correct_unsafe": 0,
+      "cpu_carrier_ids": [
+        "gradient_shapes",
+        "crosshatch",
+        "radial_objects",
+        "colored_texture"
+      ],
+      "evidence": "synthetic_only",
+      "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT",
+      "exit": false,
+      "failures": 0,
+      "formal_denominator": 0,
+      "identity_translation_psr_ge_8": 2,
+      "negative_unsafe": 0,
+      "route": "balanced_bipolar_prn_microcode",
+      "source_exact": "12488ad69bd6d2bf8ccc8d0c8d590cfa44bf372b",
+      "stage": "V4-G1R",
+      "status": "CPU_METHOD_PARTIAL",
+      "stops": 0,
+      "units": 20,
+      "wrong_unsafe": 0
+    }
+  ],
+  "schema": "geometry_v4_evidence_route_ledger_v1"
+}

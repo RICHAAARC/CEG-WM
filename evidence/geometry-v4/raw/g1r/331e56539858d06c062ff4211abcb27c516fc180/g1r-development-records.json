@@ -1,0 +1,1109 @@
+{
+  "config_sha256": "89dc5d156c72a342cf32fb986fb3280ecfd1591a2038616411a9853c40601822",
+  "content_detector": {
+    "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+    "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+    "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96",
+    "hf_scorer": "score_hf_image",
+    "joint_operator": "weighted_joint_score",
+    "lf_scorer": "score_content_whitened_lf_image"
+  },
+  "records": [
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    }
+  ],
+  "source_exact": "331e56539858d06c062ff4211abcb27c516fc180",
+  "sources": [
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.06784723299925327,
+        "correct_domain_scores": {
+          "fit": 0.0021188042506675494,
+          "search": -0.0036069304809315437,
+          "validate": -0.003845996329728077
+        },
+        "luma_peak": 0.0039215686274511885,
+        "luma_rms": 0.0005555044769461999,
+        "passed": false,
+        "psnr": 62.56817009119112,
+        "ssim": 0.9999977942192905,
+        "wrong_domain_scores": {
+          "fit": -0.0006156672427582152,
+          "search": 0.006483075743614679,
+          "validate": 0.00805293351695868
+        }
+      },
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.00273230264075236,
+        "correct_domain_scores": {
+          "fit": -0.00820203256146358,
+          "search": 0.013635678583380446,
+          "validate": -0.005183465960701595
+        },
+        "luma_peak": 0.00700941176470582,
+        "luma_rms": 0.0008390411195043858,
+        "passed": false,
+        "psnr": 59.53209681343756,
+        "ssim": 0.9999949058873037,
+        "wrong_domain_scores": {
+          "fit": 0.011074800462091156,
+          "search": -0.03160780179747769,
+          "validate": 0.001360309105275189
+        }
+      },
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.03391194198519837,
+        "correct_domain_scores": {
+          "fit": 0.0015567064080667299,
+          "search": 0.011441928868154311,
+          "validate": 0.001599414025883079
+        },
+        "luma_peak": 0.0039215686274510775,
+        "luma_rms": 0.0005036551667372757,
+        "passed": true,
+        "psnr": 63.299985187262145,
+        "ssim": 0.9999965502018526,
+        "wrong_domain_scores": {
+          "fit": -0.0020738857499201023,
+          "search": -0.022765786125926512,
+          "validate": -0.0003513742884530487
+        }
+      },
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.00047303435301704333,
+        "correct_domain_scores": {
+          "fit": -0.002109945972467121,
+          "search": 0.024502385341511883,
+          "validate": 0.005825579077493266
+        },
+        "luma_peak": 0.0039215686274511885,
+        "luma_rms": 0.0006643052910692025,
+        "passed": true,
+        "psnr": 60.95661190695015,
+        "ssim": 0.9999944789779195,
+        "wrong_domain_scores": {
+          "fit": -0.003616704073651747,
+          "search": 0.0037310675823816267,
+          "validate": -0.006485145664073084
+        }
+      },
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    }
+  ],
+  "stage": "development"
+}

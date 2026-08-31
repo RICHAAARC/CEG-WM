@@ -1,0 +1,3095 @@
+{
+  "contract_sha256": "3f9c7c798777a529177331db98b4fc5aede3703715b628653b02b6463a7f7e58",
+  "stage": "G1",
+  "content_detector": {
+    "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+    "lf_scorer": "score_content_whitened_lf_image",
+    "hf_scorer": "score_hf_image",
+    "joint_operator": "weighted_joint_score",
+    "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+    "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+  },
+  "records": [
+    {
+      "seed": 6101,
+      "prompt": "a red ceramic teapot in a sunlit kitchen",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 65.00622796800955,
+        "ssim": 0.9999987145951946,
+        "luma_rms": 0.00039503524788679086,
+        "luma_peak": 0.003921568627451045,
+        "correct_key_anchor": 14.237157821655273,
+        "wrong_key_anchor": 1.5181498527526855,
+        "content_score_drift": 0.02246506737083509
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9036875802021086,
+            -0.09896988622905867,
+            0.17638131049379,
+            0.09896988622905867,
+            0.9036875802021085,
+            0.12465551875292027,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.17638131049379,
+              0.12465551875292027
+            ],
+            [
+              1.0800688906958986,
+              0.22362540498197894
+            ],
+            [
+              0.98109900446684,
+              1.1273129851840875
+            ],
+            [
+              0.07741142426473133,
+              1.0283430989550288
+            ]
+          ],
+          "support": 14,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 35.52264372100995,
+            "global_score": 1.5688699160798691,
+            "translation_phase_psr": 15.224887831086201,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.0251846629456636,
+              3.744602880843785,
+              -0.023993599348707983,
+              0.6183153526813069,
+              0.006315744217480143,
+              1.4496681782282896,
+              5.134414667743271,
+              2.342176437188537,
+              0.8873960236630152,
+              9.147307688410919,
+              0.1303783835359168,
+              2.9775560612773755,
+              0.984198820913867,
+              5.891557711097126,
+              8.166077151916245,
+              2.0974015022592036
+            ],
+            "rotation_deg": -6.25,
+            "scale": 1.1,
+            "translation_pixels_search_128": [
+              -10,
+              -16
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0559595559624617,
+            -0.15075541101180534,
+            0.3859806046900261,
+            0.1507554110118053,
+            1.055959555962462,
+            -0.008869294510755623,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.3859806046900261,
+              -0.008869294510755623
+            ],
+            [
+              1.4419401606524878,
+              0.14188611650104968
+            ],
+            [
+              1.2911847496406825,
+              1.1978456724635116
+            ],
+            [
+              0.23522519367822076,
+              1.0470902614517064
+            ]
+          ],
+          "support": 8,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 20.832534308214424,
+            "global_score": 2.2978815224503064,
+            "translation_phase_psr": 9.5994398395574,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.0,
+              3.420215449481946,
+              11.721521338690561,
+              4.859178652412787,
+              0.0,
+              -0.9351092411472424,
+              -1.7520204732035478,
+              -1.1886765728479873,
+              0.0,
+              1.825914026954191,
+              -3.543518447350835,
+              0.633570503600035,
+              -0.039021287509868635,
+              1.789353881707579,
+              2.693137581027744,
+              5.5339276232481325
+            ],
+            "rotation_deg": -8.125,
+            "scale": 0.9375,
+            "translation_pixels_search_128": [
+              -43,
+              -12
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 33.288719177246094,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6101,
+      "prompt": "a red ceramic teapot in a sunlit kitchen",
+      "attack": "rotation_5",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 65.00622796800955,
+        "ssim": 0.9999987145951946,
+        "luma_rms": 0.00039503524788679086,
+        "luma_peak": 0.003921568627451045,
+        "correct_key_anchor": 14.237157821655273,
+        "wrong_key_anchor": 1.5181498527526855,
+        "content_score_drift": 0.02246506737083509
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.8884148408698973,
+            -0.13674012241790262,
+            0.21865082975038064,
+            0.13674012241790262,
+            0.8884148408698972,
+            0.07403669158444653,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.21865082975038064,
+              0.07403669158444653
+            ],
+            [
+              1.107065670620278,
+              0.21077681400234916
+            ],
+            [
+              0.9703255482023754,
+              1.0991916548722465
+            ],
+            [
+              0.08191070733247802,
+              0.9624515324543437
+            ]
+          ],
+          "support": 14,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 37.37474603938532,
+            "global_score": 2.8539325743076494,
+            "translation_phase_psr": 17.410005971675297,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.585990806448368,
+              5.528317742559563,
+              -0.4209148978833245,
+              1.0117346982757824,
+              0.17166020174850083,
+              1.248999495800014,
+              4.159589820385734,
+              2.4161151131340928,
+              1.305009308536052,
+              8.072119057343135,
+              -2.1660658699283464,
+              1.211935964233378,
+              2.087392775899306,
+              6.851149046848028,
+              9.011264918851706,
+              4.846064002406191
+            ],
+            "rotation_deg": -8.75,
+            "scale": 1.1125,
+            "translation_pixels_search_128": [
+              -12,
+              -11
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0486259979913113,
+            -0.09174288710279807,
+            0.29714899573684583,
+            0.09174288710279807,
+            1.048625997991311,
+            0.04005177792538642,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.29714899573684583,
+              0.04005177792538642
+            ],
+            [
+              1.3457749937281571,
+              0.1317946650281845
+            ],
+            [
+              1.254032106625359,
+              1.1804206630194956
+            ],
+            [
+              0.20540610863404776,
+              1.0886777759166975
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 22.611212571907306,
+            "global_score": 4.773599275697356,
+            "translation_phase_psr": 11.539930790308135,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.0,
+              6.711714972686162,
+              8.86255427396954,
+              4.949934214389758,
+              0.0,
+              -1.6081485758029368,
+              -1.1489912937355766,
+              -2.357834068595328,
+              -0.4566143603566456,
+              1.189755772671893,
+              -2.365086612780516,
+              1.0879021781239475,
+              0.2986765534187321,
+              3.9812795098198803,
+              1.1046257030772186,
+              5.0435534675237355
+            ],
+            "rotation_deg": -5.0,
+            "scale": 0.95,
+            "translation_pixels_search_128": [
+              -35,
+              -14
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 35.54267120361328,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6101,
+      "prompt": "a red ceramic teapot in a sunlit kitchen",
+      "attack": "scale_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 65.00622796800955,
+        "ssim": 0.9999987145951946,
+        "luma_rms": 0.00039503524788679086,
+        "luma_peak": 0.003921568627451045,
+        "correct_key_anchor": 14.237157821655273,
+        "wrong_key_anchor": 1.5181498527526855,
+        "content_score_drift": 0.02246506737083509
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9847764269673746,
+            -0.07534219704094056,
+            0.1397710740131609,
+            0.07534219704094056,
+            0.9847764269673746,
+            0.05655486122418891,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.1397710740131609,
+              0.05655486122418891
+            ],
+            [
+              1.1245475009805355,
+              0.13189705826512946
+            ],
+            [
+              1.049205303939595,
+              1.116673485232504
+            ],
+            [
+              0.06442887697222036,
+              1.0413312881915635
+            ]
+          ],
+          "support": 13,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 40.83423587973457,
+            "global_score": 4.150632058638613,
+            "translation_phase_psr": 19.378559863017117,
+            "macro_regions": 4,
+            "tile_scores": [
+              -2.2348771786678587,
+              5.886688571534222,
+              1.7066729597970185,
+              2.2170723142571376,
+              -0.014001066993097944,
+              1.5349834265990427,
+              4.878005514404296,
+              2.740735328785229,
+              1.5787336682331348,
+              7.910869111255375,
+              -1.8203680158401525,
+              1.9070342237888909,
+              3.2644060389849177,
+              6.3293733701136015,
+              8.439383517977669,
+              5.003081793028274
+            ],
+            "rotation_deg": -4.375,
+            "scale": 1.0125,
+            "translation_pixels_search_128": [
+              -12,
+              -11
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1266418879247846,
+            0.1483252184318768,
+            0.07511487201851977,
+            -0.1483252184318768,
+            1.1266418879247846,
+            0.058085759741735125,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.07511487201851977,
+              0.058085759741735125
+            ],
+            [
+              1.2017567599433043,
+              -0.09023945869014166
+            ],
+            [
+              1.3500819783751812,
+              1.0364024292346428
+            ],
+            [
+              0.22344009045039656,
+              1.1847276476665196
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 21.835371674189442,
+            "global_score": 3.6821932585354036,
+            "translation_phase_psr": 12.226889225374391,
+            "macro_regions": 4,
+            "tile_scores": [
+              -2.4622237300258485,
+              1.7204662689497463,
+              12.278900840395618,
+              4.174630620206332,
+              2.2465898206992585,
+              -3.1226952667513403,
+              1.146475890196298,
+              -4.171434735020947,
+              -1.7027296968669225,
+              2.936431534132198,
+              0.9947233953478118,
+              1.5137038347202303,
+              1.252702548998252,
+              2.9639454743907314,
+              1.8623382159409239,
+              3.55101969369364
+            ],
+            "rotation_deg": 7.5,
+            "scale": 0.88,
+            "translation_pixels_search_128": [
+              -27,
+              -6
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 40.119388580322266,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6101,
+      "prompt": "a red ceramic teapot in a sunlit kitchen",
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 65.00622796800955,
+        "ssim": 0.9999987145951946,
+        "luma_rms": 0.00039503524788679086,
+        "luma_peak": 0.003921568627451045,
+        "correct_key_anchor": 14.237157821655273,
+        "wrong_key_anchor": 1.5181498527526855,
+        "content_score_drift": 0.02246506737083509
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.8836056339753952,
+            -0.09677055542396852,
+            0.1380785237164126,
+            0.09677055542396852,
+            0.8836056339753954,
+            0.12004812577275911,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.1380785237164126,
+              0.12004812577275911
+            ],
+            [
+              1.0216841576918076,
+              0.21681868119672765
+            ],
+            [
+              0.9249136022678393,
+              1.100424315172123
+            ],
+            [
+              0.04130796829244408,
+              1.0036537597481545
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 37.392380631155994,
+            "global_score": 2.4781153885833103,
+            "translation_phase_psr": 19.56412895067372,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.04291372489394207,
+              3.521876385845798,
+              -0.0340470350260893,
+              0.8227526416229419,
+              -1.097092221540434,
+              0.560216621136225,
+              5.80362691039603,
+              2.6942403936021684,
+              2.0902661492030354,
+              8.28137043480546,
+              -0.6427393563433117,
+              3.1454369845979473,
+              3.926145782246463,
+              5.814251203674045,
+              8.081561870771175,
+              3.239201297001351
+            ],
+            "rotation_deg": -6.25,
+            "scale": 1.125,
+            "translation_pixels_search_128": [
+              -4,
+              -14
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1068829978797172,
+            0.09683971416406463,
+            0.031996911694644484,
+            -0.09683971416406463,
+            1.1068829978797172,
+            0.05009646837839416,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.031996911694644484,
+              0.05009646837839416
+            ],
+            [
+              1.1388799095743618,
+              -0.04674324578567047
+            ],
+            [
+              1.2357196237384265,
+              1.0601397520940468
+            ],
+            [
+              0.12883662585870911,
+              1.1569794662581114
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 27.353981555047206,
+            "global_score": 6.9632377249461195,
+            "translation_phase_psr": 11.904694153795743,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.6736285051746274,
+              -2.203106545655464,
+              11.735632307059603,
+              3.603960249587746,
+              3.9762389896434835,
+              -3.3012519558737266,
+              1.8312291829109082,
+              -3.7935329941313882,
+              0.049632041630138346,
+              2.8202007001043636,
+              0.8649139333291802,
+              2.511023676202968,
+              1.7932571533880872,
+              2.8429050412793493,
+              1.3672662385259324,
+              3.8563812167207616
+            ],
+            "rotation_deg": 5.0,
+            "scale": 0.9,
+            "translation_pixels_search_128": [
+              -17,
+              -7
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 36.00392150878906,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6101,
+      "prompt": "a red ceramic teapot in a sunlit kitchen",
+      "attack": "crop_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 65.00622796800955,
+        "ssim": 0.9999987145951946,
+        "luma_rms": 0.00039503524788679086,
+        "luma_peak": 0.003921568627451045,
+        "correct_key_anchor": 14.237157821655273,
+        "wrong_key_anchor": 1.5181498527526855,
+        "content_score_drift": 0.02246506737083509
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.908225655983507,
+            0.039653988513941814,
+            0.08117828798749609,
+            -0.039653988513941814,
+            0.908225655983507,
+            0.19957243398175287,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.08117828798749609,
+              0.19957243398175287
+            ],
+            [
+              0.9894039439710031,
+              0.15991844546781106
+            ],
+            [
+              1.029057932484945,
+              1.068144101451318
+            ],
+            [
+              0.12083227650143791,
+              1.10779808996526
+            ]
+          ],
+          "support": 15,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 35.54946486171611,
+            "global_score": 1.221650905142221,
+            "translation_phase_psr": 13.99166898844422,
+            "macro_regions": 4,
+            "tile_scores": [
+              -0.9448136752762488,
+              2.215562582553301,
+              0.4279072908617066,
+              1.3660901325612493,
+              2.2730807124353327,
+              3.225128810023512,
+              4.845471693968369,
+              2.0817811103646684,
+              0.668313697920935,
+              9.481610242823745,
+              0.9713617808563673,
+              0.6985555428247283,
+              3.26615267821184,
+              3.1388316181867055,
+              7.868392666609333,
+              3.313259842827092
+            ],
+            "rotation_deg": 2.5,
+            "scale": 1.1,
+            "translation_pixels_search_128": [
+              -7,
+              -17
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1559783748160946,
+            0.17792208911101376,
+            0.029900161737233328,
+            -0.17792208911101376,
+            1.1559783748160946,
+            0.07396398313171157,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.029900161737233328,
+              0.07396398313171157
+            ],
+            [
+              1.185878536553328,
+              -0.10395810597930219
+            ],
+            [
+              1.3638006256643418,
+              1.0520202688367923
+            ],
+            [
+              0.2078222508482471,
+              1.2299423579478062
+            ]
+          ],
+          "support": 11,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 25.469013653703346,
+            "global_score": 3.603105783840649,
+            "translation_phase_psr": 15.240376520635486,
+            "macro_regions": 4,
+            "tile_scores": [
+              4.8922210347730495,
+              -2.7997385910653914,
+              9.7712714461607,
+              3.033940506052918,
+              0.021431552163004408,
+              -1.8123387589452231,
+              2.2953211509635194,
+              -3.8350543649496576,
+              -1.8032666024150614,
+              5.647113517317176,
+              0.3120132934751081,
+              2.7583055371117795,
+              1.3436132284148514,
+              4.051017608406922,
+              0.9705406071602329,
+              5.092039689498049
+            ],
+            "rotation_deg": 8.75,
+            "scale": 0.855,
+            "translation_pixels_search_128": [
+              -25,
+              -8
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 34.003814697265625,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6102,
+      "prompt": "a blue paper kite over a grassy field",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 63.41143373859402,
+        "ssim": 0.9999968805121542,
+        "luma_rms": 0.0005005675772428213,
+        "luma_peak": 0.00392156862745105,
+        "correct_key_anchor": 0.5202416181564331,
+        "wrong_key_anchor": 6.8101325035095215,
+        "content_score_drift": 0.003324321706305554
+      },
+      "attacked_rgb": {
+        "passed": true,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.0559595559624617,
+            0.15075541101180534,
+            -0.15060157797532253,
+            -0.1507554110118053,
+            1.055959555962462,
+            -0.06283829294776917,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.15060157797532253,
+              -0.06283829294776917
+            ],
+            [
+              0.9053579779871392,
+              -0.2135937039595745
+            ],
+            [
+              1.0561133889989447,
+              0.8423658520028874
+            ],
+            [
+              0.00015383303648280888,
+              0.9931212630146927
+            ]
+          ],
+          "support": 11,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 11.527726828197675,
+            "global_score": 0.1906985436050957,
+            "translation_phase_psr": 17.198425363555078,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.27902446499273137,
+              -0.7648884048296901,
+              0.728608826908111,
+              -0.18553933500329647,
+              0.26282820525919026,
+              -1.8919155164866537,
+              2.5941650839386954,
+              0.8484403233425455,
+              -1.5170679565640355,
+              -0.32602479044735044,
+              1.4206035208923518,
+              2.656166971684086,
+              3.4085581204680757,
+              1.7189815716499828,
+              3.2690593566968795,
+              2.2255257647689803
+            ],
+            "rotation_deg": 8.125,
+            "scale": 0.9375,
+            "translation_pixels_search_128": [
+              6,
+              14
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": null,
+          "corners_hat": [],
+          "support": 11,
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "diagnostics": {
+            "anchor_score": 7.352842529368333,
+            "global_score": -0.24546249118706798,
+            "translation_phase_psr": 11.929174401682294,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.19443879192622676,
+              -0.19533198355809545,
+              0.9657383967968931,
+              -0.40035143639832504,
+              0.2871089077424828,
+              -0.5999096898500836,
+              0.4406910245722485,
+              3.1400833591825066,
+              1.4181436317448475,
+              1.4406621379880207,
+              0.20472893068325132,
+              -0.7229093454473956,
+              1.0957841385857678,
+              1.23479145800012,
+              1.8047219179079306,
+              -0.6154923464469578
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 11.78485107421875,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6102,
+      "prompt": "a blue paper kite over a grassy field",
+      "attack": "rotation_5",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 63.41143373859402,
+        "ssim": 0.9999968805121542,
+        "luma_rms": 0.0005005675772428213,
+        "luma_peak": 0.00392156862745105,
+        "correct_key_anchor": 0.5202416181564331,
+        "wrong_key_anchor": 6.8101325035095215,
+        "content_score_drift": 0.003324321706305554
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9526376004508535,
+            0.146624950544498,
+            -0.0811273384898018,
+            -0.14662495054449803,
+            0.9526376004508537,
+            0.026127533314538754,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.0811273384898018,
+              0.026127533314538754
+            ],
+            [
+              0.8715102619610517,
+              -0.12049741722995928
+            ],
+            [
+              1.0181352125055496,
+              0.8321401832208943
+            ],
+            [
+              0.0654976120546962,
+              0.9787651337653924
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 13.675928628874992,
+            "global_score": 1.208478959201616,
+            "translation_phase_psr": 16.550843858341455,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.1999778413403948,
+              0.34617078831277137,
+              -0.3899431768230253,
+              0.4941805686897787,
+              0.3661187877134288,
+              -0.8405015878236808,
+              2.5914120260973434,
+              0.5549232373171704,
+              -1.561318384019676,
+              -0.41067547989930886,
+              1.8127485046211236,
+              3.364354271749497,
+              1.294101439860374,
+              2.162578451931242,
+              2.980147208358263,
+              2.704554033957132
+            ],
+            "rotation_deg": 8.75,
+            "scale": 1.0375,
+            "translation_pixels_search_128": [
+              4,
+              9
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1111111111111112,
+            0.0,
+            0.13342082239720038,
+            0.0,
+            1.1111111111111112,
+            -0.11854768153980752,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.13342082239720038,
+              -0.11854768153980752
+            ],
+            [
+              1.2445319335083116,
+              -0.11854768153980752
+            ],
+            [
+              1.2445319335083116,
+              0.9925634295713036
+            ],
+            [
+              0.13342082239720038,
+              0.9925634295713036
+            ]
+          ],
+          "support": 10,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 5.944165506019594,
+            "global_score": 2.667002481968838,
+            "translation_phase_psr": 11.831741263995859,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.310708363176746,
+              -0.1181521199241215,
+              1.0125175333334213,
+              -0.5388479038283187,
+              0.07924605031510454,
+              -0.1735511056927191,
+              0.6316761037257522,
+              0.2807273141638837,
+              0.5507436569179257,
+              1.3160457299912256,
+              0.4066441458480233,
+              -0.5230497918777901,
+              1.2463265970897717,
+              -0.512264241235606,
+              2.6209186789644967,
+              -1.0934028889777643
+            ],
+            "rotation_deg": 0.0,
+            "scale": 0.9,
+            "translation_pixels_search_128": [
+              -24,
+              8
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 14.081665992736816,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6102,
+      "prompt": "a blue paper kite over a grassy field",
+      "attack": "scale_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 63.41143373859402,
+        "ssim": 0.9999968805121542,
+        "luma_rms": 0.0005005675772428213,
+        "luma_peak": 0.00392156862745105,
+        "correct_key_anchor": 0.5202416181564331,
+        "wrong_key_anchor": 6.8101325035095215,
+        "content_score_drift": 0.003324321706305554
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9024510947867859,
+            0.029543189906795598,
+            -0.005367221086948231,
+            -0.0295431899067956,
+            0.902451094786786,
+            -0.023068125668341596,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.005367221086948231,
+              -0.023068125668341596
+            ],
+            [
+              0.8970838736998377,
+              -0.052611315575137194
+            ],
+            [
+              0.9266270636066333,
+              0.8498397792116488
+            ],
+            [
+              0.024175968819847366,
+              0.8793829691184444
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 23.243055486182154,
+            "global_score": 10.44084930613566,
+            "translation_phase_psr": 17.66946905291074,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.7702395070672075,
+              1.4085897774061324,
+              -1.7382504886794294,
+              0.139379795783924,
+              4.2766979287783995,
+              1.100037176375471,
+              4.338507653226211,
+              -2.415797215894785,
+              -4.019230767777809,
+              1.6598282468903314,
+              3.412634864484002,
+              1.220342787866834,
+              3.468216715070015,
+              -0.3933163213869941,
+              4.308633509378154,
+              3.94522412317344
+            ],
+            "rotation_deg": 1.875,
+            "scale": 1.1075000000000002,
+            "translation_pixels_search_128": [
+              5,
+              11
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0589969781429922,
+            0.12768389899196003,
+            0.07201389214118543,
+            -0.12768389899196,
+            1.058996978142992,
+            0.0028473974323580333,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.07201389214118543,
+              0.0028473974323580333
+            ],
+            [
+              1.1310108702841777,
+              -0.12483650155960196
+            ],
+            [
+              1.2586947692761377,
+              0.9341604765833901
+            ],
+            [
+              0.19969779113314545,
+              1.06184437557535
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 12.117029651963948,
+            "global_score": 2.9636330616516764,
+            "translation_phase_psr": 12.511692339924041,
+            "macro_regions": 4,
+            "tile_scores": [
+              3.8794450750721614,
+              -1.3804806677181514,
+              2.592194085711085,
+              1.1219276019991478,
+              1.9143270060677982,
+              -0.7273609763273045,
+              2.3446105584417687,
+              -0.4462925867478955,
+              -1.3057664063918564,
+              2.060158779982528,
+              0.9043069523676109,
+              -0.7722807200391353,
+              1.4560603321947785,
+              -1.8068053274324958,
+              3.3778153823778325,
+              0.011362297927388687
+            ],
+            "rotation_deg": 6.875,
+            "scale": 0.9375,
+            "translation_pixels_search_128": [
+              -21,
+              4
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 23.608978271484375,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6102,
+      "prompt": "a blue paper kite over a grassy field",
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 63.41143373859402,
+        "ssim": 0.9999968805121542,
+        "luma_rms": 0.0005005675772428213,
+        "luma_peak": 0.00392156862745105,
+        "correct_key_anchor": 0.5202416181564331,
+        "wrong_key_anchor": 6.8101325035095215,
+        "content_score_drift": 0.003324321706305554
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9071444756714578,
+            -0.05945739020922097,
+            -0.00258370021143335,
+            0.05945739020922098,
+            0.9071444756714578,
+            -0.08566313766474878,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.00258370021143335,
+              -0.08566313766474878
+            ],
+            [
+              0.9045607754600244,
+              -0.026205747455527804
+            ],
+            [
+              0.8451033852508035,
+              0.8809387282159301
+            ],
+            [
+              -0.062041090420654324,
+              0.8214813380067091
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 10.797968261680236,
+            "global_score": 3.8839499041316166,
+            "translation_phase_psr": 19.061351501119837,
+            "macro_regions": 4,
+            "tile_scores": [
+              -0.40639028956482814,
+              0.37271868023485766,
+              -0.5063502744111676,
+              -0.484438698539541,
+              4.368692598734569,
+              -0.09600578792208775,
+              1.9243171585703325,
+              -0.2941841814905297,
+              -2.3234579860858706,
+              1.0734440236860392,
+              1.645810685419664,
+              1.921433525737546,
+              0.8144388003036017,
+              -0.7840491102920591,
+              2.2359630147902925,
+              1.3069428196492907
+            ],
+            "rotation_deg": -3.75,
+            "scale": 1.1,
+            "translation_pixels_search_128": [
+              10,
+              13
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1357552130413244,
+            0.03718077593383652,
+            0.07101232047304941,
+            -0.03718077593383652,
+            1.1357552130413247,
+            -0.14377540753012194,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.07101232047304941,
+              -0.14377540753012194
+            ],
+            [
+              1.206767533514374,
+              -0.18095618346395848
+            ],
+            [
+              1.2439483094482104,
+              0.9547990295773662
+            ],
+            [
+              0.10819309640688593,
+              0.9919798055112027
+            ]
+          ],
+          "support": 10,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 15.326017231648507,
+            "global_score": 5.105952273516267,
+            "translation_phase_psr": 12.156095705685535,
+            "macro_regions": 4,
+            "tile_scores": [
+              2.9816011723710965,
+              -0.6744889990240478,
+              3.0937270289244525,
+              -1.7551853380269968,
+              3.9770262013975493,
+              -0.9986568998222642,
+              -0.23530291568090966,
+              1.8064923577577932,
+              0.03874468545775178,
+              2.3080554801879187,
+              0.19892369490337658,
+              -0.8522129886382197,
+              3.190658987470473,
+              0.21750501480505055,
+              2.124531252231645,
+              0.19539143582223545
+            ],
+            "rotation_deg": 1.875,
+            "scale": 0.88,
+            "translation_pixels_search_128": [
+              -20,
+              12
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 10.772212028503418,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6102,
+      "prompt": "a blue paper kite over a grassy field",
+      "attack": "crop_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 63.41143373859402,
+        "ssim": 0.9999968805121542,
+        "luma_rms": 0.0005005675772428213,
+        "luma_peak": 0.00392156862745105,
+        "correct_key_anchor": 0.5202416181564331,
+        "wrong_key_anchor": 6.8101325035095215,
+        "content_score_drift": 0.003324321706305554
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1595846331857431,
+            0.15266221312286735,
+            -0.22698956488658875,
+            -0.15266221312286735,
+            1.1595846331857433,
+            -0.1609415249920679,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.22698956488658875,
+              -0.1609415249920679
+            ],
+            [
+              0.9325950682991544,
+              -0.31360373811493525
+            ],
+            [
+              1.0852572814220218,
+              0.845980895070808
+            ],
+            [
+              -0.0743273517637214,
+              0.9986431081936754
+            ]
+          ],
+          "support": 11,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 9.198831172463564,
+            "global_score": 0.12910537685025064,
+            "translation_phase_psr": 17.304724537573605,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.0648858056172006,
+              -4.502376707768832,
+              3.574947519672913,
+              -0.13981953126839786,
+              0.31672737993792927,
+              -1.503185330951248,
+              2.9495649068852865,
+              0.8817724506871805,
+              -1.38776236797656,
+              -0.25389022058746413,
+              0.7408286647032113,
+              2.0753737752766592,
+              2.168802465240131,
+              1.985862166326982,
+              2.287755886300351,
+              1.510738678009882
+            ],
+            "rotation_deg": 7.5,
+            "scale": 0.855,
+            "translation_pixels_search_128": [
+              9,
+              20
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            0.9013135103398277,
+            0.11866017474550147,
+            0.24985567714237475,
+            -0.11866017474550146,
+            0.9013135103398277,
+            0.03780719047055343,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.24985567714237475,
+              0.03780719047055343
+            ],
+            [
+              1.1511691874822023,
+              -0.08085298427494803
+            ],
+            [
+              1.269829362227704,
+              0.8204605260648796
+            ],
+            [
+              0.3685158518878762,
+              0.9391207008103811
+            ]
+          ],
+          "support": 7,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 4.447121367620974,
+            "global_score": 0.31422143680332004,
+            "translation_phase_psr": 10.39063433652462,
+            "macro_regions": 3,
+            "tile_scores": [
+              0.0,
+              0.1131496927624326,
+              0.2609854588310094,
+              -0.5614335355878659,
+              0.0,
+              -0.4560508138320993,
+              1.7347948623127423,
+              2.340194779742858,
+              0.0,
+              -0.09894160191986046,
+              0.28562202686039007,
+              -0.650991780927676,
+              0.0,
+              -0.4024815711123837,
+              1.4714633288221872,
+              1.4483372648340533
+            ],
+            "rotation_deg": 7.5,
+            "scale": 1.1,
+            "translation_pixels_search_128": [
+              -33,
+              9
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 9.328579902648926,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6103,
+      "prompt": "a glass terrarium with a tiny fern",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 62.954920807517325,
+        "ssim": 0.9999981823398013,
+        "luma_rms": 0.00045713023265980633,
+        "luma_peak": 0.007843137254901957,
+        "correct_key_anchor": 13.345698356628418,
+        "wrong_key_anchor": 6.32797908782959,
+        "content_score_drift": 0.09927897904919736
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1626389920728886,
+            -0.12732967818943225,
+            -0.041276704185822605,
+            0.12732967818943228,
+            1.1626389920728886,
+            -0.19222842961934938,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.041276704185822605,
+              -0.19222842961934938
+            ],
+            [
+              1.121362287887066,
+              -0.0648987514299171
+            ],
+            [
+              0.9940326096976337,
+              1.0977402406429713
+            ],
+            [
+              -0.16860638237525485,
+              0.9704105624535392
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 24.62900345164342,
+            "global_score": 5.300193867220491,
+            "translation_phase_psr": 13.096327359384864,
+            "macro_regions": 4,
+            "tile_scores": [
+              5.676409577361258,
+              1.13420664973939,
+              -4.808524189686517,
+              -1.5876099753233923,
+              -3.942956444885457,
+              1.1968344224176417,
+              0.7534124648249263,
+              4.336226959292157,
+              1.7265016318546473,
+              2.7620537405386667,
+              -1.3621231722461726,
+              0.9584173601701871,
+              2.9308045144845867,
+              6.34584246892083,
+              8.019895353247467,
+              3.3289244265024367
+            ],
+            "rotation_deg": -6.25,
+            "scale": 0.855,
+            "translation_pixels_search_128": [
+              3,
+              6
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            0.9467203221164947,
+            0.10368273795425195,
+            0.11653075342919358,
+            -0.10368273795425195,
+            0.9467203221164947,
+            0.10997727091100458,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.11653075342919358,
+              0.10997727091100458
+            ],
+            [
+              1.0632510755456883,
+              0.006294532956752627
+            ],
+            [
+              1.16693381349994,
+              0.9530148550732473
+            ],
+            [
+              0.22021349138344554,
+              1.0566975930274993
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 26.73864719948936,
+            "global_score": 1.6316748831563672,
+            "translation_phase_psr": 6.684622377423906,
+            "macro_regions": 4,
+            "tile_scores": [
+              2.435278874455483,
+              -1.2141075851030751,
+              7.413126623163979,
+              2.8249311186415023,
+              -0.3155368715775986,
+              0.5997077804486446,
+              4.791966888020973,
+              -0.2514453325739311,
+              2.1729553330647304,
+              4.754317392935428,
+              -1.4489634755997038,
+              0.006385596900870316,
+              -0.725044849955033,
+              -1.842388040925686,
+              4.89771796087528,
+              9.088285788417702
+            ],
+            "rotation_deg": 6.25,
+            "scale": 1.05,
+            "translation_pixels_search_128": [
+              -18,
+              -4
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 24.549930572509766,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6103,
+      "prompt": "a glass terrarium with a tiny fern",
+      "attack": "rotation_5",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 62.954920807517325,
+        "ssim": 0.9999981823398013,
+        "luma_rms": 0.00045713023265980633,
+        "luma_peak": 0.007843137254901957,
+        "correct_key_anchor": 13.345698356628418,
+        "wrong_key_anchor": 6.32797908782959,
+        "content_score_drift": 0.09927897904919736
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1186587797285126,
+            -0.1348773580900986,
+            0.031731336424887485,
+            0.1348773580900986,
+            1.1186587797285126,
+            -0.1740121633974946,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.031731336424887485,
+              -0.1740121633974946
+            ],
+            [
+              1.1503901161534,
+              -0.03913480530739599
+            ],
+            [
+              1.0155127580633014,
+              1.0795239744211167
+            ],
+            [
+              -0.10314602166521111,
+              0.944646616331018
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 22.39375216774435,
+            "global_score": 2.2353844333463826,
+            "translation_phase_psr": 8.723673753618279,
+            "macro_regions": 4,
+            "tile_scores": [
+              5.1812119845756754,
+              -1.1564460582943705,
+              -5.205963986195111,
+              -1.1740932927133831,
+              -0.6838513565834053,
+              -0.14832390375442533,
+              0.23815802839431122,
+              4.03395657369209,
+              -0.03626645767844716,
+              4.189779364914237,
+              0.8795887770374206,
+              0.41898633618159264,
+              -1.8270278919977605,
+              5.913679010173557,
+              8.114312598191802,
+              8.347325486109678
+            ],
+            "rotation_deg": -6.875,
+            "scale": 0.8875000000000001,
+            "translation_pixels_search_128": [
+              -3,
+              6
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0,
+            0.0,
+            0.09448818897637795,
+            0.0,
+            1.0,
+            0.08661417322834646,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.09448818897637795,
+              0.08661417322834646
+            ],
+            [
+              1.094488188976378,
+              0.08661417322834646
+            ],
+            [
+              1.094488188976378,
+              1.0866141732283465
+            ],
+            [
+              0.09448818897637795,
+              1.0866141732283465
+            ]
+          ],
+          "support": 11,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 24.27048994161943,
+            "global_score": 0.5627814276915992,
+            "translation_phase_psr": 5.788845931352968,
+            "macro_regions": 4,
+            "tile_scores": [
+              3.088947059702027,
+              0.09776754089825795,
+              6.246201635796282,
+              3.5585264900885143,
+              -1.1078340540365321,
+              1.6536111057945742,
+              4.783701951026131,
+              -0.09667767142654105,
+              2.408266598344107,
+              2.4104783895859376,
+              0.24268035352278583,
+              -0.2021352274534396,
+              -0.9371192584437917,
+              -3.393374891707944,
+              5.469877053603845,
+              6.6506407372254746
+            ],
+            "rotation_deg": 0.0,
+            "scale": 1.0,
+            "translation_pixels_search_128": [
+              -12,
+              -11
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 21.887744903564453,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6103,
+      "prompt": "a glass terrarium with a tiny fern",
+      "attack": "scale_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 62.954920807517325,
+        "ssim": 0.9999981823398013,
+        "luma_rms": 0.00045713023265980633,
+        "luma_peak": 0.007843137254901957,
+        "correct_key_anchor": 13.345698356628418,
+        "wrong_key_anchor": 6.32797908782959,
+        "content_score_drift": 0.09927897904919736
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.9735209007205887,
+            0.06380793095623713,
+            0.09157180463402802,
+            -0.06380793095623713,
+            0.9735209007205888,
+            0.09238760960601318,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.09157180463402802,
+              0.09238760960601318
+            ],
+            [
+              1.0650927053546166,
+              0.02857967864977605
+            ],
+            [
+              1.1289006363108538,
+              1.0021005793703648
+            ],
+            [
+              0.15537973559026513,
+              1.065908510326602
+            ]
+          ],
+          "support": 13,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 38.40896534816544,
+            "global_score": 11.089515623342667,
+            "translation_phase_psr": 9.859350656159076,
+            "macro_regions": 4,
+            "tile_scores": [
+              -4.707369900238282,
+              4.28804314173987,
+              2.355008234662879,
+              3.871947897669205,
+              2.1704716201648786,
+              5.679655551095492,
+              -2.0355251765229427,
+              2.8349241578050686,
+              -0.09245173007072471,
+              3.4068856765550306,
+              0.5790214036281777,
+              0.9949169323304461,
+              1.9406918088104983,
+              4.845992794027367,
+              7.420681980978104,
+              6.978313966627635
+            ],
+            "rotation_deg": 3.75,
+            "scale": 1.0250000000000001,
+            "translation_pixels_search_128": [
+              -14,
+              -6
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            0.9914448613738105,
+            -0.1305261922200516,
+            0.18765090164359302,
+            0.1305261922200516,
+            0.9914448613738105,
+            -0.11610363703315149,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.18765090164359302,
+              -0.11610363703315149
+            ],
+            [
+              1.1790957630174035,
+              0.01442255518690011
+            ],
+            [
+              1.048569570797352,
+              1.0058674165607107
+            ],
+            [
+              0.05712470942354142,
+              0.875341224340659
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 25.64085143754376,
+            "global_score": 5.532936638328329,
+            "translation_phase_psr": 6.859920130191208,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.0365830971171577,
+              -3.9997581951891696,
+              8.476083242187624,
+              3.9083026222412296,
+              2.901703580102627,
+              1.247716458486463,
+              2.613766607218279,
+              0.2133888432424368,
+              4.751846256332408,
+              8.060286291452345,
+              -3.0705065965822396,
+              1.8867268443663703,
+              -0.3982010780099252,
+              5.279149429598545,
+              0.9884789714315686,
+              -5.310994125262076
+            ],
+            "rotation_deg": -7.5,
+            "scale": 1.0,
+            "translation_pixels_search_128": [
+              -15,
+              7
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 33.710243225097656,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6103,
+      "prompt": "a glass terrarium with a tiny fern",
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 62.954920807517325,
+        "ssim": 0.9999981823398013,
+        "luma_rms": 0.00045713023265980633,
+        "luma_peak": 0.007843137254901957,
+        "correct_key_anchor": 13.345698356628418,
+        "wrong_key_anchor": 6.32797908782959,
+        "content_score_drift": 0.09927897904919736
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1611808970866142,
+            0.14000427521048248,
+            -0.20571069638476877,
+            -0.14000427521048248,
+            1.161180897086614,
+            -0.08932846841838071,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.20571069638476877,
+              -0.08932846841838071
+            ],
+            [
+              0.9554702007018454,
+              -0.2293327436288632
+            ],
+            [
+              1.0954744759123278,
+              0.9318481534577508
+            ],
+            [
+              -0.0657064211742863,
+              1.0718524286682332
+            ]
+          ],
+          "support": 8,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 24.69740338607685,
+            "global_score": 3.95016878326196,
+            "translation_phase_psr": 9.092762262548023,
+            "macro_regions": 4,
+            "tile_scores": [
+              5.65228028397747,
+              0.7454890528284874,
+              -1.4849392148578104,
+              -0.283697087999601,
+              -0.7939032523002114,
+              0.009698485032579973,
+              -1.5160416771090244,
+              4.014100686156379,
+              -1.858543756445061,
+              3.375072765684584,
+              2.030118852845509,
+              -1.266402448322638,
+              -4.782401121876681,
+              4.540156847072849,
+              9.363097850790163,
+              10.914824299472889
+            ],
+            "rotation_deg": 6.875,
+            "scale": 0.855,
+            "translation_pixels_search_128": [
+              7,
+              10
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0,
+            0.0,
+            0.09448818897637795,
+            0.0,
+            1.0,
+            -0.03937007874015748,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.09448818897637795,
+              -0.03937007874015748
+            ],
+            [
+              1.094488188976378,
+              -0.03937007874015748
+            ],
+            [
+              1.094488188976378,
+              0.9606299212598425
+            ],
+            [
+              0.09448818897637795,
+              0.9606299212598425
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 30.293378690222458,
+            "global_score": 11.0314479028461,
+            "translation_phase_psr": 5.722710161488356,
+            "macro_regions": 4,
+            "tile_scores": [
+              3.554454217045067,
+              -3.7779114782456276,
+              8.574993864021264,
+              0.7762390599635111,
+              3.5739928010326345,
+              -0.2620615399762193,
+              2.21234586891677,
+              -0.04606314534098199,
+              2.3879589995429606,
+              5.655782166319374,
+              -3.112876815919463,
+              0.161974603480957,
+              0.09011138638043481,
+              0.2769003315722587,
+              1.8935789953256008,
+              8.142024104075592
+            ],
+            "rotation_deg": 0.0,
+            "scale": 1.0,
+            "translation_pixels_search_128": [
+              -12,
+              5
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 26.367422103881836,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6103,
+      "prompt": "a glass terrarium with a tiny fern",
+      "attack": "crop_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": false,
+        "psnr": 62.954920807517325,
+        "ssim": 0.9999981823398013,
+        "luma_rms": 0.00045713023265980633,
+        "luma_peak": 0.007843137254901957,
+        "correct_key_anchor": 13.345698356628418,
+        "wrong_key_anchor": 6.32797908782959,
+        "content_score_drift": 0.09927897904919736
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1308917348547693,
+            0.11138311401086431,
+            -0.06601931419659629,
+            -0.11138311401086433,
+            1.1308917348547691,
+            -0.0963684836502989,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.06601931419659629,
+              -0.0963684836502989
+            ],
+            [
+              1.064872420658173,
+              -0.20775159766116325
+            ],
+            [
+              1.1762555346690373,
+              0.9231401371936059
+            ],
+            [
+              0.045363799814268024,
+              1.0345232512044702
+            ]
+          ],
+          "support": 10,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 25.797929255205368,
+            "global_score": 4.86168119375682,
+            "translation_phase_psr": 10.297515888401799,
+            "macro_regions": 4,
+            "tile_scores": [
+              6.165498711008849,
+              1.7255413038453855,
+              -2.3349840009702967,
+              -0.01288220019815689,
+              -1.3353389940785685,
+              0.4097067087268287,
+              -1.0196273753181457,
+              3.6105630658520917,
+              -1.4627177531081663,
+              2.9337545883914657,
+              2.6502042756214124,
+              0.2126591573242118,
+              -5.261478324591888,
+              6.519372291918579,
+              9.177723091721376,
+              7.357442017650976
+            ],
+            "rotation_deg": 5.625,
+            "scale": 0.88,
+            "translation_pixels_search_128": [
+              -7,
+              11
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            0.9961946980917455,
+            -0.08715574274765817,
+            0.12422067980827128,
+            0.08715574274765817,
+            0.9961946980917455,
+            0.03706493706061314,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.12422067980827128,
+              0.03706493706061314
+            ],
+            [
+              1.1204153779000168,
+              0.12422067980827131
+            ],
+            [
+              1.0332596351523586,
+              1.1204153779000168
+            ],
+            [
+              0.03706493706061312,
+              1.0332596351523586
+            ]
+          ],
+          "support": 12,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 25.241511713440133,
+            "global_score": 1.891937466925926,
+            "translation_phase_psr": 6.240473711164017,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.9019960088669434,
+              -1.3837622199753232,
+              6.174548569626644,
+              3.420394408927952,
+              -1.1652262146954504,
+              2.5459802010102295,
+              5.023753348623122,
+              0.7026075535476133,
+              2.4570995425280167,
+              -0.856158425721069,
+              0.721583905739577,
+              0.7999735583156617,
+              -1.682105712821913,
+              2.749496419730012,
+              5.50441375721368,
+              4.127295472082934
+            ],
+            "rotation_deg": -5.0,
+            "scale": 1.0,
+            "translation_pixels_search_128": [
+              -10,
+              -10
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 27.253379821777344,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6104,
+      "prompt": "a silver compass beside a folded map",
+      "attack": "identity",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 63.16238037857488,
+        "ssim": 0.999994432787384,
+        "luma_rms": 0.0005282455081097415,
+        "luma_peak": 0.007843137254901936,
+        "correct_key_anchor": 2.341453790664673,
+        "wrong_key_anchor": -5.616070747375488,
+        "content_score_drift": 0.005567145822401087
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.1578503903097168,
+            0.16530198575855845,
+            -0.2560643770105156,
+            -0.16530198575855848,
+            1.1578503903097168,
+            0.0667179237086728,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.2560643770105156,
+              0.0667179237086728
+            ],
+            [
+              0.9017860132992013,
+              -0.09858406204988568
+            ],
+            [
+              1.0670879990577598,
+              1.0592663282598311
+            ],
+            [
+              -0.09076239125195715,
+              1.2245683140183896
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 12.018204248655453,
+            "global_score": 0.005807226603105453,
+            "translation_phase_psr": 9.062233755897017,
+            "macro_regions": 3,
+            "tile_scores": [
+              -1.4882869751933991,
+              3.5661836151089883,
+              -1.6320205449391794,
+              -0.9017392477137517,
+              0.08194422050964678,
+              2.536456808986347,
+              -0.9262598658190435,
+              -0.41493189907684536,
+              5.147810453459605,
+              -1.8813726665534567,
+              3.550872064008833,
+              0.6236020470159156,
+              -2.9610750501503413,
+              1.922356469677358,
+              7.935472920293356,
+              0.35168060510422167
+            ],
+            "rotation_deg": 8.125,
+            "scale": 0.855,
+            "translation_pixels_search_128": [
+              12,
+              -8
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            0.9047133878838153,
+            -0.08910649120869144,
+            0.32841702410338297,
+            0.08910649120869145,
+            0.9047133878838152,
+            -0.10714616001869429,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.32841702410338297,
+              -0.10714616001869429
+            ],
+            [
+              1.2331304119871982,
+              -0.018039668810002837
+            ],
+            [
+              1.1440239207785068,
+              0.8866737190738123
+            ],
+            [
+              0.23931053289469154,
+              0.7975672278651209
+            ]
+          ],
+          "support": 7,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 12.155458801053108,
+            "global_score": 1.8457207883941749,
+            "translation_phase_psr": 9.426335805293212,
+            "macro_regions": 3,
+            "tile_scores": [
+              0.0,
+              -0.6517544796619471,
+              2.211106204842479,
+              0.6910984294003851,
+              0.0,
+              -1.4783801261274807,
+              5.472536742096583,
+              1.7010674163638675,
+              0.008025878054685874,
+              1.4026156964614067,
+              -0.4446549053635015,
+              5.684953953428347,
+              -0.011187377064046922,
+              -0.14398142701154437,
+              0.3031567948785647,
+              -0.5589980673216851
+            ],
+            "rotation_deg": -5.625,
+            "scale": 1.1,
+            "translation_pixels_search_128": [
+              -30,
+              14
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 12.695915222167969,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6104,
+      "prompt": "a silver compass beside a folded map",
+      "attack": "rotation_5",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 63.16238037857488,
+        "ssim": 0.999994432787384,
+        "luma_rms": 0.0005282455081097415,
+        "luma_peak": 0.007843137254901936,
+        "correct_key_anchor": 2.341453790664673,
+        "wrong_key_anchor": -5.616070747375488,
+        "content_score_drift": 0.005567145822401087
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": null,
+          "corners_hat": [],
+          "support": 10,
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "diagnostics": {
+            "anchor_score": 9.519052047615332,
+            "global_score": -2.919964397079165,
+            "translation_phase_psr": 12.410680392510558,
+            "macro_regions": 4,
+            "tile_scores": [
+              -1.9461894514114995,
+              3.305960753534313,
+              -1.8771026505749064,
+              1.1209200492419475,
+              0.7025289641063421,
+              1.5206651987562165,
+              0.08558732361834664,
+              -0.8064612727562201,
+              6.746509539285458,
+              -2.443953917996334,
+              2.4235842002050667,
+              1.9938536132087157,
+              -3.0051350938294856,
+              1.6745533699114914,
+              5.716911680460244,
+              -0.5390484462842593
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0589969781429922,
+            -0.12768389899196003,
+            0.2548159013693659,
+            0.12768389899196,
+            1.058996978142992,
+            -0.18782862754385402,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.2548159013693659,
+              -0.18782862754385402
+            ],
+            [
+              1.313812879512358,
+              -0.06014472855189401
+            ],
+            [
+              1.186128980520398,
+              0.998852249591098
+            ],
+            [
+              0.12713200237740585,
+              0.871168350599138
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 11.168884234384196,
+            "global_score": 4.425700472746861,
+            "translation_phase_psr": 8.854389015790387,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.6788975441017706,
+              -0.864503712019476,
+              2.408854315980519,
+              0.174123459693605,
+              0.15925681760415675,
+              -0.8753911196667457,
+              6.186736318688423,
+              1.6791099314973554,
+              -0.32144031511251825,
+              1.4928384583283845,
+              -1.761054173697571,
+              4.163449928997659,
+              -0.03293025827540632,
+              -0.8021206861782546,
+              0.3323025164267598,
+              -1.8127310606676592
+            ],
+            "rotation_deg": -6.875,
+            "scale": 0.9375,
+            "translation_pixels_search_128": [
+              -28,
+              12
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": null,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6104,
+      "prompt": "a silver compass beside a folded map",
+      "attack": "scale_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 63.16238037857488,
+        "ssim": 0.999994432787384,
+        "luma_rms": 0.0005282455081097415,
+        "luma_peak": 0.007843137254901936,
+        "correct_key_anchor": 2.341453790664673,
+        "wrong_key_anchor": -5.616070747375488,
+        "content_score_drift": 0.005567145822401087
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            0.8920073406980873,
+            0.03894588157619286,
+            -0.10720889460170697,
+            -0.03894588157619285,
+            0.8920073406980872,
+            0.07346927043905283,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.10720889460170697,
+              0.07346927043905283
+            ],
+            [
+              0.7847984460963803,
+              0.03452338886285997
+            ],
+            [
+              0.8237443276725731,
+              0.9265307295609472
+            ],
+            [
+              -0.06826301302551412,
+              0.96547661113714
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 10.328068088951744,
+            "global_score": 4.02910822901103,
+            "translation_phase_psr": 12.856866972414087,
+            "macro_regions": 4,
+            "tile_scores": [
+              -0.873735386117918,
+              2.7219588275433546,
+              1.6807186994698988,
+              2.312472423867106,
+              -0.39128351244747434,
+              2.7679553920011144,
+              1.7003109575754447,
+              1.9004092873045413,
+              -0.6049458942918221,
+              0.6166792540239101,
+              -2.5156759202837575,
+              -2.1411340734050244,
+              -0.4345683769078408,
+              2.9631021021864576,
+              -2.1347280627384966,
+              2.4761895040172295
+            ],
+            "rotation_deg": 2.5,
+            "scale": 1.12,
+            "translation_pixels_search_128": [
+              18,
+              0
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.1363636363636365,
+            0.0,
+            0.12866857551896924,
+            0.0,
+            1.1363636363636365,
+            -0.20204008589835365,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.12866857551896924,
+              -0.20204008589835365
+            ],
+            [
+              1.2650322118826056,
+              -0.20204008589835365
+            ],
+            [
+              1.2650322118826056,
+              0.9343235504652828
+            ],
+            [
+              0.12866857551896924,
+              0.9343235504652828
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 19.162966373613155,
+            "global_score": 2.6535673519903664,
+            "translation_phase_psr": 9.73658763465856,
+            "macro_regions": 4,
+            "tile_scores": [
+              1.3528057009267336,
+              -1.288058530626196,
+              4.741255850409954,
+              -0.4476721457657197,
+              1.9210692780779066,
+              -0.09579689376648803,
+              4.338267548114448,
+              -0.910255546357503,
+              -0.04587441378335222,
+              2.881545182240382,
+              -0.24645939435528574,
+              5.790588841247031,
+              1.4662093431368626,
+              0.500276432922149,
+              2.797572327746962,
+              -0.18281966024792617
+            ],
+            "rotation_deg": 0.0,
+            "scale": 0.88,
+            "translation_pixels_search_128": [
+              -25,
+              17
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 11.799018859863281,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6104,
+      "prompt": "a silver compass beside a folded map",
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 63.16238037857488,
+        "ssim": 0.999994432787384,
+        "luma_rms": 0.0005282455081097415,
+        "luma_peak": 0.007843137254901936,
+        "correct_key_anchor": 2.341453790664673,
+        "wrong_key_anchor": -5.616070747375488,
+        "content_score_drift": 0.005567145822401087
+      },
+      "attacked_rgb": {
+        "passed": false,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.0525689526317366,
+            -0.011482201572823552,
+            0.11331489218707892,
+            0.01148220157282355,
+            1.0525689526317366,
+            -0.0320255771022801,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.11331489218707892,
+              -0.0320255771022801
+            ],
+            [
+              1.1658838448188156,
+              -0.02054337552945655
+            ],
+            [
+              1.154401643245992,
+              1.03202557710228
+            ],
+            [
+              0.10183269061425537,
+              1.0205433755294564
+            ]
+          ],
+          "support": 8,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 10.427508209587224,
+            "global_score": 6.34544844132415,
+            "translation_phase_psr": 11.394023083313762,
+            "macro_regions": 4,
+            "tile_scores": [
+              -4.532663009615317,
+              0.0007389639307932017,
+              1.1043364413050747,
+              -0.13076442925404952,
+              -0.38418268025762226,
+              2.4760819461469774,
+              -0.5655648766089113,
+              -1.2179066573710484,
+              2.7120114323999016,
+              0.4567460219676953,
+              -2.7243912380620174,
+              2.0432459373814953,
+              4.713242915235439,
+              -1.2998607822701365,
+              0.5967511769091556,
+              5.032996877266596
+            ],
+            "rotation_deg": -0.625,
+            "scale": 0.95,
+            "translation_pixels_search_128": [
+              -17,
+              0
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": [
+            1.0253969508511889,
+            0.02237424106108833,
+            0.08635062451630236,
+            -0.022374241061088332,
+            1.0253969508511889,
+            -0.1274956068635542,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              0.08635062451630236,
+              -0.1274956068635542
+            ],
+            [
+              1.1117475753674912,
+              -0.14986984792464253
+            ],
+            [
+              1.1341218164285796,
+              0.8755271029265463
+            ],
+            [
+              0.1087248655773907,
+              0.8979013439876347
+            ]
+          ],
+          "support": 8,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 17.556513419236445,
+            "global_score": 5.280241340971356,
+            "translation_phase_psr": 9.457369150592438,
+            "macro_regions": 4,
+            "tile_scores": [
+              2.5313239343669154,
+              -1.1295116574351025,
+              4.038446986063255,
+              -0.623039205035046,
+              3.039971723250358,
+              -0.2863689063105346,
+              4.834748940331926,
+              -0.7171201066528013,
+              -0.16996012984662512,
+              2.422802095998658,
+              -0.45234648671939104,
+              6.05634443666315,
+              0.34138166478407145,
+              -1.0120431556698515,
+              0.554959533713364,
+              -1.0755277903895608
+            ],
+            "rotation_deg": 1.25,
+            "scale": 0.975,
+            "translation_pixels_search_128": [
+              -14,
+              16
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 10.206873893737793,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    },
+    {
+      "seed": 6104,
+      "prompt": "a silver compass beside a folded map",
+      "attack": "crop_0.9",
+      "failure": null,
+      "content_detector": {
+        "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+        "lf_scorer": "score_content_whitened_lf_image",
+        "hf_scorer": "score_hf_image",
+        "joint_operator": "weighted_joint_score",
+        "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+        "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96"
+      },
+      "final_rgb": {
+        "passed": true,
+        "psnr": 63.16238037857488,
+        "ssim": 0.999994432787384,
+        "luma_rms": 0.0005282455081097415,
+        "luma_peak": 0.007843137254901936,
+        "correct_key_anchor": 2.341453790664673,
+        "wrong_key_anchor": -5.616070747375488,
+        "content_score_drift": 0.005567145822401087
+      },
+      "attacked_rgb": {
+        "passed": true,
+        "correct_key_geometry": {
+          "H_hat": [
+            1.080823813059361,
+            0.02358365949682283,
+            -0.083699799270218,
+            -0.023583659496822833,
+            1.0808238130593613,
+            -0.020746061033237707,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "corners_hat": [
+            [
+              -0.083699799270218,
+              -0.020746061033237707
+            ],
+            [
+              0.9971240137891431,
+              -0.04432972053006054
+            ],
+            [
+              1.020707673285966,
+              1.0364940925293007
+            ],
+            [
+              -0.06011613977339518,
+              1.0600777520261235
+            ]
+          ],
+          "support": 9,
+          "reliability": 1.0,
+          "status": "RELIABLE",
+          "diagnostics": {
+            "anchor_score": 7.597185905735727,
+            "global_score": 0.7532374258833816,
+            "translation_phase_psr": 9.897406415160077,
+            "macro_regions": 4,
+            "tile_scores": [
+              0.6840941599540176,
+              0.9795969243735287,
+              -1.4328228023421172,
+              -1.1625112570472094,
+              -0.1727653058136204,
+              5.214414027121211,
+              -2.19980692453486,
+              0.687184961499588,
+              1.0131880380602074,
+              -2.012309108480508,
+              2.2356943622800554,
+              -0.9922809810769188,
+              -2.755480333773955,
+              0.8783376306002043,
+              7.3040449679806425,
+              0.9243304237206369
+            ],
+            "rotation_deg": 1.25,
+            "scale": 0.9249999999999999,
+            "translation_pixels_search_128": [
+              4,
+              -1
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "wrong_key_geometry": {
+          "H_hat": null,
+          "corners_hat": [],
+          "support": 5,
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "diagnostics": {
+            "anchor_score": 11.769270945892472,
+            "global_score": 2.1049520676782376,
+            "translation_phase_psr": 8.530627755504474,
+            "macro_regions": 3,
+            "tile_scores": [
+              0.0,
+              -0.8577390308223664,
+              2.5932772432311593,
+              -0.6388524805465726,
+              0.0,
+              -0.2692727132729058,
+              5.003977805267191,
+              0.028587304966014748,
+              0.0384240747700009,
+              2.003242180043026,
+              -0.248795518964397,
+              5.9594512784030425,
+              -0.013939460307879372,
+              -0.20250662623803856,
+              0.5215524694470243,
+              -0.4420295971800971
+            ],
+            "public_h_direction": "attacked_to_canonical"
+          }
+        },
+        "correct_key_self_rectified_anchor": 7.594574928283691,
+        "geometry_role": "coordinate_only_never_positive"
+      }
+    }
+  ]
+}

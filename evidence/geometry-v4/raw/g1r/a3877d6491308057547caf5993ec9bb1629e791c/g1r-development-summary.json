@@ -1,0 +1,16 @@
+{
+  "config_sha256": "1231298b12c81140b5482053b9c3a6fdf662ca7bf8272753e5fbeb970aafc713",
+  "correct_safe_reliable": 0,
+  "correct_unsafe": 0,
+  "failures": 0,
+  "negative_unsafe": 0,
+  "source_exact": "a3877d6491308057547caf5993ec9bb1629e791c",
+  "source_failures": 0,
+  "source_observability_passed": 2,
+  "sources": 4,
+  "stage": "development",
+  "status": "GATE_FAILED",
+  "unit_failures": 0,
+  "units": 20,
+  "wrong_unsafe": 0
+}

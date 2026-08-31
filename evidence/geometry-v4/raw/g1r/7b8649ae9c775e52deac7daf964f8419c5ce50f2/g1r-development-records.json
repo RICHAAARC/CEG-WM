@@ -1,0 +1,4469 @@
+{
+  "config_sha256": "318509ef39d693f8e961413832cb75a048efc3d156176fafc8218756cf973e1f",
+  "content_detector": {
+    "adapter_id": "geometry_v4_reused_content_v9_weighted_joint_rgb_key_only_v1",
+    "calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+    "calibration_asset_sha256": "63c17e8200a92383b061541fc234dfef36e4b7356954c160ce5f048f820cde96",
+    "hf_scorer": "score_hf_image",
+    "joint_operator": "weighted_joint_score",
+    "lf_scorer": "score_content_whitened_lf_image"
+  },
+  "records": [
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.05995428458142728,
+                "scale": 0.87,
+                "translation_psr": 10.060229122415878,
+                "translation_x": 0.007750498932014677,
+                "translation_y": 0.17277611838632626
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06546695231848222,
+                "scale": 0.86,
+                "translation_psr": 10.43812137459216,
+                "translation_x": 0.013408539174175433,
+                "translation_y": 0.17653731242786272
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.028865370069489676,
+                "scale": 0.87,
+                "translation_psr": 10.060229122415878,
+                "translation_x": 0.02579029503452537,
+                "translation_y": 0.06421753624479383
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06483229798727516,
+                "scale": 0.84,
+                "translation_psr": 9.707847862995637,
+                "translation_x": 0.024724619658496948,
+                "translation_y": 0.1840597005109358
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.05431163867785042,
+                "scale": 0.88,
+                "translation_psr": 10.247491980291905,
+                "translation_x": 0.0020924586898539215,
+                "translation_y": 0.1690149243447898
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.06546695231848222,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.43812137459216,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06581451221769377,
+                "scale": 0.86,
+                "translation_psr": 11.347468126830634,
+                "translation_x": 0.013408539174175433,
+                "translation_y": 0.17653731242786272
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06053764091379946,
+                "scale": 0.87,
+                "translation_psr": 9.996797260871041,
+                "translation_x": 0.007750498932014677,
+                "translation_y": 0.17277611838632626
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06500567067983785,
+                "scale": 0.84,
+                "translation_psr": 9.419331871756404,
+                "translation_x": 0.024724619658496948,
+                "translation_y": 0.1840597005109358
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.028791993379705137,
+                "scale": 0.87,
+                "translation_psr": 9.996797260871041,
+                "translation_x": 0.02579029503452537,
+                "translation_y": 0.06421753624479383
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.05753036258198995,
+                "scale": 0.88,
+                "translation_psr": 10.204611592979854,
+                "translation_x": -0.032674170899094926,
+                "translation_y": 0.1745214175142059
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.06581451221769377,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.347468126830634,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.07625394143449606,
+                "scale": 0.85,
+                "translation_psr": 9.147753184596452,
+                "translation_x": 0.01374780760496834,
+                "translation_y": 0.14671710288916462
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.07110727217408801,
+                "scale": 0.86,
+                "translation_psr": 10.154918081282085,
+                "translation_x": 0.008027193576791491,
+                "translation_y": 0.14256083351138998
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.056537933524835916,
+                "scale": 0.88,
+                "translation_psr": 14.636468884158164,
+                "translation_x": -0.0034140344795622057,
+                "translation_y": 0.13424829475584094
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.063026303823904,
+                "scale": 0.87,
+                "translation_psr": 10.989643159888974,
+                "translation_x": 0.002306579548614643,
+                "translation_y": 0.13840456413361546
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.06045949221811529,
+                "scale": 0.87,
+                "translation_psr": 10.989643159888974,
+                "translation_x": 0.018638337698814747,
+                "translation_y": 0.24151922689174782
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.07625394143449606,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.147753184596452,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -6.5,
+                "ncc": 0.0815350135802813,
+                "scale": 0.86,
+                "translation_psr": 9.673789220044487,
+                "translation_x": 0.08855027325580075,
+                "translation_y": 0.07947423103676071
+              },
+              {
+                "angle_degrees": -6.0,
+                "ncc": 0.07598018277105023,
+                "scale": 0.86,
+                "translation_psr": 8.965775050019552,
+                "translation_x": 0.09223567305148145,
+                "translation_y": 0.07589971272325038
+              },
+              {
+                "angle_degrees": -8.0,
+                "ncc": 0.06335960952399444,
+                "scale": 0.89,
+                "translation_psr": 7.932236081426857,
+                "translation_x": 0.06295120358299355,
+                "translation_y": 0.07610007130167373
+              },
+              {
+                "angle_degrees": -5.5,
+                "ncc": 0.06727195406328866,
+                "scale": 0.86,
+                "translation_psr": 8.122526081505976,
+                "translation_x": 0.095952125679383,
+                "translation_y": 0.07235749128858707
+              },
+              {
+                "angle_degrees": -5.5,
+                "ncc": 0.062330486422794706,
+                "scale": 0.87,
+                "translation_psr": 10.479882457119016,
+                "translation_x": 0.09125389458263161,
+                "translation_y": 0.06738490397798919
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.0815350135802813,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.673789220044487,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -6.5,
+                "ncc": 0.08206107696791401,
+                "scale": 0.86,
+                "translation_psr": 9.735028701222618,
+                "translation_x": 0.08855027325580075,
+                "translation_y": 0.07947423103676071
+              },
+              {
+                "angle_degrees": -6.0,
+                "ncc": 0.07626862770261901,
+                "scale": 0.86,
+                "translation_psr": 9.304189351791935,
+                "translation_x": 0.09223567305148145,
+                "translation_y": 0.07589971272325038
+              },
+              {
+                "angle_degrees": -8.0,
+                "ncc": 0.06384388181761082,
+                "scale": 0.89,
+                "translation_psr": 8.158374024793808,
+                "translation_x": 0.06295120358299355,
+                "translation_y": 0.07610007130167373
+              },
+              {
+                "angle_degrees": -5.5,
+                "ncc": 0.06740186430754967,
+                "scale": 0.86,
+                "translation_psr": 7.975922828768574,
+                "translation_x": 0.095952125679383,
+                "translation_y": 0.07235749128858707
+              },
+              {
+                "angle_degrees": -8.0,
+                "ncc": 0.05784814032105947,
+                "scale": 0.89,
+                "translation_psr": 8.158374024793808,
+                "translation_x": 0.0023532418769503915,
+                "translation_y": 0.1565162825844302
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.08206107696791401,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.735028701222618,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -5.5,
+                "ncc": 0.05364017841718502,
+                "scale": 0.86,
+                "translation_psr": 13.696197195062286,
+                "translation_x": 0.03076596111841679,
+                "translation_y": 0.11319330828580942
+              },
+              {
+                "angle_degrees": -6.0,
+                "ncc": 0.11487898979068108,
+                "scale": 0.86,
+                "translation_psr": 13.676829500114472,
+                "translation_x": 0.11925566797933548,
+                "translation_y": 0.0038808271855059195
+              },
+              {
+                "angle_degrees": -6.5,
+                "ncc": 0.10792228630760883,
+                "scale": 0.86,
+                "translation_psr": 11.960289268087378,
+                "translation_x": 0.11494076398384337,
+                "translation_y": 0.007222296812595508
+              },
+              {
+                "angle_degrees": -5.5,
+                "ncc": 0.12224949071554643,
+                "scale": 0.86,
+                "translation_psr": 13.696197195062286,
+                "translation_x": 0.12359956712982254,
+                "translation_y": 0.0005771389542294642
+              },
+              {
+                "angle_degrees": -8.0,
+                "ncc": 0.09029690747424984,
+                "scale": 0.89,
+                "translation_psr": 12.070912832836433,
+                "translation_x": 0.08829562204183677,
+                "translation_y": 0.0006384224130956129
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.12224949071554643,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 13.696197195062286,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.025083226529836408,
+                "scale": 0.94,
+                "translation_psr": 11.195264447185007,
+                "translation_x": -0.02575959308817663,
+                "translation_y": -0.00020240930622752312
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.025083226529836408,
+                "scale": 0.94,
+                "translation_psr": 11.195264447185007,
+                "translation_x": -0.02575959308817663,
+                "translation_y": -0.00020240930622752312
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.025890826015989934,
+                "scale": 0.94,
+                "translation_psr": 11.576261821714928,
+                "translation_x": -0.021374539692706335,
+                "translation_y": -0.004771422883881608
+              },
+              {
+                "angle_degrees": 8.0,
+                "ncc": 0.011881109344963474,
+                "scale": 0.95,
+                "translation_psr": 8.772097271756301,
+                "translation_x": 0.08515273463082021,
+                "translation_y": 0.03877581761608233
+              },
+              {
+                "angle_degrees": 8.0,
+                "ncc": 0.02657612968424728,
+                "scale": 0.94,
+                "translation_psr": 8.916332411436342,
+                "translation_x": -0.016949781607454875,
+                "translation_y": -0.009301996163381097
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.02657612968424728,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.916332411436342,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.025343202608456884,
+                "scale": 0.94,
+                "translation_psr": 10.610658487269998,
+                "translation_x": -0.02575959308817663,
+                "translation_y": -0.00020240930622752312
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.026110185954341288,
+                "scale": 0.94,
+                "translation_psr": 11.0297839153655,
+                "translation_x": -0.021374539692706335,
+                "translation_y": -0.004771422883881608
+              },
+              {
+                "angle_degrees": 8.0,
+                "ncc": 0.01164557957053437,
+                "scale": 0.95,
+                "translation_psr": 9.351942135660874,
+                "translation_x": 0.08515273463082021,
+                "translation_y": 0.03877581761608233
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.02073619009489942,
+                "scale": 0.95,
+                "translation_psr": 8.683512918286455,
+                "translation_x": -0.02692107734901175,
+                "translation_y": -0.010141331637965455
+              },
+              {
+                "angle_degrees": 8.0,
+                "ncc": 0.026923991317631655,
+                "scale": 0.94,
+                "translation_psr": 9.179847886041594,
+                "translation_x": -0.016949781607454875,
+                "translation_y": -0.009301996163381097
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.026923991317631655,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.179847886041594,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.030718982775320196,
+                "scale": 0.94,
+                "translation_psr": 9.692580971419057,
+                "translation_x": 0.20274110603413914,
+                "translation_y": -0.010028420735739957
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.030718982775320196,
+                "scale": 0.94,
+                "translation_psr": 9.692580971419057,
+                "translation_x": 0.20274110603413914,
+                "translation_y": -0.010028420735739957
+              },
+              {
+                "angle_degrees": 8.0,
+                "ncc": 0.03521659349655333,
+                "scale": 0.94,
+                "translation_psr": 9.236790760220646,
+                "translation_x": 0.21168760329674186,
+                "translation_y": -0.015138623971473381
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.022377194265569753,
+                "scale": 0.94,
+                "translation_psr": 9.692580971419057,
+                "translation_x": 0.05346216482728432,
+                "translation_y": -0.028357569983874138
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.022377194265569753,
+                "scale": 0.94,
+                "translation_psr": 9.692580971419057,
+                "translation_x": 0.05346216482728432,
+                "translation_y": -0.028357569983874138
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.03521659349655333,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.236790760220646,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.05279362139107614,
+                "scale": 0.87,
+                "translation_psr": 10.118616526043867,
+                "translation_x": -0.008581259218185425,
+                "translation_y": 0.06966145562819387
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.045403112676464394,
+                "scale": 0.86,
+                "translation_psr": 10.786386140004115,
+                "translation_x": -0.002735497617976392,
+                "translation_y": 0.0746078756784445
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.03650263559234368,
+                "scale": 0.85,
+                "translation_psr": 9.559531189535546,
+                "translation_x": 0.003110263982232641,
+                "translation_y": 0.07955429572869525
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.10793132609555652,
+                "scale": 0.88,
+                "translation_psr": 9.04075373052624,
+                "translation_x": -0.10220743007699264,
+                "translation_y": 0.18553440385303815
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.10793132609555652,
+                "scale": 0.88,
+                "translation_psr": 9.04075373052624,
+                "translation_x": -0.10220743007699264,
+                "translation_y": 0.18553440385303815
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.10793132609555652,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.04075373052624,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.05316925555281416,
+                "scale": 0.87,
+                "translation_psr": 9.782552182195523,
+                "translation_x": -0.008581259218185425,
+                "translation_y": 0.06966145562819387
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.04569075960250909,
+                "scale": 0.86,
+                "translation_psr": 11.212832449345052,
+                "translation_x": -0.002735497617976392,
+                "translation_y": 0.0746078756784445
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.0366957445217733,
+                "scale": 0.85,
+                "translation_psr": 9.716985758582219,
+                "translation_x": 0.003110263982232641,
+                "translation_y": 0.07955429572869525
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.10796928097924614,
+                "scale": 0.88,
+                "translation_psr": 8.456388109519093,
+                "translation_x": -0.10220743007699264,
+                "translation_y": 0.18553440385303815
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.10796928097924614,
+                "scale": 0.88,
+                "translation_psr": 8.456388109519093,
+                "translation_x": -0.10220743007699264,
+                "translation_y": 0.18553440385303815
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.10796928097924614,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.456388109519093,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.03921427403561392,
+                "scale": 0.88,
+                "translation_psr": 8.72585014563838,
+                "translation_x": 0.06611922469833549,
+                "translation_y": 0.12323530841700868
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.03921427403561392,
+                "scale": 0.88,
+                "translation_psr": 8.72585014563838,
+                "translation_x": 0.06611922469833549,
+                "translation_y": 0.12323530841700868
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.04129893474664744,
+                "scale": 0.87,
+                "translation_psr": 9.799492732968197,
+                "translation_x": 0.07104968805403623,
+                "translation_y": 0.12751672536681538
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.03651025600532491,
+                "scale": 0.88,
+                "translation_psr": 8.72585014563838,
+                "translation_x": -0.056427814149211525,
+                "translation_y": 0.24956116986151972
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.03651025600532491,
+                "scale": 0.88,
+                "translation_psr": 8.72585014563838,
+                "translation_x": -0.056427814149211525,
+                "translation_y": 0.24956116986151972
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.04129893474664744,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.799492732968197,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.07138169982124139,
+                "scale": 1.15,
+                "translation_psr": 11.573411100560449,
+                "translation_x": -0.000639164735800335,
+                "translation_y": -0.14078890965171992
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.07138169982124139,
+                "scale": 1.15,
+                "translation_psr": 11.573411100560449,
+                "translation_x": -0.000639164735800335,
+                "translation_y": -0.14078890965171992
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.06623219753585655,
+                "scale": 1.15,
+                "translation_psr": 11.573411100560449,
+                "translation_x": 0.016178804654110014,
+                "translation_y": -0.27776027857822233
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.06623219753585655,
+                "scale": 1.15,
+                "translation_psr": 11.573411100560449,
+                "translation_x": 0.016178804654110014,
+                "translation_y": -0.27776027857822233
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.0695103142192471,
+                "scale": 1.16,
+                "translation_psr": 8.650931214930772,
+                "translation_x": 0.000667171890819912,
+                "translation_y": -0.1507432110844399
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.07138169982124139,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.573411100560449,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.07007901827529059,
+                "scale": 1.15,
+                "translation_psr": 11.432158933143244,
+                "translation_x": -0.000639164735800335,
+                "translation_y": -0.14078890965171992
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.01268147494452745,
+                "scale": 0.97,
+                "translation_psr": 17.412724694432328,
+                "translation_x": -0.054899560733153774,
+                "translation_y": 0.09684187035587016
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.06545127230830365,
+                "scale": 1.15,
+                "translation_psr": 11.432158933143244,
+                "translation_x": 0.016178804654110014,
+                "translation_y": -0.27776027857822233
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.06879817073838908,
+                "scale": 1.16,
+                "translation_psr": 8.774567834170654,
+                "translation_x": 0.000667171890819912,
+                "translation_y": -0.1507432110844399
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.00877080808859322,
+                "scale": 0.96,
+                "translation_psr": 20.217566395209055,
+                "translation_x": -0.049178946704976925,
+                "translation_y": 0.10099813973364469
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.07007901827529059,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.432158933143244,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.08891392472307261,
+                "scale": 1.15,
+                "translation_psr": 15.35521497876425,
+                "translation_x": -0.000639164735800335,
+                "translation_y": -0.14078890965171992
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.08891392472307261,
+                "scale": 1.15,
+                "translation_psr": 15.35521497876425,
+                "translation_x": -0.000639164735800335,
+                "translation_y": -0.14078890965171992
+              },
+              {
+                "angle_degrees": 7.0,
+                "ncc": 0.0792513869247453,
+                "scale": 1.16,
+                "translation_psr": 13.966491825960231,
+                "translation_x": -0.004992548776981229,
+                "translation_y": -0.14636098712695228
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.0773230642892277,
+                "scale": 1.16,
+                "translation_psr": 14.193137337088265,
+                "translation_x": 0.000667171890819912,
+                "translation_y": -0.1507432110844399
+              },
+              {
+                "angle_degrees": 7.5,
+                "ncc": 0.08701594358738875,
+                "scale": 1.15,
+                "translation_psr": 10.064881774130594,
+                "translation_x": 0.00497176523658871,
+                "translation_y": -0.14513335581647058
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.08891392472307261,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 15.35521497876425,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.04851067665049991,
+                "scale": 0.84,
+                "translation_psr": 10.192442085026078,
+                "translation_x": 0.07635084740373102,
+                "translation_y": 0.08368113722236509
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.04974179434341346,
+                "scale": 0.84,
+                "translation_psr": 9.555393000619302,
+                "translation_x": 0.07273395733065663,
+                "translation_y": 0.08739397873797483
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.04683169813015679,
+                "scale": 0.84,
+                "translation_psr": 10.118790763866974,
+                "translation_x": 0.08000000000000002,
+                "translation_y": 0.08000000000000002
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.10362346153384402,
+                "scale": 0.84,
+                "translation_psr": 10.118790763866974,
+                "translation_x": 0.1136,
+                "translation_y": 0.1136
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.13558296686757135,
+                "scale": 0.84,
+                "translation_psr": 12.903877836137523,
+                "translation_x": -0.013977069790082189,
+                "translation_y": 0.1045696373190332
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13558296686757135,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 12.903877836137523,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.04882680435718575,
+                "scale": 0.84,
+                "translation_psr": 9.807471461297325,
+                "translation_x": 0.07273395733065663,
+                "translation_y": 0.08739397873797483
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.047753477191776174,
+                "scale": 0.84,
+                "translation_psr": 9.957301530320665,
+                "translation_x": 0.07635084740373102,
+                "translation_y": 0.08368113722236509
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.04630318073866925,
+                "scale": 0.84,
+                "translation_psr": 10.104120763743142,
+                "translation_x": 0.08000000000000002,
+                "translation_y": 0.08000000000000002
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.10403086199526305,
+                "scale": 0.84,
+                "translation_psr": 10.104120763743142,
+                "translation_x": 0.1136,
+                "translation_y": 0.1136
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.13693156043842533,
+                "scale": 0.84,
+                "translation_psr": 13.130982106254969,
+                "translation_x": -0.013977069790082189,
+                "translation_y": 0.1045696373190332
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13693156043842533,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 13.130982106254969,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08551267083614378,
+                "scale": 0.84,
+                "translation_psr": 10.931407201140145,
+                "translation_x": 0.1399237224451661,
+                "translation_y": 0.08622117702538938
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.07405458296539945,
+                "scale": 0.84,
+                "translation_psr": 11.731985907124637,
+                "translation_x": 0.14354828863364333,
+                "translation_y": 0.08309471403687436
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.04200992006917345,
+                "scale": 0.84,
+                "translation_psr": 9.413231484583992,
+                "translation_x": 0.053799096180720034,
+                "translation_y": 0.0721475564743639
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.05953023400075215,
+                "scale": 0.84,
+                "translation_psr": 10.895407147503107,
+                "translation_x": 0.1472,
+                "translation_y": 0.08000000000000002
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.03581569465720731,
+                "scale": 0.84,
+                "translation_psr": 10.78519538577827,
+                "translation_x": 0.05008241660740896,
+                "translation_y": 0.07605763581098562
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.08551267083614378,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.931407201140145,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.05287503169900438,
+                "scale": 0.84,
+                "translation_psr": 10.304824046157089,
+                "translation_x": 0.11424754003778112,
+                "translation_y": 0.04834189962639135
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04642048810069864,
+                "scale": 0.84,
+                "translation_psr": 10.303621094119896,
+                "translation_x": 0.11820363875548331,
+                "translation_y": 0.044992814847450435
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04642048810069864,
+                "scale": 0.84,
+                "translation_psr": 10.303621094119896,
+                "translation_x": 0.11820363875548331,
+                "translation_y": 0.044992814847450435
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.1077643957777586,
+                "scale": 0.84,
+                "translation_psr": 10.303621094119896,
+                "translation_x": 0.14874734765504466,
+                "translation_y": 0.0813933896596544
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.1077643957777586,
+                "scale": 0.84,
+                "translation_psr": 10.303621094119896,
+                "translation_x": 0.14874734765504466,
+                "translation_y": 0.0813933896596544
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.1077643957777586,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.303621094119896,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.052167610443343226,
+                "scale": 0.84,
+                "translation_psr": 10.693440319767138,
+                "translation_x": 0.11424754003778112,
+                "translation_y": 0.04834189962639135
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04594353007818417,
+                "scale": 0.84,
+                "translation_psr": 10.460429216966295,
+                "translation_x": 0.11820363875548331,
+                "translation_y": 0.044992814847450435
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04594353007818417,
+                "scale": 0.84,
+                "translation_psr": 10.460429216966295,
+                "translation_x": 0.11820363875548331,
+                "translation_y": 0.044992814847450435
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.10800550877776689,
+                "scale": 0.84,
+                "translation_psr": 10.460429216966295,
+                "translation_x": 0.14874734765504466,
+                "translation_y": 0.0813933896596544
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.10800550877776689,
+                "scale": 0.84,
+                "translation_psr": 10.460429216966295,
+                "translation_x": 0.14874734765504466,
+                "translation_y": 0.0813933896596544
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.10800550877776689,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.460429216966295,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04333260761989486,
+                "scale": 0.84,
+                "translation_psr": 10.821318600104238,
+                "translation_x": 0.10941833988651938,
+                "translation_y": 0.1454092404150984
+              },
+              {
+                "angle_degrees": 5.0,
+                "ncc": 0.04333260761989486,
+                "scale": 0.84,
+                "translation_psr": 10.821318600104238,
+                "translation_x": 0.10941833988651938,
+                "translation_y": 0.1454092404150984
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.0526095594900761,
+                "scale": 0.84,
+                "translation_psr": 11.218844160227993,
+                "translation_x": 0.10633886318841435,
+                "translation_y": 0.14883116686669065
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.07281379170443142,
+                "scale": 0.84,
+                "translation_psr": 11.218844160227993,
+                "translation_x": 0.18124038486464733,
+                "translation_y": 0.05361435085930253
+              },
+              {
+                "angle_degrees": 6.0,
+                "ncc": 0.0464132621811486,
+                "scale": 0.84,
+                "translation_psr": 9.209125017829152,
+                "translation_x": 0.09278682283336573,
+                "translation_y": 0.034886693007117615
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.07281379170443142,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.218844160227993,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.027371639594630053,
+                "scale": 0.92,
+                "translation_psr": 10.098973015580889,
+                "translation_x": 0.057292349350311196,
+                "translation_y": 0.09390284899271555
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.05439562860460281,
+                "scale": 0.89,
+                "translation_psr": 8.161057637602719,
+                "translation_x": 0.07330987743557822,
+                "translation_y": 0.13897399081789308
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.05439562860460281,
+                "scale": 0.89,
+                "translation_psr": 8.161057637602719,
+                "translation_x": 0.07330987743557822,
+                "translation_y": 0.13897399081789308
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.045145112123607486,
+                "scale": 0.9,
+                "translation_psr": 8.709596234056427,
+                "translation_x": 0.07039970082027454,
+                "translation_y": 0.09896685555344635
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.045145112123607486,
+                "scale": 0.9,
+                "translation_psr": 8.709596234056427,
+                "translation_x": 0.07039970082027454,
+                "translation_y": 0.09896685555344635
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.05439562860460281,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.161057637602719,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.08318214842406546,
+                "scale": 0.92,
+                "translation_psr": 9.571263199046856,
+                "translation_x": 0.06371312317048866,
+                "translation_y": -0.05315704922413393
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.027645185493534258,
+                "scale": 0.92,
+                "translation_psr": 9.571263199046856,
+                "translation_x": 0.057292349350311196,
+                "translation_y": 0.09390284899271555
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.052099303092516515,
+                "scale": 0.89,
+                "translation_psr": 8.278519862599298,
+                "translation_x": 0.07330987743557822,
+                "translation_y": 0.13897399081789308
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.052099303092516515,
+                "scale": 0.89,
+                "translation_psr": 8.278519862599298,
+                "translation_x": 0.07330987743557822,
+                "translation_y": 0.13897399081789308
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.10193371720412481,
+                "scale": 0.92,
+                "translation_psr": 9.571263199046856,
+                "translation_x": 0.10047809772470102,
+                "translation_y": -0.05155185576908958
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.10193371720412481,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.571263199046856,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.08735305125878653,
+                "scale": 0.92,
+                "translation_psr": 10.256466580269343,
+                "translation_x": -0.05139738085728156,
+                "translation_y": 0.052322294073370086
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.04004181858245135,
+                "scale": 0.92,
+                "translation_psr": 10.256466580269343,
+                "translation_x": 0.06531831662553302,
+                "translation_y": -0.08992202377834631
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.03864695046102478,
+                "scale": 0.89,
+                "translation_psr": 9.53267249921483,
+                "translation_x": 0.08076251760457342,
+                "translation_y": -0.003230854931158232
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.03864695046102478,
+                "scale": 0.89,
+                "translation_psr": 9.53267249921483,
+                "translation_x": 0.08076251760457342,
+                "translation_y": -0.003230854931158232
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.11625244610975215,
+                "scale": 0.89,
+                "translation_psr": 9.53267249921483,
+                "translation_x": -0.03148059683396147,
+                "translation_y": 0.09783329925388386
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.11625244610975215,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.53267249921483,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.0931880079932293,
+                "scale": 0.84,
+                "translation_psr": 7.2324964177407365,
+                "translation_x": 0.0937410181778262,
+                "translation_y": 0.09917759582477104
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.09572411115078037,
+                "scale": 0.84,
+                "translation_psr": 7.974419812342487,
+                "translation_x": 0.09025869633642813,
+                "translation_y": 0.10273809134013792
+              },
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.048734727783519,
+                "scale": 0.84,
+                "translation_psr": 7.2324964177407365,
+                "translation_x": 0.09843151053464232,
+                "translation_y": -0.03514053132659542
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09903508242966087,
+                "scale": 0.84,
+                "translation_psr": 6.96920214040424,
+                "translation_x": 0.08680757788168204,
+                "translation_y": 0.10632883988791136
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09903508242966087,
+                "scale": 0.84,
+                "translation_psr": 6.96920214040424,
+                "translation_x": 0.08680757788168204,
+                "translation_y": 0.10632883988791136
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09903508242966087,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 6.96920214040424,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.09364301545841752,
+                "scale": 0.84,
+                "translation_psr": 7.44788976796231,
+                "translation_x": 0.0937410181778262,
+                "translation_y": 0.09917759582477104
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.09649146347287499,
+                "scale": 0.84,
+                "translation_psr": 8.07537355367818,
+                "translation_x": 0.09025869633642813,
+                "translation_y": 0.10273809134013792
+              },
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.04705639520632141,
+                "scale": 0.84,
+                "translation_psr": 7.44788976796231,
+                "translation_x": 0.09843151053464232,
+                "translation_y": -0.03514053132659542
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09974126259314246,
+                "scale": 0.84,
+                "translation_psr": 7.068391269476233,
+                "translation_x": 0.08680757788168204,
+                "translation_y": 0.10632883988791136
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09974126259314246,
+                "scale": 0.84,
+                "translation_psr": 7.068391269476233,
+                "translation_x": 0.08680757788168204,
+                "translation_y": 0.10632883988791136
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09974126259314246,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 7.068391269476233,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.045842051290347956,
+                "scale": 0.84,
+                "translation_psr": 10.08418482227636,
+                "translation_x": 0.12098886129522951,
+                "translation_y": 0.07332035818694936
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.045842051290347956,
+                "scale": 0.84,
+                "translation_psr": 10.08418482227636,
+                "translation_x": 0.12098886129522951,
+                "translation_y": 0.07332035818694936
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.052914477769348774,
+                "scale": 0.84,
+                "translation_psr": 9.030671777825338,
+                "translation_x": 0.12472672791875139,
+                "translation_y": 0.07002915068410373
+              },
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.0657947876064764,
+                "scale": 0.84,
+                "translation_psr": 9.441601788864524,
+                "translation_x": 0.12849317305487185,
+                "translation_y": 0.06677068712613345
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.04132081366021141,
+                "scale": 0.84,
+                "translation_psr": 10.527890530193456,
+                "translation_x": 0.11727985783732127,
+                "translation_y": 0.07664405899647636
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.0657947876064764,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.441601788864524,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.18386626008588505,
+                "scale": 0.88,
+                "translation_psr": 11.224516906783325,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.13040000000000002
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.18386626008588505,
+                "scale": 0.88,
+                "translation_psr": 11.224516906783325,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.13040000000000002
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.17555432664674753,
+                "scale": 0.88,
+                "translation_psr": 8.527049233128503,
+                "translation_x": 0.13363940075568131,
+                "translation_y": 0.12718874571528327
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.17555432664674753,
+                "scale": 0.88,
+                "translation_psr": 8.527049233128503,
+                "translation_x": 0.13363940075568131,
+                "translation_y": 0.12718874571528327
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.13654998259023177,
+                "scale": 0.88,
+                "translation_psr": 11.224516906783325,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.1656
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.18386626008588505,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.224516906783325,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.18332513456780192,
+                "scale": 0.88,
+                "translation_psr": 11.34315885975506,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.13040000000000002
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.18332513456780192,
+                "scale": 0.88,
+                "translation_psr": 11.34315885975506,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.13040000000000002
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.17502303054145793,
+                "scale": 0.88,
+                "translation_psr": 8.135154611416635,
+                "translation_x": 0.13363940075568131,
+                "translation_y": 0.12718874571528327
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.1367909761189382,
+                "scale": 0.88,
+                "translation_psr": 11.34315885975506,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.1656
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.1367909761189382,
+                "scale": 0.88,
+                "translation_psr": 11.34315885975506,
+                "translation_x": 0.13040000000000002,
+                "translation_y": 0.1656
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.18332513456780192,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.34315885975506,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.0830120921908542,
+                "scale": 0.9,
+                "translation_psr": 11.625914340715694,
+                "translation_x": 0.05300160976156677,
+                "translation_y": 0.15408608133778512
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.05584374498686374,
+                "scale": 0.88,
+                "translation_psr": 10.123041823181527,
+                "translation_x": 0.06,
+                "translation_y": 0.1656
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.05584374498686374,
+                "scale": 0.88,
+                "translation_psr": 10.123041823181527,
+                "translation_x": 0.06,
+                "translation_y": 0.1656
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.06029714957061874,
+                "scale": 0.88,
+                "translation_psr": 10.37073698113962,
+                "translation_x": 0.06293490732242088,
+                "translation_y": 0.16177305730805658
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.06029714957061874,
+                "scale": 0.88,
+                "translation_psr": 10.37073698113962,
+                "translation_x": 0.06293490732242088,
+                "translation_y": 0.16177305730805658
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.0830120921908542,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.625914340715694,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.115405700554515,
+                "scale": 1.07,
+                "translation_psr": 8.374943917660282,
+                "translation_x": -0.03500000000000003,
+                "translation_y": -0.12060000000000004
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.10930054393425638,
+                "scale": 1.07,
+                "translation_psr": 10.464082199123412,
+                "translation_x": -0.029563940909040836,
+                "translation_y": -0.1252450659452548
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.10400135663811519,
+                "scale": 1.07,
+                "translation_psr": 9.392395271344078,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.10400135663811519,
+                "scale": 1.07,
+                "translation_psr": 9.392395271344078,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.1184753495820658,
+                "scale": 1.07,
+                "translation_psr": 11.789393905546675,
+                "translation_x": -0.04039531676962257,
+                "translation_y": -0.11590767296199474
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.1184753495820658,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 11.789393905546675,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.23438657112907188,
+                "scale": 1.12,
+                "translation_psr": 12.278438251113627,
+                "translation_x": -0.07681264760710654,
+                "translation_y": -0.1347183072517132
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.10825818618731482,
+                "scale": 1.07,
+                "translation_psr": 9.436666580056839,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": 3.5,
+                "ncc": 0.10581598753549916,
+                "scale": 1.08,
+                "translation_psr": 13.37918504654041,
+                "translation_x": -0.0007519859831738307,
+                "translation_y": -0.15819784908028023
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.11792204670045675,
+                "scale": 1.08,
+                "translation_psr": 7.475907592393117,
+                "translation_x": -0.006476705776889833,
+                "translation_y": -0.1538029569414547
+              },
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.13316594433016343,
+                "scale": 1.12,
+                "translation_psr": 12.278438251113627,
+                "translation_x": -0.07212173847033568,
+                "translation_y": 0.04442028538390673
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.23438657112907188,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 12.278438251113627,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.06324591098580168,
+                "scale": 1.07,
+                "translation_psr": 10.006782354365502,
+                "translation_x": -0.03500000000000003,
+                "translation_y": -0.03500000000000003
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.08074292105397575,
+                "scale": 1.07,
+                "translation_psr": 13.431573344003525,
+                "translation_x": -0.15396192352280327,
+                "translation_y": -0.046496443339163224
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.08074292105397575,
+                "scale": 1.07,
+                "translation_psr": 13.431573344003525,
+                "translation_x": -0.15396192352280327,
+                "translation_y": -0.046496443339163224
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.06440857343119866,
+                "scale": 1.07,
+                "translation_psr": 12.259244529525354,
+                "translation_x": -0.039274829611631354,
+                "translation_y": 0.012487437959444882
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.045329286091062564,
+                "scale": 1.07,
+                "translation_psr": 12.259244529525354,
+                "translation_x": 0.0031500449761847835,
+                "translation_y": -0.030684428067032064
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.08074292105397575,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 13.431573344003525,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.06421217797536641,
+                "scale": 1.1,
+                "translation_psr": 14.666844828866495,
+                "translation_x": -0.030470231674127175,
+                "translation_y": -0.06885967804687826
+              },
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.048985264522054234,
+                "scale": 1.11,
+                "translation_psr": 14.123704635001067,
+                "translation_x": -0.035292688325710156,
+                "translation_y": -0.07403112966548625
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.06179226135740121,
+                "scale": 1.11,
+                "translation_psr": 8.153630130080298,
+                "translation_x": -0.03026300299016962,
+                "translation_y": -0.07868052296569261
+              },
+              {
+                "angle_degrees": 2.0,
+                "ncc": 0.13955350237532696,
+                "scale": 1.1,
+                "translation_psr": 14.666844828866495,
+                "translation_x": -0.03354138738394726,
+                "translation_y": 0.019086714730802173
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.13762966269276863,
+                "scale": 1.11,
+                "translation_psr": 8.153630130080298,
+                "translation_x": -0.03413640458821146,
+                "translation_y": 0.01003495911077637
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13955350237532696,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 14.666844828866495,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.196019796209534,
+                "scale": 1.11,
+                "translation_psr": 8.72732572696985,
+                "translation_x": -0.020545503159581317,
+                "translation_y": -0.17196415018982858
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.196019796209534,
+                "scale": 1.11,
+                "translation_psr": 8.72732572696985,
+                "translation_x": -0.020545503159581317,
+                "translation_y": -0.17196415018982858
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.07081034894671578,
+                "scale": 1.11,
+                "translation_psr": 8.72732572696985,
+                "translation_x": 0.10550080149816782,
+                "translation_y": -0.03197554678895918
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.07081034894671578,
+                "scale": 1.11,
+                "translation_psr": 8.72732572696985,
+                "translation_x": 0.10550080149816782,
+                "translation_y": -0.03197554678895918
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.05870819469125433,
+                "scale": 1.11,
+                "translation_psr": 8.72732572696985,
+                "translation_x": -0.02519293607395473,
+                "translation_y": -0.08328584750362239
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.196019796209534,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.72732572696985,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.09607447836310784,
+                "scale": 1.11,
+                "translation_psr": 13.06799776061522,
+                "translation_x": -0.03026300299016962,
+                "translation_y": -0.07868052296569261
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.13147190969489603,
+                "scale": 1.11,
+                "translation_psr": 13.06799776061522,
+                "translation_x": -0.024452900593106865,
+                "translation_y": -0.21175374608039607
+              },
+              {
+                "angle_degrees": 2.5,
+                "ncc": 0.10819306348299933,
+                "scale": 1.1,
+                "translation_psr": 9.825406289968354,
+                "translation_x": -0.025485858819087027,
+                "translation_y": -0.07346718492095661
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.1301944137484475,
+                "scale": 1.11,
+                "translation_psr": 7.657712320671764,
+                "translation_x": -0.01822178670239461,
+                "translation_y": -0.21630330153293165
+              },
+              {
+                "angle_degrees": 3.0,
+                "ncc": 0.1301944137484475,
+                "scale": 1.11,
+                "translation_psr": 7.657712320671764,
+                "translation_x": -0.01822178670239461,
+                "translation_y": -0.21630330153293165
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13147190969489603,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 13.06799776061522,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.06563896893219033,
+                "scale": 0.94,
+                "translation_psr": 10.761773662176905,
+                "translation_x": 0.039586635266103086,
+                "translation_y": -0.05331959442478777
+              },
+              {
+                "angle_degrees": -2.5,
+                "ncc": 0.1416249608243005,
+                "scale": 1.0,
+                "translation_psr": 26.95984975238104,
+                "translation_x": -0.06304050883148465,
+                "translation_y": -0.015931570476921716
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.06695602798275489,
+                "scale": 0.94,
+                "translation_psr": 10.761773662176905,
+                "translation_x": 0.11280655049573814,
+                "translation_y": 0.06077564655293688
+              },
+              {
+                "angle_degrees": -3.0,
+                "ncc": 0.07846281014289812,
+                "scale": 1.0,
+                "translation_psr": 13.012093361244286,
+                "translation_x": 0.016555874141141874,
+                "translation_y": 0.06470495388465015
+              },
+              {
+                "angle_degrees": -3.0,
+                "ncc": 0.07846281014289812,
+                "scale": 1.0,
+                "translation_psr": 13.012093361244286,
+                "translation_x": 0.016555874141141874,
+                "translation_y": 0.06470495388465015
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.1416249608243005,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 26.95984975238104,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -2.5,
+                "ncc": 0.1412734671086282,
+                "scale": 1.0,
+                "translation_psr": 26.513532431103886,
+                "translation_x": -0.06304050883148465,
+                "translation_y": -0.015931570476921716
+              },
+              {
+                "angle_degrees": -2.0,
+                "ncc": 0.15038177212032353,
+                "scale": 0.99,
+                "translation_psr": 8.94791846859364,
+                "translation_x": -0.052931607061565605,
+                "translation_y": -0.015617065187251589
+              },
+              {
+                "angle_degrees": -2.5,
+                "ncc": 0.08893656034204675,
+                "scale": 1.0,
+                "translation_psr": 26.513532431103886,
+                "translation_x": 0.020372899884290852,
+                "translation_y": 0.06050273626040002
+              },
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.04617909682337847,
+                "scale": 1.0,
+                "translation_psr": 14.167466781250925,
+                "translation_x": -0.05290342964073749,
+                "translation_y": 0.014306889598472844
+              },
+              {
+                "angle_degrees": -2.0,
+                "ncc": 0.10419265810409142,
+                "scale": 1.0,
+                "translation_psr": 12.701310674522773,
+                "translation_x": 0.024226451088065506,
+                "translation_y": 0.056333988054366374
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.15038177212032353,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.94791846859364,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -2.0,
+                "ncc": 0.0716054323762847,
+                "scale": 1.0,
+                "translation_psr": 15.500650039761506,
+                "translation_x": -0.017145161860798366,
+                "translation_y": 0.01775433484170258
+              },
+              {
+                "angle_degrees": -2.5,
+                "ncc": 0.13406037070298898,
+                "scale": 1.0,
+                "translation_psr": 11.005880626677712,
+                "translation_x": 0.018628124389677415,
+                "translation_y": 0.020540807397125712
+              },
+              {
+                "angle_degrees": -3.0,
+                "ncc": 0.07770345190531765,
+                "scale": 1.0,
+                "translation_psr": 9.301084944706473,
+                "translation_x": -0.10537310827912474,
+                "translation_y": 0.031040087243620458
+              },
+              {
+                "angle_degrees": -3.0,
+                "ncc": 0.07770345190531765,
+                "scale": 1.0,
+                "translation_psr": 9.301084944706473,
+                "translation_x": -0.10537310827912474,
+                "translation_y": 0.031040087243620458
+              },
+              {
+                "angle_degrees": -2.0,
+                "ncc": 0.16080175569351457,
+                "scale": 1.0,
+                "translation_psr": 15.500650039761506,
+                "translation_x": 0.022830471219965464,
+                "translation_y": 0.01635835497360254
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.16080175569351457,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 15.500650039761506,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.08211415392843503,
+                "scale": 1.07,
+                "translation_psr": 20.14310706039221,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.08211415392843503,
+                "scale": 1.07,
+                "translation_psr": 20.14310706039221,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.10932119720918897,
+                "scale": 1.07,
+                "translation_psr": 20.339964353643154,
+                "translation_x": -0.01969162812963403,
+                "translation_y": -0.09160666971558912
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.1292003188828239,
+                "scale": 1.06,
+                "translation_psr": 14.975242436215021,
+                "translation_x": -0.014834697025618768,
+                "translation_y": -0.08607763541918179
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.11466282763159473,
+                "scale": 1.07,
+                "translation_psr": 20.14310706039221,
+                "translation_x": -0.024834516469206903,
+                "translation_y": -0.08704903570530957
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.1292003188828239,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 14.975242436215021,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.05956520716675243,
+                "scale": 1.08,
+                "translation_psr": 24.617017944209135,
+                "translation_x": -0.05395050757305242,
+                "translation_y": -0.025679403400549417
+              },
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.07208027677112473,
+                "scale": 1.12,
+                "translation_psr": 17.76985199906781,
+                "translation_x": -0.07446719303872111,
+                "translation_y": -0.04514901093390322
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.08066295905744728,
+                "scale": 1.07,
+                "translation_psr": 19.682494008022033,
+                "translation_x": -0.02707540545575411,
+                "translation_y": 0.041331408352771076
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.112694807271554,
+                "scale": 1.07,
+                "translation_psr": 20.291688586663895,
+                "translation_x": -0.01969162812963403,
+                "translation_y": -0.09160666971558912
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.13335353692263358,
+                "scale": 1.06,
+                "translation_psr": 15.361680565533339,
+                "translation_x": -0.014834697025618768,
+                "translation_y": -0.08607763541918179
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13335353692263358,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 15.361680565533339,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.04728585539582962,
+                "scale": 1.06,
+                "translation_psr": 16.607742664429594,
+                "translation_x": -0.01594459963387259,
+                "translation_y": -0.04369216484021815
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.06547082965257585,
+                "scale": 1.07,
+                "translation_psr": 16.44725489696169,
+                "translation_x": -0.02408755347369117,
+                "translation_y": -0.12984251705800312
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.06547082965257585,
+                "scale": 1.07,
+                "translation_psr": 16.44725489696169,
+                "translation_x": -0.02408755347369117,
+                "translation_y": -0.12984251705800312
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.0717573560281472,
+                "scale": 1.07,
+                "translation_psr": 12.563152768330879,
+                "translation_x": -0.018571254742057057,
+                "translation_y": -0.13439200322454298
+              },
+              {
+                "angle_degrees": 1.5,
+                "ncc": 0.07256144417928673,
+                "scale": 1.06,
+                "translation_psr": 16.607742664429594,
+                "translation_x": -0.013724794417364947,
+                "translation_y": -0.12846310599814542
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.07256144417928673,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 16.607742664429594,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.07723507212523859,
+                "scale": 1.16,
+                "translation_psr": 13.261000997267415,
+                "translation_x": -0.06816968413970252,
+                "translation_y": -0.1828199250348444
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.07723507212523859,
+                "scale": 1.16,
+                "translation_psr": 13.261000997267415,
+                "translation_x": -0.06816968413970252,
+                "translation_y": -0.1828199250348444
+              },
+              {
+                "angle_degrees": 3.5,
+                "ncc": 0.0668979508386267,
+                "scale": 1.16,
+                "translation_psr": 8.450624630124713,
+                "translation_x": 0.09826298602027542,
+                "translation_y": -0.15214183395842232
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09840575195678108,
+                "scale": 1.16,
+                "translation_psr": 13.261000997267415,
+                "translation_x": -0.210587649940232,
+                "translation_y": 0.00032243221011192535
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.09840575195678108,
+                "scale": 1.16,
+                "translation_psr": 13.261000997267415,
+                "translation_x": -0.210587649940232,
+                "translation_y": 0.00032243221011192535
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09840575195678108,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 13.261000997267415,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.04220105131129388,
+                "scale": 0.9299999999999999,
+                "translation_psr": 17.61356325107604,
+                "translation_x": -0.08039783508957868,
+                "translation_y": 0.045802297426186606
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.025468095524294646,
+                "scale": 0.94,
+                "translation_psr": 12.108235510143063,
+                "translation_x": -0.11789381774689027,
+                "translation_y": 0.08393746865384191
+              },
+              {
+                "angle_degrees": -9.0,
+                "ncc": 0.011289808892916857,
+                "scale": 0.94,
+                "translation_psr": 12.108235510143063,
+                "translation_x": 0.024772572793105768,
+                "translation_y": 0.023272643505414012
+              },
+              {
+                "angle_degrees": -8.5,
+                "ncc": 0.010096210003648376,
+                "scale": 0.92,
+                "translation_psr": 15.50531381302524,
+                "translation_x": -0.10660996646867904,
+                "translation_y": 0.05113223708884146
+              },
+              {
+                "angle_degrees": -8.5,
+                "ncc": 0.015136280276876002,
+                "scale": 0.94,
+                "translation_psr": 15.58529454858968,
+                "translation_x": -0.11423950579430737,
+                "translation_y": 0.07856123870535478
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.04220105131129388,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 17.61356325107604,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.048750769322055174,
+                "scale": 1.16,
+                "translation_psr": 18.229315907364825,
+                "translation_x": -0.06978926745708243,
+                "translation_y": -0.0900340589243313
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.048750769322055174,
+                "scale": 1.16,
+                "translation_psr": 18.229315907364825,
+                "translation_x": -0.06978926745708243,
+                "translation_y": -0.0900340589243313
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.0760868810027491,
+                "scale": 1.16,
+                "translation_psr": 8.235454997737461,
+                "translation_x": -0.04136509476083272,
+                "translation_y": -0.07275893199023481
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.032303288028015284,
+                "scale": 1.15,
+                "translation_psr": 10.341629679960338,
+                "translation_x": -0.018884297036292963,
+                "translation_y": -0.08414474772024794
+              },
+              {
+                "angle_degrees": 1.0,
+                "ncc": 0.06605830652435757,
+                "scale": 1.15,
+                "translation_psr": 10.341629679960338,
+                "translation_x": -0.2020534622489539,
+                "translation_y": -0.1333489844819021
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.0760868810027491,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 8.235454997737461,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.13688994514186836,
+                "scale": 0.94,
+                "translation_psr": 14.444410739006956,
+                "translation_x": -0.011682143831609069,
+                "translation_y": 0.034447485578814184
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.0699898170781044,
+                "scale": 0.86,
+                "translation_psr": 10.016705995608422,
+                "translation_x": -0.006228565112039841,
+                "translation_y": 0.07877075141366881
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08279789205240246,
+                "scale": 0.85,
+                "translation_psr": 9.973842755238516,
+                "translation_x": 0.03365263518737092,
+                "translation_y": 0.08307538411324683
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08279789205240246,
+                "scale": 0.85,
+                "translation_psr": 9.973842755238516,
+                "translation_x": 0.03365263518737092,
+                "translation_y": 0.08307538411324683
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.07595267856752548,
+                "scale": 0.86,
+                "translation_psr": 10.016705995608422,
+                "translation_x": 0.1313504777414796,
+                "translation_y": 0.07636930028789861
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13688994514186836,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 14.444410739006956,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.09395552602257828,
+                "scale": 0.85,
+                "translation_psr": 10.258368505519877,
+                "translation_x": 0.037308699726736456,
+                "translation_y": 0.07902166249148078
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.05341968527141861,
+                "scale": 0.85,
+                "translation_psr": 10.258368505519877,
+                "translation_x": 0.07130740511091828,
+                "translation_y": 0.07872496028453607
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08460210508966712,
+                "scale": 0.85,
+                "translation_psr": 10.465899691440583,
+                "translation_x": 0.03365263518737092,
+                "translation_y": 0.08307538411324683
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08460210508966712,
+                "scale": 0.85,
+                "translation_psr": 10.465899691440583,
+                "translation_x": 0.03365263518737092,
+                "translation_y": 0.08307538411324683
+              },
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.05993787142984713,
+                "scale": 0.84,
+                "translation_psr": 9.041191141409763,
+                "translation_x": 0.0355611191017805,
+                "translation_y": 0.09201778726271723
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09395552602257828,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.258368505519877,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.10636403458126337,
+                "scale": 0.85,
+                "translation_psr": 11.878503841489827,
+                "translation_x": 0.06824083864155586,
+                "translation_y": 0.1164768239296965
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.10636403458126337,
+                "scale": 0.85,
+                "translation_psr": 11.878503841489827,
+                "translation_x": 0.06824083864155586,
+                "translation_y": 0.1164768239296965
+              },
+              {
+                "angle_degrees": -1.5,
+                "ncc": 0.11292185517217732,
+                "scale": 0.85,
+                "translation_psr": 12.063850908074288,
+                "translation_x": 0.06491045009700977,
+                "translation_y": 0.12025918896540319
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.09999470049844693,
+                "scale": 0.86,
+                "translation_psr": 12.296941293334468,
+                "translation_x": 0.06316131909616243,
+                "translation_y": 0.11196478656416356
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.15773648865109816,
+                "scale": 0.94,
+                "translation_psr": 10.22500049170191,
+                "translation_x": -0.012010261566347932,
+                "translation_y": -0.0031510827283986603
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.15773648865109816,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.22500049170191,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "identity",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.0753525319539301,
+                "scale": 0.86,
+                "translation_psr": 11.012070431835625,
+                "translation_x": 0.03647504509688909,
+                "translation_y": 0.03219014954570589
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.08918290525347751,
+                "scale": 0.85,
+                "translation_psr": 10.776045865011957,
+                "translation_x": 0.07576005950082836,
+                "translation_y": 0.04029740822433982
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.07658734065959905,
+                "scale": 0.86,
+                "translation_psr": 11.012070431835625,
+                "translation_x": 0.1736508702185675,
+                "translation_y": 0.04298612111785736
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.06945929784177673,
+                "scale": 0.84,
+                "translation_psr": 7.941197092270941,
+                "translation_x": 0.07680266577467637,
+                "translation_y": 0.049381562400538585
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.07470503314511172,
+                "scale": 0.86,
+                "translation_psr": 10.963658962984237,
+                "translation_x": 0.032410335440373556,
+                "translation_y": 0.036252929284705866
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.08918290525347751,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.776045865011957,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.09041804457869924,
+                "scale": 0.85,
+                "translation_psr": 10.408557125429677,
+                "translation_x": 0.07576005950082836,
+                "translation_y": 0.04029740822433982
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.07570256969354593,
+                "scale": 0.86,
+                "translation_psr": 9.862596610270783,
+                "translation_x": 0.032410335440373556,
+                "translation_y": 0.036252929284705866
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.07093605586193806,
+                "scale": 0.84,
+                "translation_psr": 8.426034418438018,
+                "translation_x": 0.07680266577467637,
+                "translation_y": 0.049381562400538585
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.04838352654058655,
+                "scale": 0.85,
+                "translation_psr": 10.408557125429677,
+                "translation_x": 0.10965524884775471,
+                "translation_y": 0.04296501747908654
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.08507629098145661,
+                "scale": 0.85,
+                "translation_psr": 11.298866123039106,
+                "translation_x": 0.07176460227199394,
+                "translation_y": 0.04401705719102121
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09041804457869924,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.408557125429677,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.10760988833481043,
+                "scale": 0.84,
+                "translation_psr": 12.634737497857463,
+                "translation_x": 0.10797700034560385,
+                "translation_y": 0.0852435320070713
+              },
+              {
+                "angle_degrees": 4.0,
+                "ncc": 0.1047425689115351,
+                "scale": 0.85,
+                "translation_psr": 12.348740036766799,
+                "translation_x": 0.1033100598735277,
+                "translation_y": 0.0803059550071555
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.0955943434582044,
+                "scale": 0.85,
+                "translation_psr": 12.178838595429381,
+                "translation_x": 0.10698763959300799,
+                "translation_y": 0.0768602068260129
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.19300367664360546,
+                "scale": 0.85,
+                "translation_psr": 12.178838595429381,
+                "translation_x": 0.08109527801032182,
+                "translation_y": -0.027492970469512892
+              },
+              {
+                "angle_degrees": 4.5,
+                "ncc": 0.09090105040195602,
+                "scale": 0.86,
+                "translation_psr": 11.976888072727728,
+                "translation_x": 0.10236396476469044,
+                "translation_y": 0.07188209161220123
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.19300367664360546,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 12.178838595429381,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "rotation_5",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.12512981420616284,
+                "scale": 0.85,
+                "translation_psr": 13.845630837710297,
+                "translation_x": 0.037308699726736456,
+                "translation_y": 0.07902166249148078
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.14065506112497062,
+                "scale": 0.84,
+                "translation_psr": 14.205152872516228,
+                "translation_x": 0.042752126788774866,
+                "translation_y": 0.08397434881511046
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.1446325906577351,
+                "scale": 0.84,
+                "translation_psr": 15.740253215457933,
+                "translation_x": 0.04640000000000002,
+                "translation_y": 0.08000000000000002
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.16742391211881352,
+                "scale": 0.84,
+                "translation_psr": 15.740253215457933,
+                "translation_x": 0.08000000000000002,
+                "translation_y": -0.02079999999999997
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.13605606885076957,
+                "scale": 0.84,
+                "translation_psr": 15.740253215457933,
+                "translation_x": -0.02079999999999997,
+                "translation_y": 0.08000000000000002
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.16742391211881352,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 15.740253215457933,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.12811737767961293,
+                "scale": 0.85,
+                "translation_psr": 15.806086063209673,
+                "translation_x": 0.04100000000000001,
+                "translation_y": 0.07500000000000001
+              },
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.1986193962087389,
+                "scale": 0.85,
+                "translation_psr": 15.806086063209673,
+                "translation_x": 0.07500000000000001,
+                "translation_y": -0.026999999999999982
+              },
+              {
+                "angle_degrees": 0.5,
+                "ncc": 0.15494614217811387,
+                "scale": 0.84,
+                "translation_psr": 14.878091106758768,
+                "translation_x": 0.0845607720006012,
+                "translation_y": -0.02444531444113747
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.12384648042523869,
+                "scale": 0.85,
+                "translation_psr": 15.578631160021308,
+                "translation_x": 0.037308699726736456,
+                "translation_y": 0.07902166249148078
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.139175714338482,
+                "scale": 0.84,
+                "translation_psr": 16.454167131762464,
+                "translation_x": 0.042752126788774866,
+                "translation_y": 0.08397434881511046
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.1986193962087389,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 15.806086063209673,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": 0.0,
+                "ncc": 0.18920721571337853,
+                "scale": 0.84,
+                "translation_psr": 10.817097620330285,
+                "translation_x": 0.1136,
+                "translation_y": 0.1472
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.11811906562025357,
+                "scale": 0.86,
+                "translation_psr": 10.937447677664546,
+                "translation_x": -0.04062332582541969,
+                "translation_y": 0.07937111419511136
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.11535599878756463,
+                "scale": 0.86,
+                "translation_psr": 11.347247771843996,
+                "translation_x": -0.036932107642116935,
+                "translation_y": 0.07466936181013936
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.19950772641193537,
+                "scale": 0.85,
+                "translation_psr": 10.191938357102549,
+                "translation_x": 0.10589951490898952,
+                "translation_y": 0.146425668845955
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.1081871713740672,
+                "scale": 0.85,
+                "translation_psr": 10.191938357102549,
+                "translation_x": -0.030688711041627195,
+                "translation_y": 0.07961506690537021
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.19950772641193537,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.191938357102549,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "scale_0.9",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.05834956730573606,
+                "scale": 0.85,
+                "translation_psr": 9.740480040952319,
+                "translation_x": 0.07130740511091828,
+                "translation_y": 0.07872496028453607
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.13795833394354565,
+                "scale": 0.86,
+                "translation_psr": 9.819989581948589,
+                "translation_x": -0.04062332582541969,
+                "translation_y": 0.07937111419511136
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.13795833394354565,
+                "scale": 0.86,
+                "translation_psr": 9.819989581948589,
+                "translation_x": -0.04062332582541969,
+                "translation_y": 0.07937111419511136
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.12126093120517,
+                "scale": 0.86,
+                "translation_psr": 9.819989581948589,
+                "translation_x": 0.09695571702809974,
+                "translation_y": 0.07696966306934115
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.12126093120517,
+                "scale": 0.86,
+                "translation_psr": 9.819989581948589,
+                "translation_x": 0.09695571702809974,
+                "translation_y": 0.07696966306934115
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.13795833394354565,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.819989581948589,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.05935823474624766,
+                "scale": 0.85,
+                "translation_psr": 10.589251592002004,
+                "translation_x": 0.07130740511091828,
+                "translation_y": 0.07872496028453607
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.10684056437871114,
+                "scale": 0.85,
+                "translation_psr": 11.209328525649356,
+                "translation_x": 0.10164227845800552,
+                "translation_y": 0.08188862047551154
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.10684056437871114,
+                "scale": 0.85,
+                "translation_psr": 11.209328525649356,
+                "translation_x": 0.10164227845800552,
+                "translation_y": 0.08188862047551154
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.12118317469095716,
+                "scale": 0.85,
+                "translation_psr": 10.589251592002004,
+                "translation_x": 0.10530611049510011,
+                "translation_y": 0.07842825807759136
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.12446710311566239,
+                "scale": 0.86,
+                "translation_psr": 10.521965441221553,
+                "translation_x": 0.09695571702809974,
+                "translation_y": 0.07696966306934115
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.12446710311566239,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.521965441221553,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.1127398757875492,
+                "scale": 0.85,
+                "translation_psr": 11.63846850913867,
+                "translation_x": 0.06824083864155586,
+                "translation_y": 0.1164768239296965
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.1127398757875492,
+                "scale": 0.85,
+                "translation_psr": 11.63846850913867,
+                "translation_x": 0.06824083864155586,
+                "translation_y": 0.1164768239296965
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.11811527619455198,
+                "scale": 0.85,
+                "translation_psr": 9.122321887793978,
+                "translation_x": 0.07160410731786299,
+                "translation_y": 0.11272366566871789
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08333600011179859,
+                "scale": 0.86,
+                "translation_psr": 9.956824306797667,
+                "translation_x": 0.06316131909616243,
+                "translation_y": 0.11196478656416356
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.08333600011179859,
+                "scale": 0.86,
+                "translation_psr": 9.956824306797667,
+                "translation_x": 0.06316131909616243,
+                "translation_y": 0.11196478656416356
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.11811527619455198,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.122321887793978,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "translation_0.08_0",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    },
+    {
+      "arms": {
+        "correct": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.07911119318719687,
+                "scale": 0.94,
+                "translation_psr": 10.370929160966854,
+                "translation_x": -0.011682143831609069,
+                "translation_y": 0.034447485578814184
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.06571168128892273,
+                "scale": 0.95,
+                "translation_psr": 10.407835590322156,
+                "translation_x": -0.05512412397008598,
+                "translation_y": 0.029826407604122723
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.08103909974451455,
+                "scale": 0.97,
+                "translation_psr": 9.626631862715865,
+                "translation_x": 0.08838314282694525,
+                "translation_y": 0.018573657875914456
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.0881372587199821,
+                "scale": 0.97,
+                "translation_psr": 9.626631862715865,
+                "translation_x": -0.06681094763261415,
+                "translation_y": 0.019928016185262094
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.07327745691118177,
+                "scale": 0.94,
+                "translation_psr": 8.716759908289964,
+                "translation_x": -0.015725321086907447,
+                "translation_y": 0.03893042478406119
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.0881372587199821,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.626631862715865,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "negative": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.08168488012595307,
+                "scale": 0.97,
+                "translation_psr": 9.526766109284807,
+                "translation_x": 0.08838314282694525,
+                "translation_y": 0.018573657875914456
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.09135594269891881,
+                "scale": 0.97,
+                "translation_psr": 9.526766109284807,
+                "translation_x": -0.06681094763261415,
+                "translation_y": 0.019928016185262094
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.08054021214518264,
+                "scale": 0.94,
+                "translation_psr": 11.157854990674778,
+                "translation_x": -0.011682143831609069,
+                "translation_y": 0.034447485578814184
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.06651744781178072,
+                "scale": 0.95,
+                "translation_psr": 9.801300569188967,
+                "translation_x": -0.05512412397008598,
+                "translation_y": 0.029826407604122723
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.061679271547642224,
+                "scale": 0.95,
+                "translation_psr": 9.801300569188967,
+                "translation_x": 0.02087298218279103,
+                "translation_y": 0.029163190906246306
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.09135594269891881,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 9.526766109284807,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        },
+        "wrong": {
+          "H_hat": null,
+          "corners_hat": [],
+          "engineering_diagnostics": {
+            "holdout": {},
+            "search_top_k": [
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.09985793636079524,
+                "scale": 0.94,
+                "translation_psr": 10.853927306321554,
+                "translation_x": 0.022525162733014723,
+                "translation_y": 0.07586848763989965
+              },
+              {
+                "angle_degrees": -1.0,
+                "ncc": 0.09985793636079524,
+                "scale": 0.94,
+                "translation_psr": 10.853927306321554,
+                "translation_x": 0.022525162733014723,
+                "translation_y": 0.07586848763989965
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.09152905127781281,
+                "scale": 0.94,
+                "translation_psr": 12.623752809540632,
+                "translation_x": 0.026244542210342628,
+                "translation_y": 0.07171793615128816
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.08661228613449871,
+                "scale": 0.95,
+                "translation_psr": 10.976142704965783,
+                "translation_x": 0.02120459053172924,
+                "translation_y": 0.06716174398268482
+              },
+              {
+                "angle_degrees": -0.5,
+                "ncc": 0.20413744933403852,
+                "scale": 0.95,
+                "translation_psr": 10.976142704965783,
+                "translation_x": -0.017788787591523893,
+                "translation_y": -0.0465023068976925
+              }
+            ],
+            "selected_fit": {
+              "condition": 1000000000000.0,
+              "coverage": 0.0,
+              "inlier_ratio": 0.0,
+              "macro_regions": 0,
+              "ncc": 0.20413744933403852,
+              "reprojection": null,
+              "support": 0,
+              "translation_psr": 10.976142704965783,
+              "valid": false
+            }
+          },
+          "reliability": 0.0,
+          "status": "UNRELIABLE",
+          "support": 0,
+          "truth_metrics": {
+            "center_reprojection_error": 0.0,
+            "log_scale_abs_error": 0.0,
+            "mapped_corner_error": 0.0,
+            "rotation_abs_error_degrees": 0.0
+          },
+          "unsafe": false
+        }
+      },
+      "attack": "crop_0.9",
+      "failure": null,
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    }
+  ],
+  "source_exact": "7b8649ae9c775e52deac7daf964f8419c5ce50f2",
+  "sources": [
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.09761721857919387,
+        "correct_domain_scores": {
+          "fit": 0.5870655076508544,
+          "search": 0.6198751456136481,
+          "validate": 0.47984659406722957
+        },
+        "luma_peak": 0.023529411764705965,
+        "luma_rms": 0.005990727599697672,
+        "passed": false,
+        "psnr": 44.33507833037116,
+        "ssim": 0.9998531519054065,
+        "wrong_domain_scores": {
+          "fit": 0.0278288173129187,
+          "search": 0.08362999689020041,
+          "validate": -0.04235660512852227
+        }
+      },
+      "prompt": "a copper kettle beside a linen napkin",
+      "seed": 6201
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.019520539213019467,
+        "correct_domain_scores": {
+          "fit": 0.5820887256445437,
+          "search": 0.610954464888578,
+          "validate": 0.4732949344305643
+        },
+        "luma_peak": 0.02352941176470591,
+        "luma_rms": 0.0058466953422664746,
+        "passed": true,
+        "psnr": 44.54770244128728,
+        "ssim": 0.9998394624250941,
+        "wrong_domain_scores": {
+          "fit": 0.024518907608120564,
+          "search": 0.08374532722506801,
+          "validate": -0.03573749529873975
+        }
+      },
+      "prompt": "a green bicycle leaning against a brick wall",
+      "seed": 6202
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.04454599370858042,
+        "correct_domain_scores": {
+          "fit": 0.5876490859027171,
+          "search": 0.619429862261771,
+          "validate": 0.47986962315668524
+        },
+        "luma_peak": 0.02352941176470591,
+        "luma_rms": 0.0059898576358446585,
+        "passed": true,
+        "psnr": 44.326512254777235,
+        "ssim": 0.9997276362453431,
+        "wrong_domain_scores": {
+          "fit": 0.028152401508382444,
+          "search": 0.0843704703698233,
+          "validate": -0.04144232942102498
+        }
+      },
+      "prompt": "a bowl of oranges on a marble counter",
+      "seed": 6203
+    },
+    {
+      "failure": null,
+      "final_rgb": {
+        "content_score_drift": 0.09315401415117508,
+        "correct_domain_scores": {
+          "fit": 0.5864040127834651,
+          "search": 0.6192070262460142,
+          "validate": 0.48012834133386306
+        },
+        "luma_peak": 0.02352941176470591,
+        "luma_rms": 0.00595355085403701,
+        "passed": false,
+        "psnr": 44.42686088181972,
+        "ssim": 0.9997516057526703,
+        "wrong_domain_scores": {
+          "fit": 0.028682824572970132,
+          "search": 0.08397055700165018,
+          "validate": -0.04278509996146489
+        }
+      },
+      "prompt": "a wooden sailboat on a calm lake",
+      "seed": 6204
+    }
+  ],
+  "stage": "development"
+}

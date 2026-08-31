@@ -1,0 +1,20 @@
+{
+  "decision": "freeze_V4_and_do_not_continue_this_route_without_a_new_mechanism",
+  "do_not_merge_back": true,
+  "do_not_rerun_frozen_gpu_development_seeds": true,
+  "formal_science_denominator": 0,
+  "frozen_exact": "12488ad69bd6d2bf8ccc8d0c8d590cfa44bf372b",
+  "geometry_role": "coordinate_only_never_positive",
+  "method": "geometry_v4_keyed_multiscale_sync_anchor_v1",
+  "reasons": [
+    "G0 passed 4/4 and proves only writer_to_final_RGB observability, not blind recovery.",
+    "Legacy G1 passed its attacked gate only 2/20 and produced unsafe reliable homographies.",
+    "All six real G1R development artifacts retained 0/20 correct safe RELIABLE recoveries.",
+    "Real final-RGB source observability varied from 0/4 to 3/4 and never reached the frozen 4/4 requirement.",
+    "The final synthetic CPU route remained CPU_METHOD_PARTIAL; synthetic evidence has formal denominator zero.",
+    "Changing writer placement, phase search, spread, color carrier, sparsity, and balanced PRN microcode did not close both observability and blind safe-H recovery."
+  ],
+  "reuse_rule": "future methods may recompute this public evidence locally but must not relabel it as a positive or scientific result",
+  "schema": "geometry_v4_freeze_decision_v1",
+  "status": "DECODER_OUTPUT_BASELINE_METHOD_PARTIAL"
+}
