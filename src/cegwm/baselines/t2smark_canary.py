@@ -10,6 +10,7 @@ import tempfile
 import time
 import sys
 import uuid
+import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
@@ -81,6 +82,18 @@ class RunLock:
     def __exit__(self, *_: Any) -> None:
         record = _read_json(self.path)
         if record and record.get("token") == self.token: self.path.unlink()
+
+
+def clear_stale_lock(run_dir: Path) -> dict[str, Any]:
+    """Explicit operator action; never follows a link or guesses liveness."""
+    root = run_dir.resolve()
+    path = run_dir / ".run.lock"
+    if path.is_symlink() or not path.exists() or not path.is_file() or path.resolve().parent != root:
+        raise RuntimeError("refuse unsafe stale-lock target")
+    record = _read_json(path)
+    if not record: raise RuntimeError("stale lock metadata is malformed")
+    path.unlink()
+    return record
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -217,13 +230,16 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
 
 def main() -> None:
     parser=argparse.ArgumentParser(); parser.add_argument("--run-dir",required=True); parser.add_argument("--project-exact",required=True)
-    parser.add_argument("--run-id",default=RUN_ID_DEFAULT); parser.add_argument("--official-source",required=True); parser.add_argument("--force-rerun-all",action="store_true"); args=parser.parse_args()
+    parser.add_argument("--run-id",default=RUN_ID_DEFAULT); parser.add_argument("--official-source",required=True); parser.add_argument("--force-rerun-all",action="store_true"); parser.add_argument("--clear-stale-lock",action="store_true"); args=parser.parse_args()
+    if args.clear_stale_lock:
+        print({"cleared_stale_lock": clear_stale_lock(Path(args.run_dir))}); return
     if not os.environ.get("HF_TOKEN"): raise RuntimeError("HF_TOKEN must be supplied only through environment")
     source = Path(args.official_source)
     if not (source / ".git").exists(): raise RuntimeError("official source is not a git repository")
-    official_head = os.popen(f"git -C {source} rev-parse HEAD").read().strip()
-    official_branch = os.popen(f"git -C {source} symbolic-ref -q --short HEAD").read().strip()
-    if official_head != OFFICIAL_EXACT or official_branch or os.popen(f"git -C {source} status --porcelain").read().strip(): raise RuntimeError("official source identity is not detached, clean, pinned exact")
+    official_head = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    branch = subprocess.run(["git", "-C", str(source), "symbolic-ref", "-q", "--short", "HEAD"], capture_output=True, text=True)
+    official_dirty = subprocess.run(["git", "-C", str(source), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip()
+    if official_head != OFFICIAL_EXACT or branch.returncode == 0 or official_dirty: raise RuntimeError("official source identity is not detached, clean, pinned exact")
     import torch
     sys.path.insert(0, args.official_source)
     from cegwm.baselines.t2smark import embed_t2smark_sd35, score_t2smark_rgb
