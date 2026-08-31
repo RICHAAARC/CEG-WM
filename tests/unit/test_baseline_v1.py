@@ -72,7 +72,7 @@ def test_unvalidated_methods_cannot_emit_observed_or_placeholder_evidence() -> N
         ))
     with pytest.raises(ValueError, match="cannot carry detection evidence"):
         validate_observation(_record(continuous_score=0.25))
-    with pytest.raises(ValueError, match="source, adapter, and threshold"):
+    with pytest.raises(ValueError, match=r"^observed records require validated source and adapter registry entries$"):
         _record(
             continuous_score=0.25,
             score_direction="higher_is_watermarked",
@@ -111,7 +111,7 @@ def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.Mo
         ).as_dict()
     with pytest.raises(ValueError, match="source_exact must match"):
         replace(observed, source_exact="f" * 40).as_dict()
-    with pytest.raises(ValueError, match="validated source and adapter registry"):
+    with pytest.raises(ValueError, match=r"^threshold provenance must match the registry$"):
         _record(
             source_exact="0" * 40,
             adapter_exact="1" * 40,
