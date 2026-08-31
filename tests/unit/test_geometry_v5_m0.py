@@ -68,7 +68,23 @@ def test_recovered_z_t_rotation_scale_search_is_blind_and_fails_closed_on_bad_da
     recovered = [tuple(tuple(0.0 for _ in range(size)) for _ in range(size)) for _ in range(4)]
     recovered[3] = tuple(tuple(row) for row in plane)
     estimate = method.estimate_rotation_scale_from_recovered_z_t(recovered, ((0.0, 1.0), (0.0, 0.5)))
-    assert estimate.rotation_degrees == 0.0 and estimate.scale == 0.5
+    assert estimate.rotation_degrees == 0.0 and estimate.scale == 2.0
+    forward_rotation_degrees = 10.0
+    forward_angle = math.radians(forward_rotation_degrees)
+    rotated_plane = [[0.0 for _ in range(size)] for _ in range(size)]
+    for point in method.build_hermitian_x_template():
+        observed_y = 0.5 * (math.sin(forward_angle) * point.frequency_x + math.cos(forward_angle) * point.frequency_y)
+        observed_x = 0.5 * (math.cos(forward_angle) * point.frequency_x - math.sin(forward_angle) * point.frequency_y)
+        y = method._frequency_bin(observed_y, size)
+        x = method._frequency_bin(observed_x, size)
+        for row in range(size):
+            for column in range(size):
+                rotated_plane[row][column] += math.cos(2.0 * math.pi * ((y * row / size) + (x * column / size)))
+    recovered[3] = tuple(tuple(row) for row in rotated_plane)
+    inverse_estimate = method.estimate_rotation_scale_from_recovered_z_t(
+        recovered, ((0.0, 0.5), (10.0, 0.5))
+    )
+    assert inverse_estimate.rotation_degrees == -10.0 and inverse_estimate.scale == 2.0
     flat = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
     with pytest.raises(ValueError, match="usable"):
         method.estimate_rotation_scale_from_recovered_z_t(flat, ((0.0, 1.0),))
@@ -98,6 +114,12 @@ def test_m0_raw_H_is_exact_nontrivial_attacked_to_canonical_similarity_from_its_
     assert record.H_hat == H
     with pytest.raises(ValueError, match="positive-scale similarity"):
         protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, ((1.2, 0.2, -0.1), (0.0, 1.2, 0.05), (0.0, 0.0, 1.0)), {})
+    with pytest.raises(ValueError, match="positive-scale similarity"):
+        protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, ((-1.2, 0.0, -0.1), (0.0, 1.2, 0.05), (0.0, 0.0, 1.0)), {})
+    with pytest.raises(ValueError, match="scale must be positive"):
+        protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 0.0, 0.0, 0.0, 0.0, ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), {})
+    with pytest.raises(ValueError, match="scale must be positive"):
+        protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 0.0, -1.0, 0.0, 0.0, ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), {})
     with pytest.raises(ValueError, match="match"):
         protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, method.assemble_attacked_to_canonical_similarity(-20.0, 1.0 / 1.2, 0.1, -0.05), {})
 

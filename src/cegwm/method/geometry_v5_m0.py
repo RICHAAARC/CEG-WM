@@ -92,7 +92,7 @@ def estimate_rotation_scale_from_recovered_z_t(
     recovered_z_t: Sequence[Sequence[Sequence[float]]],
     candidate_grid: Sequence[Sequence[float]],
 ) -> RecoveredZTRotationScaleEstimate:
-    """Search explicit R/S candidates from channel-3 recovered-`z_T` magnitude only.
+    """Search forward spectral candidates, then return attacked-to-canonical R/S.
 
     Candidate selection is deterministic and blind: no original latent, prompt,
     clean RGB, transform truth, or attack parameters are accepted by this API.
@@ -108,21 +108,25 @@ def estimate_rotation_scale_from_recovered_z_t(
     if not candidates or any(len(candidate) != 2 or candidate[1] <= 0.0 for candidate in candidates):
         raise ValueError("R/S candidate grid must contain finite rotation/positive-scale pairs")
     template = build_hermitian_x_template()
-    scored: list[tuple[float, float, float]] = []
-    for rotation_degrees, scale in candidates:
-        angle = math.radians(rotation_degrees)
+    scored_forward_candidates: list[tuple[float, float, float]] = []
+    for forward_rotation_degrees, forward_scale in candidates:
+        angle = math.radians(forward_rotation_degrees)
         cosine, sine = math.cos(angle), math.sin(angle)
         score = 0.0
         for point in template:
-            observed_x = scale * (cosine * point.frequency_x - sine * point.frequency_y)
-            observed_y = scale * (sine * point.frequency_x + cosine * point.frequency_y)
+            observed_x = forward_scale * (cosine * point.frequency_x - sine * point.frequency_y)
+            observed_y = forward_scale * (sine * point.frequency_x + cosine * point.frequency_y)
             y, x = _frequency_bin(observed_y, height), _frequency_bin(observed_x, width)
             score += abs(spectrum[y][x])
-        scored.append((score, rotation_degrees, scale))
-    score, rotation_degrees, scale = max(scored, key=lambda item: (item[0], -abs(item[1]), -item[2]))
+        scored_forward_candidates.append((score, forward_rotation_degrees, forward_scale))
+    score, forward_rotation_degrees, forward_scale = max(
+        scored_forward_candidates, key=lambda item: (item[0], -abs(item[1]), -item[2])
+    )
     if not math.isfinite(score) or score <= 0.0:
         raise ValueError("recovered z_T has no usable X-template spectral evidence")
-    return RecoveredZTRotationScaleEstimate(rotation_degrees, scale, score)
+    return RecoveredZTRotationScaleEstimate(
+        _normalize_degrees(-forward_rotation_degrees), 1.0 / forward_scale, score
+    )
 
 
 def estimate_rotation_scale_from_peak_pairs(
@@ -232,6 +236,11 @@ def _frequency_bin(value: float, size: int) -> int:
     if not -0.5 <= frequency <= 0.5:
         raise ValueError("frequency lies outside normalized Fourier support")
     return int(round(frequency * size)) % size
+
+
+def _normalize_degrees(value: float) -> float:
+    normalized = (value + 180.0) % 360.0 - 180.0
+    return 180.0 if normalized == -180.0 else normalized
 
 
 def _dft2(plane: Sequence[Sequence[float]]) -> list[list[complex]]:
