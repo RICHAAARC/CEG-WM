@@ -34,3 +34,11 @@ def test_failed_records_retry_and_final_requires_all_valid(tmp_path: Path) -> No
     assert not (tmp_path / "canary_result.json").exists() and len(pending_observations(tmp_path, config())) == 2
     run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
     assert (tmp_path / "canary_result.json").is_file() and (tmp_path / "scores.csv").is_file()
+
+
+def test_stale_final_is_quarantined_when_repair_fails(tmp_path: Path) -> None:
+    run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    (tmp_path / "images" / f"{CONDITIONS[0]}__clean_negative.png").write_bytes(b"bad")
+    run_canary(tmp_path, config(), lambda c, r: (_ for _ in ()).throw(RuntimeError("repair failed")))
+    assert not (tmp_path / "canary_result.json").exists()
+    assert list(tmp_path.glob("canary_result.stale.*.json"))

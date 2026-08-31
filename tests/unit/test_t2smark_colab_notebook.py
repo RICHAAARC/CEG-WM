@@ -12,7 +12,8 @@ def test_thin_launcher_contract() -> None:
     text = "\n".join("".join(cell["source"]) for cell in notebook["cells"])
     for marker in ("https://github.com/RICHAAARC/CEG-WM.git", "'Baseline-V1'",
                    "checkout','--detach',resolved_exact", "status','--porcelain",
-                   "cegwm.baselines.t2smark_canary", "RUN_ID = 't2smark_sd35_one_unit_v1'",
-                   "FORCE_RERUN_ALL = False", "HF_TOKEN", "cwd=checkout"):
+                   "cegwm.baselines.t2smark_canary", "RUN_ID='t2smark_sd35_one_unit_v1'",
+                   "FORCE_RERUN_ALL=False", "HF_TOKEN", "cwd=checkout", "0xD009/T2SMark.git",
+                   "--official-source", "0c1fbfd50fcd1fba135477a2c016e284d5d"):
         assert marker in text
     assert "force_remount" not in text and "T2SMarkCodec" not in text

@@ -8,6 +8,7 @@ import math
 import os
 import tempfile
 import time
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -152,13 +153,16 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
     if len(rows)==12 and all(row.get("status")=="ok" for row in rows):
         atomic_json(run_dir/"canary_result.json",{"identity":_identity(config),"engineering_canary_complete":True,"observations":rows})
         os.replace(run_dir/"partial_scores.csv",run_dir/"scores.csv")
+    elif (run_dir / "canary_result.json").exists():
+        os.replace(run_dir / "canary_result.json", run_dir / f"canary_result.stale.{time.time_ns()}.json")
 
 
 def main() -> None:
     parser=argparse.ArgumentParser(); parser.add_argument("--run-dir",required=True); parser.add_argument("--project-exact",required=True)
-    parser.add_argument("--run-id",default=RUN_ID_DEFAULT); parser.add_argument("--force-rerun-all",action="store_true"); args=parser.parse_args()
+    parser.add_argument("--run-id",default=RUN_ID_DEFAULT); parser.add_argument("--official-source",required=True); parser.add_argument("--force-rerun-all",action="store_true"); args=parser.parse_args()
     if not os.environ.get("HF_TOKEN"): raise RuntimeError("HF_TOKEN must be supplied only through environment")
     import torch
+    sys.path.insert(0, args.official_source)
     from cegwm.baselines.t2smark import embed_t2smark_sd35, score_t2smark_rgb
     if not torch.cuda.is_available(): raise RuntimeError("CUDA is required")
     config={"schema":RUN_SCHEMA,"project_exact":args.project_exact,
