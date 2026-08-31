@@ -26,7 +26,7 @@ def test_t2smark_canary_notebook_contract() -> None:
         "subsampling=2, optimize=False, progressive=False", "max(1, round(w * 0.50))",
         "math.sqrt(0.80)", "mode='reflect'", "constant_values=0", "p_x=max(0,math.ceil",
         "p_y=max(0,math.ceil", "return rgb.crop(box), np.asarray(valid.crop(box),dtype=np.uint8)",
-        "run_started.json", "run_failed_", "def record_failure(stage, exc)", "set_custom_exc",
+        "run_started.json", "run_failed_", "def record_failure(stage, exc)", "def _record_uncaught(shell, exc_type, exc, tb, tb_offset=None)", "set_custom_exc",
     ]:
         assert required in text
     assert "force_remount" not in text and "rmtree" not in text and "rm -" not in text
