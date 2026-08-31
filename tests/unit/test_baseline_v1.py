@@ -64,6 +64,21 @@ def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> No
             decision=True,
             status="observed",
         ).as_dict()
+    with pytest.raises(ValueError, match="validated source and adapter registry"):
+        _record(
+            source_exact="0" * 40,
+            adapter_exact="1" * 40,
+            continuous_score=0.25,
+            score_direction="higher_is_watermarked",
+            threshold_provenance="tree_ring:calibration:future",
+            decision=True,
+            status="observed",
+            artifact_digests={
+                "source": "sha256:" + "0" * 64,
+                "adapter": "sha256:" + "1" * 64,
+                "threshold": "sha256:" + "2" * 64,
+            },
+        ).as_dict()
 
 
 @pytest.mark.unit

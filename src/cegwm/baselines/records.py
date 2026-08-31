@@ -59,6 +59,8 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
             raise ValueError("observed records require source, adapter, and threshold identities")
         if observation.continuous_score is None or not isinstance(observation.decision, bool):
             raise ValueError("observed records require a continuous score and decision")
+        if baseline.source_status != "validated" or baseline.adapter_status != "validated":
+            raise ValueError("observed records require validated source and adapter registry entries")
         if baseline.score_direction is None:
             raise ValueError("method detector score direction is unresolved")
         if observation.score_direction != baseline.score_direction:
@@ -66,6 +68,10 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
         expected_prefix = f"{observation.baseline_id}:calibration:"
         if not observation.threshold_provenance.startswith(expected_prefix):
             raise ValueError("threshold provenance must be bound to the baseline")
+        if not re.fullmatch(r"[0-9a-f]{40}", observation.source_exact):
+            raise ValueError("source_exact must be a lowercase 40-character git exact")
+        if not re.fullmatch(r"[0-9a-f]{40}", observation.adapter_exact):
+            raise ValueError("adapter_exact must be a lowercase 40-character git exact")
     elif observation.status in {"failed", "not_available"}:
         if any(value is not None for value in (observation.continuous_score, observation.score_direction,
                                                 observation.threshold_provenance, observation.decision)):
@@ -77,4 +83,6 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
     if any(not name or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
            for name, digest in observation.artifact_digests.items()):
         raise ValueError("artifact digests must be named sha256 values")
+    if observation.status == "observed" and not {"source", "adapter", "threshold"}.issubset(observation.artifact_digests):
+        raise ValueError("observed records require source, adapter, and threshold artifact digests")
     return observation
