@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "6cbfd250483b8ac83305753837eb0349d0cb4c3f55913f5631535fd8af9c1991"
+CONFIG_SHA256 = "157c8d0b3766fabd648af73b5f364a9da59c360bd2aebc20968c28ad2dd083d7"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"

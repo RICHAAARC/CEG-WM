@@ -198,8 +198,10 @@ def summarize_cpu_canary(records: tuple[Mapping[str, object], ...]) -> Mapping[s
     wrong_unsafe = sum(record["arms"] is not None and record["arms"]["wrong"]["unsafe"] for record in records)
     negative_unsafe = sum(record["arms"] is not None and record["arms"]["negative"]["unsafe"] for record in records)
     by_attack = {attack: sum(record["attack"] == attack and record["arms"] is not None and record["arms"]["correct"]["status"] == "RELIABLE" and not record["arms"]["correct"]["unsafe"] for record in records) for attack in ATTACKS}
-    passed = failures == 0 and correct_safe >= 18 and correct_unsafe == wrong_unsafe == negative_unsafe == 0 and all(value >= 3 for value in by_attack.values())
-    return {"stage": "V4-G1R", "evidence": "synthetic_only", "formal_denominator": 0, "units": 20, "failures": failures, "correct_safe_reliable": correct_safe, "correct_unsafe": correct_unsafe, "wrong_unsafe": wrong_unsafe, "negative_unsafe": negative_unsafe, "correct_safe_by_attack": by_attack, "status": "CPU_ENGINEERING_EXIT" if passed else "CPU_METHOD_PARTIAL"}
+    top5 = {attack: sum(record["attack"] == attack and record["arms"] is not None and bool(record["arms"]["correct"].get("engineering_diagnostics", {}).get("top5_hit", False)) for record in records) for attack in ATTACKS}
+    identity_psr = sum(record["attack"] == "identity" and record["arms"] is not None and float(record["arms"]["correct"].get("engineering_diagnostics", {}).get("translation_psr", 0.0)) >= 8.0 for record in records)
+    passed = failures == 0 and correct_safe >= 18 and correct_unsafe == wrong_unsafe == negative_unsafe == 0 and sum(top5.values()) >= 18 and all(value >= 3 for value in by_attack.values()) and all(value >= 3 for value in top5.values()) and identity_psr >= 3
+    return {"stage": "V4-G1R", "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT", "evidence": "synthetic_only", "formal_denominator": 0, "cpu_carrier_ids": CPU_CARRIER_IDS, "units": 20, "failures": failures, "stops": failures, "correct_safe_reliable": correct_safe, "correct_unsafe": correct_unsafe, "wrong_unsafe": wrong_unsafe, "negative_unsafe": negative_unsafe, "correct_safe_by_attack": by_attack, "correct_rs_top5_by_attack": top5, "correct_rs_top5": sum(top5.values()), "identity_translation_psr_ge_8": identity_psr, "exit": passed, "status": "CPU_ENGINEERING_EXIT" if passed else "CPU_METHOD_PARTIAL"}
 
 
 def _rgb(image: Image.Image) -> np.ndarray:

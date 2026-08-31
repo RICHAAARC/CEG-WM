@@ -56,9 +56,18 @@
     "correct_safe_reliable_min": 18,
     "correct_unsafe_max": 0,
     "evidence_class": "synthetic_only",
+    "evidence_label": "CPU_SYNTHETIC_ENGINEERING_EXIT",
     "formal_denominator": 0,
+    "identity_translation_psr_ge_8_min": 3,
     "minimum_safe_per_attack": 3,
     "ordinary_rgb_carriers": 4,
+    "carrier_ids": [
+      "gradient_shapes",
+      "crosshatch",
+      "radial_objects",
+      "colored_texture"
+    ],
+    "correct_rs_top5_min": 18,
     "wrong_unsafe_max": 0
   },
   "development_runner": {
