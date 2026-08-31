@@ -92,7 +92,7 @@ def estimate_rotation_scale_from_recovered_z_t(
     recovered_z_t: Sequence[Sequence[Sequence[float]]],
     candidate_grid: Sequence[Sequence[float]],
 ) -> RecoveredZTRotationScaleEstimate:
-    """Search forward spectral candidates, then return attacked-to-canonical R/S.
+    """Search spectral candidates, then return attacked-to-canonical spatial R/S.
 
     Candidate selection is deterministic and blind: no original latent, prompt,
     clean RGB, transform truth, or attack parameters are accepted by this API.
@@ -124,9 +124,34 @@ def estimate_rotation_scale_from_recovered_z_t(
     )
     if not math.isfinite(score) or score <= 0.0:
         raise ValueError("recovered z_T has no usable X-template spectral evidence")
+    # k_observed = c R(phi) k_canonical implies the spatial
+    # attacked_to_canonical map is c R(-phi): Fourier already carries the
+    # inverse-scale relation of the forward spatial attack.
     return RecoveredZTRotationScaleEstimate(
-        _normalize_degrees(-forward_rotation_degrees), 1.0 / forward_scale, score
+        _normalize_degrees(-forward_rotation_degrees), forward_scale, score
     )
+
+
+def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTemplatePoint]) -> Any:
+    """Torch-native FFT equivalent, without importing torch at module import."""
+
+    fft = getattr(latents, "fft", None)
+    if fft is not None:
+        raise TypeError("latents must be a tensor, not an FFT namespace")
+    if getattr(latents, "ndim", None) != 4 or tuple(latents.shape[1:]) != (4, 64, 64):
+        raise ValueError("M0 torch latents must be 1x4x64x64")
+    torch = __import__("torch")
+    spectrum = torch.fft.fft2(latents[:, M0_TEMPLATE_CHANNEL].float())
+    for point in template:
+        y, x = _frequency_bin(point.frequency_y, 64), _frequency_bin(point.frequency_x, 64)
+        spectrum[:, y, x] = spectrum[:, y, x] + point.weight
+        spectrum[:, (-y) % 64, (-x) % 64] = spectrum[:, (-y) % 64, (-x) % 64] + point.weight
+    spatial = torch.fft.ifft2(spectrum)
+    if float(spatial.imag.abs().max().item()) > 1e-10:
+        raise ValueError("torch Hermitian inverse has non-real residual")
+    result = latents.clone()
+    result[:, M0_TEMPLATE_CHANNEL] = spatial.real.to(dtype=latents.dtype)
+    return result
 
 
 def estimate_rotation_scale_from_peak_pairs(

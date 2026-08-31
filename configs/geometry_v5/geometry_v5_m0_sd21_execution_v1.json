@@ -1,0 +1,59 @@
+{
+  "contract_id": "cegwm-geometry-v5-m0-sd21-execution-v1",
+  "source_m0_exact": "5f3ad4908c91a9947a625fb803974ee6ec852985",
+  "model": {
+    "model_id": "sd2-community/stable-diffusion-2-1-base",
+    "model_revision": "4e63672c03103b6c636b8fb4119ba982469b2955",
+    "identity_note": "public_community_mirror_not_claimed_byte_equivalent_to_unresolved_stabilityai_repository"
+  },
+  "scheduler": {
+    "class": "DDIMScheduler",
+    "source": "bound_model_scheduler_config",
+    "steps": 50,
+    "eta": 0
+  },
+  "generation": {
+    "guidance_scale": 7.5,
+    "prompt": "manifest_unit_prompt",
+    "device": "cuda",
+    "dtype": "float16"
+  },
+  "inversion": {
+    "prompt": "",
+    "guidance_scale": 1.0,
+    "vae_latent": "latent_dist.mode",
+    "scaling_factor": "bound_vae_config"
+  },
+  "spectral_grid": {
+    "rotation_degrees": [
+      -15,
+      15,
+      1
+    ],
+    "spatial_scale": [
+      0.85,
+      1.15,
+      0.01
+    ],
+    "direction": "attacked_to_canonical_spatial"
+  },
+  "attack": {
+    "interpolation": "bilinear",
+    "fill": "zero",
+    "coordinates": "normalized_centered",
+    "compound_order": [
+      "scale_about_center",
+      "rotate_about_center",
+      "translate"
+    ],
+    "truth_H": "strict_inverse_of_complete_forward_attack"
+  },
+  "artifacts": {
+    "mode": "create_only",
+    "records": 44,
+    "failure_retention": true,
+    "terminal_summary_max_bytes": 4096,
+    "sanitized_errors": true
+  },
+  "claim_ceiling": "M0_SD21_global_RST_development_engineering_only_science_denominator_0"
+}

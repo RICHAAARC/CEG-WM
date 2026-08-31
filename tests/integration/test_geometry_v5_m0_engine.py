@@ -18,8 +18,8 @@ def test_injected_fake_adapters_exercise_only_fixed_boundaries_not_real_mechanis
         generated.update(kwargs)
         return "fake-final-rgb"
 
-    assert run_generation_with_initial_z_t(fake_generator, "fake-z") == "fake-final-rgb"
-    assert generated["prompt"] == "" and generated["num_inference_steps"] == 50
+    assert run_generation_with_initial_z_t(fake_generator, "fake-z", "manifest prompt") == "fake-final-rgb"
+    assert generated["prompt"] == "manifest prompt" and generated["num_inference_steps"] == 50
 
     def fake_inverter(image: object, **kwargs: object) -> str:
         assert image == "attacked-rgb" and kwargs["prompt"] == ""

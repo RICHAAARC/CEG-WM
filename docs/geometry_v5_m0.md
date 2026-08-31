@@ -36,3 +36,27 @@ or retry. Its engineering exit is only
 `M0_SD21_global_RST_development_engineering_only_science_denominator_0`; it
 does not establish reliable geometry, crop handling, dual-chain behavior, SD3.5,
 fixed-FPR, regeneration, or science success.
+
+## M0-R0 SD2.1 Colab-facing execution contract
+
+M0-R0 binds `sd2-community/stable-diffusion-2-1-base` at revision
+`4e63672c03103b6c636b8fb4119ba982469b2955`, using its bound scheduler
+configuration as `DDIMScheduler`. This is a public community mirror; no
+byte-equivalence claim is made for an unresolved `stabilityai` source. Generation
+uses each manifest prompt, 50 DDIM steps, eta 0, guidance 7.5, CUDA float16.
+Inversion uses empty prompt, guidance 1, 50 steps, eta 0, VAE
+`latent_dist.mode()`, and the bound VAE scaling factor.
+
+For spatial forward `A=sR(theta)`, the spectral relation is
+`k_observed=A^-T k_canonical=(1/s)R(theta)k_canonical`. The blind spectral
+candidate `cR(phi)` therefore produces the public attacked-to-canonical spatial
+estimate `R(-phi)` with scale `c`: the reciprocal relation is already in the
+frequency candidate. M0-R0 freezes a -15…15 degree, 1-degree spectral grid and
+0.85…1.15, 0.01 spatial-scale grid. This does not use truth or per-unit tuning.
+
+The real runner is create-only and retains 44 raw/evaluation records, including
+seed-wide generation failures and attack/inversion failures. Truth is read only
+after raw detector records are frozen. No runner path emits RELIABLE, rectifies
+RGB, or votes content. Local static/fake checks remain engineering construction
+evidence only; real Colab execution requires a detached exact checkout and a
+separate execution authorization.
