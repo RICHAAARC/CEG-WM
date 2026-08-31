@@ -209,60 +209,63 @@ def invert_bound_sd21_attacked_rgb(pipeline: Any, attacked_ordinary_rgb: Any, id
 
 
 def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21M0Identity()) -> GeometryV5M0RawRecord:
-    """Blind channel-3 finite-grid R/S then canonicalized phase-correlation T.
+    """Blind recovered-zT R/S/T using normalized template and masked phase.
 
     The selected R/S map is ``B=c R(-phi)`` from attacked to canonical
-    coordinates. Translation is recovered only after resampling the observed
-    plane through ``B^-1`` to the canonical grid. The phase peak is the
-    normalized observed relative shift, so it is negated to return the ``u``
-    in ``H=B x+u``. Ambiguous or degenerate estimates fail closed.
+    coordinates. Translation is estimated after R/S canonicalization through
+    fixed template-frequency masked cross power, never whole-plane correlation
+    against a random-to-zero reference. Availability remains raw-only.
     """
     try:
         identity = _validate_frozen_identity(identity)
         torch = __import__("torch")
         if getattr(recovered_z_t, "ndim", None) != 4 or tuple(recovered_z_t.shape[1:]) != (4, 64, 64) or not bool(torch.isfinite(recovered_z_t).all()):
             raise ValueError("recovered z_T shape or finiteness differs")
-        from cegwm.method.geometry_v5_m0 import (
-            assemble_attacked_to_canonical_similarity,
-            build_hermitian_x_template,
-            inject_initial_z_t_x_template_torch,
-        )
+        from cegwm.method.geometry_v5_m0 import assemble_attacked_to_canonical_similarity, build_hermitian_x_template
 
         magnitude = torch.fft.fft2(recovered_z_t[:, 3].float()).abs()[0]
+        global_mean = float(magnitude.mean().item())
+        if not __import__("math").isfinite(global_mean) or global_mean <= 1e-12:
+            raise ValueError("blind template spectrum is degenerate")
         template = build_hermitian_x_template()
-        scored_candidates: list[tuple[float, float, float]] = []
+        scored_candidates: list[tuple[float, float, float, float, float]] = []
         for phi in range(-15, 16):
             for hundredths in range(85, 116):
                 c = hundredths / 100.0
-                angle = __import__("math").radians(phi)
-                score = 0.0
-                for point in template:
-                    x = c * (__import__("math").cos(angle) * point.frequency_x - __import__("math").sin(angle) * point.frequency_y)
-                    y = c * (__import__("math").sin(angle) * point.frequency_x + __import__("math").cos(angle) * point.frequency_y)
-                    score += float(_bilinear_periodic(magnitude, y * 64.0, x * 64.0))
-                scored_candidates.append((score, float(phi), c))
+                correlation, local_contrast = _normalized_template_match_torch(magnitude, template, float(phi), c, global_mean)
+                scored_candidates.append((correlation * local_contrast, float(phi), c, correlation, local_contrast))
         ranked = sorted(scored_candidates, key=lambda item: (-item[0], abs(item[1]), item[2]))
-        if len(ranked) < 2:
+        if not ranked:
             raise ValueError("blind spectral grid is incomplete")
-        score, phi, scale = ranked[0]
-        runner_up_score = ranked[1][0]
-        spectral_margin = score - runner_up_score
+        score, phi, scale, correlation, local_contrast = ranked[0]
+        outside_basin = [
+            item for item in ranked[1:]
+            if abs(item[1] - phi) > 1.5 or abs(item[2] - scale) > 0.015
+        ]
+        runner_up_score = outside_basin[0][0] if outside_basin else 0.0
+        noise_scores = [item[0] for item in outside_basin] or [0.0]
+        noise_mean = sum(noise_scores) / len(noise_scores)
+        noise_std = (sum((item - noise_mean) ** 2 for item in noise_scores) / len(noise_scores)) ** 0.5
+        nms_psr = (score - noise_mean) / max(noise_std, 1e-12)
         if (
             not __import__("math").isfinite(score)
-            or not __import__("math").isfinite(runner_up_score)
             or score <= 0.0
-            or spectral_margin <= max(1e-6, 0.01 * score)
+            or correlation <= 0.0
+            or local_contrast <= 0.0
+            or not __import__("math").isfinite(nms_psr)
+            or nms_psr <= 1.0
         ):
             raise ValueError("blind spectral grid is flat or ambiguous")
         rotation = -phi
-        reference_latent = inject_initial_z_t_x_template_torch(torch.zeros_like(recovered_z_t), template)[:, 3]
         normalized_observed, overlap = _resample_recovered_to_canonical(recovered_z_t[:, 3].float(), scale, rotation)
         if not bool(torch.isfinite(normalized_observed).all()) or overlap <= 0.5:
             raise ValueError("canonicalized observed plane has insufficient overlap")
-        cross = torch.fft.fft2(normalized_observed) * torch.fft.fft2(reference_latent.float()).conj()
+        template_reference, template_mask = _fixed_template_spectrum_torch(template, normalized_observed.device, normalized_observed.dtype)
+        cross = torch.fft.fft2(normalized_observed)[0] * template_reference.conj()
+        cross = torch.where(template_mask, cross, torch.zeros_like(cross))
         if not bool(torch.isfinite(cross.real).all()) or float(cross.abs().max().item()) <= 0.0:
-            raise ValueError("phase correlation has no usable spectrum")
-        corr = torch.fft.ifft2(cross / cross.abs().clamp_min(1e-12)).real[0]
+            raise ValueError("masked phase correlation has no usable spectrum")
+        corr = torch.fft.ifft2(cross / cross.abs().clamp_min(1e-12)).real
         if not bool(torch.isfinite(corr).all()) or float(corr.abs().max().item()) <= 0.0:
             raise ValueError("phase correlation is degenerate")
         peak = int(corr.argmax().item()); y, x = divmod(peak, _LATENT_SIDE)
@@ -276,14 +279,60 @@ def estimate_bound_blind_rst(recovered_z_t: Any, identity: SD21M0Identity = SD21
         if not __import__("math").isfinite(psr) or psr <= 1.05:
             raise ValueError("phase correlation has insufficient separation")
         return GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", rotation, scale, tx, ty, H, {
-            "blind_spectral_score": score,
-            "spectral_margin": spectral_margin,
+            "blind_normalized_template_score": score,
+            "blind_normalized_template_correlation": correlation,
+            "blind_local_contrast": local_contrast,
+            "nms_runner_up_score": runner_up_score,
+            "nms_psr": nms_psr,
             "phase_peak": phase_peak,
             "phase_psr": psr,
             "canonical_overlap": overlap,
         })
     except Exception:
         return GeometryV5M0RawRecord("FAILED", None, None, None, None, None, {})
+
+
+def _normalized_template_match_torch(
+    magnitude: Any, template: Any, forward_rotation_degrees: float, forward_scale: float, global_mean: float,
+) -> tuple[float, float]:
+    """Cosine-normalized template local contrast from recovered-zT only."""
+
+    math_module = __import__("math")
+    angle = math_module.radians(forward_rotation_degrees)
+    cosine, sine = math_module.cos(angle), math_module.sin(angle)
+    contrasts: list[float] = []
+    for point in template:
+        x = forward_scale * (cosine * point.frequency_x - sine * point.frequency_y)
+        y = forward_scale * (sine * point.frequency_x + cosine * point.frequency_y)
+        if not (-0.5 <= x <= 0.5 and -0.5 <= y <= 0.5):
+            continue
+        center = float(_bilinear_periodic(magnitude, y * _LATENT_SIDE, x * _LATENT_SIDE))
+        ring = [
+            float(_bilinear_periodic(magnitude, y * _LATENT_SIDE + delta_y, x * _LATENT_SIDE + delta_x))
+            for delta_y in range(-2, 3) for delta_x in range(-2, 3)
+            if max(abs(delta_y), abs(delta_x)) == 2
+        ]
+        contrasts.append(max(0.0, center - sum(ring) / len(ring)))
+    if not contrasts:
+        return 0.0, 0.0
+    squared = sum(item * item for item in contrasts)
+    correlation = sum(contrasts) / max((len(contrasts) * squared) ** 0.5, 1e-12)
+    local_contrast = (sum(contrasts) / len(contrasts)) / max(global_mean, 1e-12)
+    return correlation, local_contrast
+
+
+def _fixed_template_spectrum_torch(template: Any, device: Any, dtype: Any) -> tuple[Any, Any]:
+    """Fixed public template support, independent of any clean or original zT."""
+
+    torch = __import__("torch")
+    reference = torch.zeros((_LATENT_SIDE, _LATENT_SIDE), device=device, dtype=torch.complex64)
+    mask = torch.zeros((_LATENT_SIDE, _LATENT_SIDE), device=device, dtype=torch.bool)
+    for point in template:
+        y = int(round(float(point.frequency_y) * _LATENT_SIDE)) % _LATENT_SIDE
+        x = int(round(float(point.frequency_x) * _LATENT_SIDE)) % _LATENT_SIDE
+        reference[y, x] = 1.0
+        mask[y, x] = True
+    return reference.to(dtype=torch.complex64), mask
 
 
 def _bilinear_periodic(magnitude: Any, y: float, x: float) -> Any:

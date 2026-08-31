@@ -35,62 +35,82 @@ def test_m0_byte_bindings_sources_roster_and_engineering_ceiling_are_frozen() ->
 
 
 @pytest.mark.unit
-def test_m0_template_initial_z_t_injection_and_similarity_direction_are_pure_math_only() -> None:
+def test_m0_direct_injected_z_t_writer_detector_closure_uses_relative_setting_only() -> None:
     template = method.build_hermitian_x_template()
     assert len(template) == 16
-    latent = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
+    assert method.M0_OFFICIAL_X_ANGLES_DEGREES == (1.0, 135.0)
+    size = 16
+    latent = tuple(
+        tuple(tuple(math.sin((channel + 1) * (row + 1) * (column + 2)) for column in range(size)) for row in range(size))
+        for channel in range(4)
+    )
+    before_spectrum = method._dft2(latent[3])
+    target = method._relative_coefficient_target(before_spectrum)
     injected = method.inject_initial_z_t_x_template(latent, template)
     assert len(injected) == 4 and any(value != 0.0 for row in injected[3] for value in row)
     spectrum = method._dft2(injected[3])
-    point = template[0]
-    y, x = method._frequency_bin(point.frequency_y, 8), method._frequency_bin(point.frequency_x, 8)
-    assert abs(spectrum[y][x]) > 0.0
-    assert spectrum[y][x] == pytest.approx(spectrum[(-y) % 8][(-x) % 8].conjugate())
+    pairs = method._template_bin_pairs(template, size, size)
+    for (y, x), (conjugate_y, conjugate_x) in pairs:
+        assert spectrum[y][x] == pytest.approx(target)
+        assert spectrum[conjugate_y][conjugate_x] == pytest.approx(target)
+    estimate = method.estimate_rotation_scale_from_recovered_z_t(
+        injected, ((0.0, 1.0), (10.0, 1.1), (-10.0, 0.9)),
+    )
+    assert estimate.rotation_degrees == pytest.approx(0.0) and estimate.scale == pytest.approx(1.0)
+    assert estimate.diagnostics["normalized_template_correlation"] > 0.0
+    assert estimate.diagnostics["nms_psr"] > 1.0
     assert all(isinstance(value, float) for row in injected[3] for value in row)
-    estimate = method.estimate_rotation_scale_from_peak_pairs(
+    paired = method.estimate_rotation_scale_from_peak_pairs(
         ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)), ((0.0, 0.0), (2.0, 0.0), (0.0, 2.0))
     )
-    assert estimate.rotation_degrees == pytest.approx(0.0)
-    assert estimate.scale == pytest.approx(2.0)
+    assert paired.rotation_degrees == pytest.approx(0.0)
+    assert paired.scale == pytest.approx(2.0)
     H = method.assemble_attacked_to_canonical_similarity(0.0, 2.0, -0.5, -0.5)
     assert H == ((2.0, -0.0, -0.5), (0.0, 2.0, -0.5), (0.0, 0.0, 1.0))
 
 
 @pytest.mark.unit
-def test_recovered_z_t_rotation_scale_search_is_blind_and_fails_closed_on_bad_data() -> None:
-    size = 16
-    plane = [[0.0 for _ in range(size)] for _ in range(size)]
+def test_known_latent_rotation_scale_direction_is_attacked_to_canonical_and_blind() -> None:
+    size, forward_rotation_degrees, forward_scale = 32, 10.0, 1.1
+    spectrum = [[0j for _ in range(size)] for _ in range(size)]
+    angle = math.radians(forward_rotation_degrees)
     for point in method.build_hermitian_x_template():
-        y = method._frequency_bin(0.5 * point.frequency_y, size)
-        x = method._frequency_bin(0.5 * point.frequency_x, size)
-        for row in range(size):
-            for column in range(size):
-                plane[row][column] += math.cos(2.0 * math.pi * ((y * row / size) + (x * column / size)))
-    recovered = [tuple(tuple(0.0 for _ in range(size)) for _ in range(size)) for _ in range(4)]
-    recovered[3] = tuple(tuple(row) for row in plane)
-    estimate = method.estimate_rotation_scale_from_recovered_z_t(recovered, ((0.0, 1.0), (0.0, 0.5)))
-    assert estimate.rotation_degrees == 0.0 and estimate.scale == 0.5
-    forward_rotation_degrees = 10.0
-    forward_angle = math.radians(forward_rotation_degrees)
-    rotated_plane = [[0.0 for _ in range(size)] for _ in range(size)]
-    for point in method.build_hermitian_x_template():
-        observed_y = 0.5 * (math.sin(forward_angle) * point.frequency_x + math.cos(forward_angle) * point.frequency_y)
-        observed_x = 0.5 * (math.cos(forward_angle) * point.frequency_x - math.sin(forward_angle) * point.frequency_y)
-        y = method._frequency_bin(observed_y, size)
-        x = method._frequency_bin(observed_x, size)
-        for row in range(size):
-            for column in range(size):
-                rotated_plane[row][column] += math.cos(2.0 * math.pi * ((y * row / size) + (x * column / size)))
-    recovered[3] = tuple(tuple(row) for row in rotated_plane)
-    inverse_estimate = method.estimate_rotation_scale_from_recovered_z_t(
-        recovered, ((0.0, 0.5), (10.0, 0.5))
+        observed_x = forward_scale * (math.cos(angle) * point.frequency_x - math.sin(angle) * point.frequency_y)
+        observed_y = forward_scale * (math.sin(angle) * point.frequency_x + math.cos(angle) * point.frequency_y)
+        if not (-0.5 <= observed_x <= 0.5 and -0.5 <= observed_y <= 0.5):
+            continue
+        y, x = method._frequency_bin(observed_y, size), method._frequency_bin(observed_x, size)
+        spectrum[y][x] = 100.0 + 0j
+    plane = tuple(tuple(value.real for value in row) for row in method._idft2(spectrum))
+    recovered = tuple(plane if channel == 3 else tuple(tuple(0.0 for _ in range(size)) for _ in range(size)) for channel in range(4))
+    estimate = method.estimate_rotation_scale_from_recovered_z_t(
+        recovered, ((0.0, 1.0), (10.0, 1.1), (8.0, 1.1), (10.0, 1.0)),
     )
-    assert inverse_estimate.rotation_degrees == -10.0 and inverse_estimate.scale == 0.5
+    assert estimate.rotation_degrees == pytest.approx(-10.0)
+    assert estimate.scale == pytest.approx(1.1)
+    assert estimate.diagnostics["nms_runner_up_score"] < estimate.score
     flat = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
     with pytest.raises(ValueError, match="usable"):
         method.estimate_rotation_scale_from_recovered_z_t(flat, ((0.0, 1.0),))
     with pytest.raises(ValueError, match="candidate grid"):
         method.estimate_rotation_scale_from_recovered_z_t(recovered, ((True, 1.0),))
+
+
+@pytest.mark.unit
+def test_known_latent_translation_uses_masked_template_cross_power_at_one_over_64() -> None:
+    size = 64
+    spectrum = [[0j for _ in range(size)] for _ in range(size)]
+    for y, x in method._template_support(method.build_hermitian_x_template(), size, size):
+        spectrum[y][x] = 1.0 + 0j
+    canonical = tuple(tuple(value.real for value in row) for row in method._idft2(spectrum))
+    shift_x, shift_y = 5, -3
+    observed = tuple(
+        tuple(canonical[(row + shift_y) % size][(column + shift_x) % size] for column in range(size))
+        for row in range(size)
+    )
+    tx, ty = method.estimate_translation_phase_correlation(canonical, observed)
+    assert tx == pytest.approx(shift_x / size)
+    assert ty == pytest.approx(shift_y / size)
 
 
 @pytest.mark.unit
@@ -142,6 +162,17 @@ def test_fourier_spatial_duality_keeps_spectral_scale_and_inverts_only_rotation(
 
 
 @pytest.mark.unit
+def test_blind_detector_signature_cannot_receive_clean_or_truth_inputs() -> None:
+    signature = method.estimate_rotation_scale_from_recovered_z_t.__annotations__
+    assert set(signature) == {"recovered_z_t", "candidate_grid", "return"}
+    source = (_ROOT / "src/cegwm/method/geometry_v5_m0.py").read_text(encoding="utf-8")
+    detector_source = source[source.index("def estimate_rotation_scale_from_recovered_z_t"):source.index("def estimate_translation_phase_correlation")]
+    for forbidden in ("original_z_T", "clean_RGB", "true_H", "evaluation_truth", "prompt"):
+        assert forbidden not in detector_source
+    assert "normalized_template" in detector_source and "nms_runner_up_score" in detector_source
+
+
+@pytest.mark.unit
 def test_torch_production_boundary_is_lazy_and_validates_template_before_fft_write() -> None:
     source = (_ROOT / "src/cegwm/method/geometry_v5_m0.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -154,7 +185,8 @@ def test_torch_production_boundary_is_lazy_and_validates_template_before_fft_wri
 @pytest.mark.unit
 def test_torch_template_injection_rejects_bad_entries_and_nonfinite_weights_when_available() -> None:
     torch = pytest.importorskip("torch")
-    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    torch.manual_seed(6032)
+    latents = torch.randn((1, 4, 64, 64), dtype=torch.float32)
     template = method.build_hermitian_x_template()
     injected = method.inject_initial_z_t_x_template_torch(latents, template)
     assert torch.isfinite(injected).all()
@@ -203,7 +235,8 @@ def test_torch_template_injection_rejects_residual_clearly_above_dtype_tolerance
         return torch.complex(spatial.real, torch.full_like(spatial.real, residual))
 
     monkeypatch.setattr(torch.fft, "ifft2", nonreal_ifft2)
-    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    torch.manual_seed(6034)
+    latents = torch.randn((1, 4, 64, 64), dtype=torch.float32)
     with pytest.raises(ValueError, match="non-real residual"):
         method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
 
@@ -227,7 +260,8 @@ def test_torch_template_injection_rejects_nonfinite_ifft_components_when_availab
         return torch.complex(real, imag)
 
     monkeypatch.setattr(torch.fft, "ifft2", nonfinite_ifft2)
-    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    torch.manual_seed(6035)
+    latents = torch.randn((1, 4, 64, 64), dtype=torch.float32)
     with pytest.raises(ValueError, match="non-finite spatial components"):
         method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
 
@@ -245,6 +279,7 @@ def test_torch_template_injection_rejects_finite_ifft_that_overflows_latent_dtyp
         return torch.complex(finite_real, torch.zeros_like(spatial.real))
 
     monkeypatch.setattr(torch.fft, "ifft2", overflow_ifft2)
-    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float16)
+    torch.manual_seed(6036)
+    latents = torch.randn((1, 4, 64, 64), dtype=torch.float16)
     with pytest.raises(ValueError, match="cast to latent dtype has non-finite"):
         method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())

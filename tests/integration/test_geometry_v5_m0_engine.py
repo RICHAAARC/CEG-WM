@@ -75,8 +75,9 @@ def test_concrete_estimator_returns_signed_translation_after_identity_normalizat
     functional = torch.nn.functional
     from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
 
+    torch.manual_seed(7510)
     canonical = inject_initial_z_t_x_template_torch(
-        torch.zeros((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
+        torch.randn((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
     )
     # g(x)=f(x+u): unit-image H translation is converted once for the grid.
     unit_u = (3 / 64, 4 / 64)
@@ -98,22 +99,23 @@ def test_concrete_estimator_returns_signed_translation_after_identity_normalizat
 
 
 @pytest.mark.integration
-def test_concrete_estimator_uses_B_times_forward_translation_in_compound_fixture_when_torch_available() -> None:
+def test_known_latent_rotation_scale_direction_is_attacked_to_canonical_when_torch_available() -> None:
     torch = pytest.importorskip("torch")
     functional = torch.nn.functional
     from cegwm.method.geometry_v5_m0 import build_hermitian_x_template, inject_initial_z_t_x_template_torch
 
-    scale, phi = 0.93, 7.0
+    scale, phi = 1.1, 10.0
     rotation = -phi
-    forward_t = (0.05, -0.04)
+    forward_t = (0.08, 0.0)
     angle = math.radians(rotation)
     cosine, sine = math.cos(angle), math.sin(angle)
     expected_u = (
         -scale * (cosine * forward_t[0] - sine * forward_t[1]),
         -scale * (sine * forward_t[0] + cosine * forward_t[1]),
     )
+    torch.manual_seed(7511)
     canonical = inject_initial_z_t_x_template_torch(
-        torch.zeros((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
+        torch.randn((1, 4, 64, 64), dtype=torch.float32), build_hermitian_x_template(),
     )
     coordinates = torch.linspace(-1.0, 1.0, 64)
     observed_y, observed_x = torch.meshgrid(coordinates, coordinates, indexing="ij")
