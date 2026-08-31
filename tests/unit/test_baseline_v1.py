@@ -47,7 +47,9 @@ def test_registry_contains_only_the_authorized_four_methods() -> None:
 @pytest.mark.unit
 def test_source_qualification_keeps_execution_and_unlicensed_source_closed() -> None:
     assert baseline_by_id("tree_ring").score_direction == "lower_is_watermarked"
+    assert baseline_by_id("tree_ring").native_score_name == "fourier_key_l1_distance"
     assert baseline_by_id("t2smark").official_entrypoint == "run_sd35.py"
+    assert baseline_by_id("t2smark").native_score_name == "norm1_w_master_key"
     assert adapter_plan("tree_ring").execution_status == "semantic_review_required"
     assert adapter_plan("t2smark").execution_status == "execution_not_authorized"
     assert adapter_plan("shallow_diffuse").execution_status == "blocked"

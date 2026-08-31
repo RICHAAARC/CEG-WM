@@ -45,7 +45,7 @@ PRIMARY_BASELINES: tuple[BaselineSpec, ...] = (
         source_license="MIT",
         official_entrypoint="run_tree_ring_watermark.py + src/tree_ring_watermark/_detect.py:detect",
         detector_input="ordinary RGB image, diffusion pipeline, and public key dataset",
-        native_score_name="inverted_fourier_key_distance",
+        native_score_name="fourier_key_l1_distance",
         key_semantics="Fourier ring array indexed by watermarked channel and radius",
         wrong_key_semantics="official detector searches any available key; no single wrong-key score is exposed",
     ),
@@ -92,9 +92,9 @@ PRIMARY_BASELINES: tuple[BaselineSpec, ...] = (
         source_license="Apache-2.0",
         official_entrypoint="run_sd35.py",
         detector_input="ordinary RGB image re-encoded and naive-forward-diffused to a latent",
-        native_score_name="key_decode_l1_norm",
+        native_score_name="norm1_w_master_key",
         key_semantics="master key controls PRNG support/signs; per-image key encodes the watermark",
-        wrong_key_semantics="official path evaluates fake_key = 1 - master_key as norm1_no_w",
+        wrong_key_semantics="norm1_no_w uses fake_key = 1 - master_key on the same watermarked sample; it is not an unwatermarked arm",
     ),
 )
 
