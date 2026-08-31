@@ -121,7 +121,12 @@ def _content_compatibility(content_only: dict[str, Any], combined: dict[str, Any
         return False
     if set(left_evidence) != set(_CONTENT_GATE_FIELDS) or set(right_evidence) != set(_CONTENT_GATE_FIELDS):
         return False
-    return all(isinstance(left_evidence[field], bool) and isinstance(right_evidence[field], bool) and left_evidence[field] is True and left_evidence[field] == right_evidence[field] for field in _CONTENT_GATE_FIELDS)
+    return all(
+        isinstance(left_evidence[field], bool)
+        and isinstance(right_evidence[field], bool)
+        and left_evidence[field] == right_evidence[field]
+        for field in _CONTENT_GATE_FIELDS
+    )
 
 
 def _carrier_window(amplitude_summaries: list[dict[str, Any]]) -> tuple[bool, list[float]]:

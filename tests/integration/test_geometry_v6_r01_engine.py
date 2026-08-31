@@ -46,9 +46,19 @@ def test_r01_one_complete_amplitude_is_a_candidate_and_all_incomplete_fail_close
 
 
 def test_r01_content_compatibility_requires_matching_complete_six_gate_vector():
-    gates = {field: True for field in engine._CONTENT_GATE_FIELDS}
+    gates = {
+        "lf_gate_a_diagnostic": False,
+        "lf_gate_b_diagnostic": True,
+        "hf_gate_a_diagnostic": False,
+        "hf_gate_b_diagnostic": True,
+        "weighted_gate_a": True,
+        "weighted_gate_b": False,
+    }
     assert engine._content_compatibility(_content_record(gates), _content_record(dict(gates))) is True
     changed = dict(gates); changed["hf_gate_b_diagnostic"] = False
     assert engine._content_compatibility(_content_record(gates), _content_record(changed)) is False
     missing = dict(gates); missing.pop("weighted_gate_b")
     assert engine._content_compatibility(_content_record(missing), _content_record(missing)) is False
+    non_bool = dict(gates); non_bool["weighted_gate_a"] = 1
+    assert engine._content_compatibility(_content_record(non_bool), _content_record(non_bool)) is False
+    assert engine._content_compatibility(_content_record(gates, positive=False), _content_record(gates)) is False
