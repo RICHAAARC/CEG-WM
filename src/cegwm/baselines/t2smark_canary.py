@@ -72,6 +72,7 @@ class RunLock:
     def __init__(self, root: Path) -> None:
         self.path = root / ".run.lock"; self.token = uuid.uuid4().hex
     def __enter__(self) -> "RunLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         try: fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError as exc: raise RuntimeError("RUN_ID is locked; use --clear-stale-lock explicitly") from exc
         with os.fdopen(fd, "w") as stream:
@@ -174,7 +175,7 @@ def rebuild_partial(run_dir: Path, config: dict[str, Any]) -> list[dict[str, Any
     return rows
 
 
-def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool=False) -> None:
+def _run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool=False) -> None:
     """Resume valid work, retry failed/corrupt work, and publish final only at 12/12."""
     run_dir.mkdir(parents=True, exist_ok=True); establish_contract(run_dir,config)
     for condition,role in pending_observations(run_dir,config,force):
@@ -194,13 +195,24 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
         atomic_json(observation_path(run_dir,condition,role),record); rebuild_partial(run_dir,config)
     rows=rebuild_partial(run_dir,config)
     if len(rows)==12 and all(row.get("status")=="ok" for row in rows):
-        atomic_json(run_dir/"canary_result.json",{"identity":_identity(config),"engineering_canary_complete":True,"observations":rows})
-        os.replace(run_dir/"partial_scores.csv",run_dir/"scores.csv")
+        observation_set_digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+        csv = (run_dir / "partial_scores.csv").read_text(encoding="utf-8")
+        csv_sha256 = hashlib.sha256(csv.encode()).hexdigest()
+        manifest = {"generation_digest": generation_digest(run_dir), "observation_set_digest": observation_set_digest, "csv_sha256": csv_sha256}
+        atomic_json(run_dir / "final_manifest.json", manifest)
+        atomic_text(run_dir / "scores.csv", csv)
+        atomic_json(run_dir/"canary_result.json",{"identity":_identity(config),**manifest,"engineering_canary_complete":True,"observations":rows})
     else:
         stamp = time.time_ns(); quarantine = run_dir / "quarantine"; quarantine.mkdir(exist_ok=True)
         for name in ("canary_result.json", "scores.csv"):
             path = run_dir / name
             if path.exists(): os.replace(path, quarantine / f"{name}.{stamp}")
+
+
+def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool=False) -> None:
+    """Hold the stable RUN_ID lock across the entire recovery/publish transaction."""
+    with RunLock(run_dir):
+        _run_canary(run_dir, config, execute, force)
 
 
 def main() -> None:

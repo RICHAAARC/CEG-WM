@@ -40,3 +40,10 @@ fails closed on contract identity drift, reuses only hash-verified generation
 and observation artifacts, retries failed or damaged work, retains append-only
 attempt records, and publishes final files only after 12 valid observations.
 It remains unexecuted locally and makes no result claim.
+
+The stable RUN_ID lock fails closed across concurrent or 24-hour Colab
+sessions. It is released only by its owning runtime. A stale lock is never
+automatically removed: after confirming no runtime is active, an operator may
+manually remove only that RUN_ID lock file. Contract drift is rejected.
+Partial artifacts report valid and pending counts; stable final JSON, CSV, and
+manifest appear only after 12 valid observations from one generation.

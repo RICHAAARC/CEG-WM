@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, atomic_json, atomic_png, establish_contract, pending_observations, run_canary, sha256_file, valid_observation
+from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, establish_contract, pending_observations, run_canary, sha256_file, valid_observation
 
 
 def config() -> dict:
@@ -58,3 +58,12 @@ def test_force_recomputes_all_observations_after_generation_rebuild(tmp_path: Pa
     run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
     run_canary(tmp_path, config(), lambda c, r: (calls.append((c, r)) or Image.new("RGB", (3, 3)), 1.0), force=True)
     assert len(calls) == 12
+
+
+def test_lock_rejects_second_runner_and_releases_own_token(tmp_path: Path) -> None:
+    with RunLock(tmp_path):
+        try:
+            with RunLock(tmp_path): pass
+        except RuntimeError as exc: assert "locked" in str(exc)
+        else: raise AssertionError("second runner acquired lock")
+    assert not (tmp_path / ".run.lock").exists()
