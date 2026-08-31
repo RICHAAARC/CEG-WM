@@ -7,7 +7,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _NOTEBOOK = _ROOT / "notebooks/geometry_v5_m0_diagnostic_colab.ipynb"
-_EXACT = "6033c18875f326a0354b00f18dadbbc9c0fb067b"
+_EXACT = "82b32387b9ccae2299dda0a425ff5f5a83fbf2f2"
 
 
 def _notebook() -> dict[str, object]:
@@ -51,3 +51,18 @@ def test_diagnostic_notebook_uses_single_create_only_drive_json_and_has_no_execu
         assert forbidden not in source
     prose = "\n".join(cell["source"] for cell in _notebook()["cells"])  # type: ignore[arg-type,index]
     assert "RELIABLE" in prose and "science denominator is 0" in prose and "content score" not in prose
+
+
+def test_diagnostic_notebook_reports_only_per_case_json_fields_after_runner_failure() -> None:
+    source = "\n".join(cell["source"] for cell in _code_cells(_notebook()))  # type: ignore[arg-type]
+    failure = source.index("if completed.returncode != 0:")
+    success_summary = source.index("summary_line = lines[-1]")
+    assert failure < success_summary
+    assert "OUTPUT.read_text(encoding='utf-8')" in source
+    assert "for case in cases:" in source
+    assert "('attack_id', 'failure_stage', 'error_class')" in source
+    assert "report['raw.status'] = raw['status']" in source
+    assert "report['diagnostics'] = raw['diagnostics']" in source
+    assert "diagnostic incomplete; per-case status printed" in source
+    for forbidden in ("completed.stderr", "traceback", "original_prompt", "initial_z_t", "final_rgb"):
+        assert forbidden not in source

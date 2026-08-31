@@ -13,7 +13,7 @@ from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord, load_geometry_v
 
 
 _DIAGNOSTIC_ID = "geometry_v5_m0_sd21_small_canary_v1"
-_METHOD_SOURCE_EXACT = "ff0ad0a92835927afa980b51444ad03ee8534fcb"
+_METHOD_SOURCE_EXACT = "82b32387b9ccae2299dda0a425ff5f5a83fbf2f2"
 _CASE_IDS = ("identity", "rotation_+10", "scale_1.1", "translation_x_+0.08")
 
 
