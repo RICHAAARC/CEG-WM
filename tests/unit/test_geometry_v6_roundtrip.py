@@ -17,6 +17,10 @@ def test_public_template_is_deterministic_and_partition_is_exact():
     assert torch.equal(part.search|part.fit|part.validate,support)
     assert not bool((part.search&part.fit).any() or (part.search&part.validate).any() or (part.fit&part.validate).any())
     assert all(int(mask.sum())>0 for mask in (part.search,part.fit,part.validate))
+    for y in range(16):
+        for x in range(16):
+            mate=((-y)%16,(-x)%16)
+            assert sum(bool(mask[y,x]) for mask in (part.search,part.fit,part.validate)) == sum(bool(mask[mate]) for mask in (part.search,part.fit,part.validate))
 
 def test_public_adjoint_works_under_no_grad_and_inference_mode_without_vae_grads():
     vae=_VAE(); z=torch.randn(1,4,16,16)

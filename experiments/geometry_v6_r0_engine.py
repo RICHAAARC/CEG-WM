@@ -221,7 +221,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             "amplitude": amplitude,
             "content_geometry": combined_record,
             "geometry_only": geometry_only_record,
-            "pilot_present_vs_absent": _pilot_present_vs_absent(combined_record, geometry_only_record),
+            "pilot_present_vs_absent": {
+                "content_geometry_vs_content_only": _pilot_present_vs_absent(combined_record, content_only_record),
+                "geometry_only_vs_unwatermarked": _pilot_present_vs_absent(geometry_only_record, unwatermarked_record),
+            },
             "content_compatibility": compatibility,
         })
     return {

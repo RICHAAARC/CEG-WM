@@ -41,7 +41,9 @@ def public_pilot_partition(latents: torch.Tensor) -> PublicPilotPartition:
     support = midfrequency_support(latents)
     h, w = support.shape
     ordinal = torch.arange(h * w, device=latents.device).reshape(h, w)
-    masks = tuple(support & (ordinal.remainder(3) == index) for index in range(3))
+    conjugate = ((-torch.arange(h, device=latents.device)) % h)[:, None] * w + ((-torch.arange(w, device=latents.device)) % w)[None, :]
+    pair_ordinal = torch.minimum(ordinal, conjugate)
+    masks = tuple(support & (pair_ordinal.remainder(3) == index) for index in range(3))
     if any(int(mask.sum().item()) == 0 for mask in masks): raise ValueError("Geometry-V6 public pilot partition is empty")
     if not bool(torch.equal(masks[0] | masks[1] | masks[2], support)): raise RuntimeError("Geometry-V6 public pilot partition union differs")
     if any(bool((left & right).any()) for left, right in ((masks[0],masks[1]),(masks[0],masks[2]),(masks[1],masks[2]))): raise RuntimeError("Geometry-V6 public pilot partition overlaps")
@@ -83,14 +85,16 @@ def blind_geometry_observation(image: Any, image_processor: Any, vae: Any) -> Ge
     """Blind public-pilot observation from ordinary RGB and frozen public VAE."""
     observation = encode_final_rgb_image(require_ordinary_rgb_image(image), image_processor, vae)
     template, partition, support = public_pilot_template(observation), public_pilot_partition(observation), midfrequency_support(observation)
+    observation_fft = torch.fft.fft2(observation.to(torch.float32), dim=(-2, -1))
+    template_fft = torch.fft.fft2(template.to(torch.float32), dim=(-2, -1))
     channels = observation.shape[0] * observation.shape[1]
-    return GeometryObservation("OBSERVATION_ONLY", _masked_cosine(observation,template,support), _masked_cosine(observation,template,partition.search), _masked_cosine(observation,template,partition.fit), _masked_cosine(observation,template,partition.validate), int(support.sum().item())*channels, int(partition.search.sum().item())*channels, int(partition.fit.sum().item())*channels, int(partition.validate.sum().item())*channels)
+    return GeometryObservation("OBSERVATION_ONLY", _masked_frequency_cosine(observation_fft,template_fft,support), _masked_frequency_cosine(observation_fft,template_fft,partition.search), _masked_frequency_cosine(observation_fft,template_fft,partition.fit), _masked_frequency_cosine(observation_fft,template_fft,partition.validate), int(support.sum().item())*channels, int(partition.search.sum().item())*channels, int(partition.fit.sum().item())*channels, int(partition.validate.sum().item())*channels)
 
-def _masked_cosine(observation: torch.Tensor, template: torch.Tensor, mask: torch.Tensor) -> float:
+def _masked_frequency_cosine(observation: torch.Tensor, template: torch.Tensor, mask: torch.Tensor) -> float:
     expanded = mask[None,None].to(dtype=observation.dtype); left, right = observation*expanded, template*expanded
     denominator = torch.linalg.vector_norm(left) * torch.linalg.vector_norm(right)
     if not bool(torch.isfinite(denominator)) or float(denominator.item()) <= 0.0: raise RuntimeError("Geometry-V6 public pilot score denominator is invalid")
-    score = float((left*right).sum().div(denominator).item())
+    score = float(torch.vdot(right.reshape(-1), left.reshape(-1)).real.div(denominator).item())
     if not math.isfinite(score): raise RuntimeError("Geometry-V6 public pilot score is nonfinite")
     return score
 
