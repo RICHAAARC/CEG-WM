@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 import torch
+import pytest
+import cegwm.method.geometry_v6_roundtrip as pilot
 from cegwm.method.geometry_v6_roundtrip import R0_AMPLITUDE_CANDIDATES, apply_roundtrip_adjoint_update, midfrequency_support, public_pilot_partition, public_pilot_template
 
 class _Dist:
@@ -27,3 +29,11 @@ def test_public_adjoint_works_under_no_grad_and_inference_mode_without_vae_grads
     with torch.no_grad(): a=apply_roundtrip_adjoint_update(z,R0_AMPLITUDE_CANDIDATES[0],vae)
     with torch.inference_mode(): b=apply_roundtrip_adjoint_update(z,R0_AMPLITUDE_CANDIDATES[0],vae)
     assert bool(torch.isfinite(a).all() and torch.isfinite(b).all()) and all(p.grad is None for p in vae.parameters())
+
+def test_fft_subset_score_responds_only_to_its_declared_frequency_support():
+    z=torch.zeros(1,4,16,16); part=public_pilot_partition(z); template=public_pilot_template(z)
+    spectrum=torch.fft.fft2(template,dim=(-2,-1)); supported=spectrum*part.search[None,None]
+    outside=(~midfrequency_support(z)).to(torch.complex64)[None,None].expand_as(spectrum).clone()
+    score=lambda x: pilot._masked_frequency_cosine(x,spectrum,part.search)
+    assert score(supported)>0
+    with pytest.raises(RuntimeError): score(outside)
