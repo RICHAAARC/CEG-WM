@@ -188,9 +188,13 @@ def test_concrete_combined_entry_exercises_fake_vae_ddim_components_when_availab
     for bad_identity in (
         SD21M0Identity(steps=1),
         SD21M0Identity(steps=50.0),
+        SD21M0Identity(steps=True),
         SD21M0Identity(eta=0.1),
+        SD21M0Identity(eta=False),
         SD21M0Identity(model_revision="0" * 40),
         SD21M0Identity(inversion_guidance_scale=2.0),
+        SD21M0Identity(guidance_scale=7),
+        SD21M0Identity(inversion_guidance_scale=1),
     ):
         with pytest.raises(ValueError, match="frozen SD2.1"):
             invert_bound_sd21_attacked_rgb(pipeline, image, bad_identity)

@@ -49,7 +49,7 @@ def _exact_value(received: Any, expected: Any) -> bool:
         return all(_exact_value(getattr(received, name), getattr(expected, name)) for name in SD21M0Identity.__dataclass_fields__)
     if isinstance(expected, tuple):
         return len(received) == len(expected) and all(_exact_value(left, right) for left, right in zip(received, expected, strict=True))
-    return received == expected
+    return type(received) is type(expected) and received == expected
 
 
 def _unit_image_translation_to_grid(value: Any) -> float:
