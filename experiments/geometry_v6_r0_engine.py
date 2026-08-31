@@ -52,7 +52,13 @@ _RUNTIME_ENVIRONMENT_FIELDS = frozenset({
     "vae_class", "vae_parameter_dtype", "vae_scaling_factor", "vae_shift_factor",
 })
 _COMMON_SECRET_PATTERN = re.compile(
-    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+|\b(?:token|key|secret|password)\s*[:=]\s*[^\s,;]+"
+    r'''(?ix)
+    \bbearer[ \t]+[A-Za-z0-9._~+/=-]{1,512}
+    |
+    \b["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password)["']?
+    [ \t]*[:=][ \t]*
+    (?:["'][^"'\r\n]{0,512}["']|[^\s,;}\]\r\n]{1,512})
+    '''
 )
 
 
@@ -99,10 +105,10 @@ def _sanitize_diagnostic(value: str, secrets: tuple[str, ...]) -> str:
     return _COMMON_SECRET_PATTERN.sub("[REDACTED]", sanitized)
 
 
-def _failure_diagnostic(error: Exception, content_key: str, token: str) -> dict[str, str]:
+def _failure_diagnostic(error: Exception, content_key: str, token: str, prompt: str) -> dict[str, str]:
     """Return a finite, JSON-safe description of the exception from this arm."""
 
-    secrets = (content_key, token)
+    secrets = (content_key, token, prompt)
     message = _sanitize_diagnostic(str(error), secrets)[:FAILURE_MESSAGE_LIMIT]
     rendered_traceback = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     traceback_tail = _sanitize_diagnostic(rendered_traceback, secrets)[-FAILURE_TRACEBACK_TAIL_LIMIT:]
@@ -267,7 +273,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
             return output.image, None
         except Exception as error:  # Record, do not retry or silently replace a failed physical arm.
-            return None, _failure_diagnostic(error, content_key, token)
+            return None, _failure_diagnostic(error, content_key, token, args.prompt)
 
     def record_arm(image: Any | None, failure: dict[str, str] | None) -> dict[str, Any]:
         if failure is not None:
