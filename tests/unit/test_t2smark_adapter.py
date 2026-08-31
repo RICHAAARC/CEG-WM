@@ -25,14 +25,15 @@ def _reference_encode(bits: torch.Tensor, key: torch.Tensor, base: torch.Tensor,
     message_length = int(bits.numel())
     noise_size = int(base.numel())
     repeat_count = int(math.erfc(tau / math.sqrt(2.0)) * noise_size / message_length)
-    generator = torch.Generator(device=base.device)
+    generator = torch.Generator()
     seed = 0
     for bit in key.tolist():
         seed = 2 * seed + int(bit)
     generator.manual_seed(seed)
-    signs = torch.randint(0, 2, (message_length * repeat_count,), generator=generator, device=base.device)
-    signs = signs.to(dtype=base.dtype).mul(2).sub(1)
-    support = torch.randperm(noise_size, generator=generator, device=base.device)[: message_length * repeat_count]
+    signs = torch.randint(0, 2, (message_length * repeat_count,), generator=generator, device="cpu")
+    signs = signs.to(device=base.device, dtype=base.dtype).mul(2).sub(1)
+    support = torch.randperm(noise_size, generator=generator, device="cpu")[: message_length * repeat_count]
+    support = support.to(device=base.device)
     selector = torch.zeros(noise_size, device=base.device, dtype=torch.bool)
     selector[support] = True
     codeword = (1 - 2 * bits).repeat(repeat_count).to(dtype=base.dtype) * signs
@@ -58,6 +59,21 @@ def test_codec_matches_published_encode_formula_on_cpu_fixture() -> None:
     expected = _reference_encode(bits, key, base, codec.tau)
 
     torch.testing.assert_close(actual, expected)
+
+
+def test_codec_uses_official_cpu_keyed_prng_topology(monkeypatch: pytest.MonkeyPatch) -> None:
+    codec = T2SMarkCodec(message_length=4, tau=0.674, latent_shape=(2, 4, 4))
+    original_generator = torch.Generator
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_generator(*args: object, **kwargs: object) -> torch.Generator:
+        calls.append((args, kwargs))
+        return original_generator(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "Generator", record_generator)
+    codec.encode(torch.zeros(4, dtype=torch.int64), torch.tensor([1, 0, 1, 1]), base_noise=torch.ones(2, 4, 4))
+
+    assert calls == [((), {})]
 
 
 def test_codec_round_trip_and_detection_score_for_uniform_message() -> None:
@@ -147,6 +163,18 @@ def test_rgb_score_rejects_non_ordinary_rgb_and_has_no_latent_escape_hatch() -> 
         score_t2smark_rgb(np.zeros((2, 2, 3), dtype=np.float32), pipeline, torch.zeros(16, dtype=torch.int64))
     with pytest.raises(TypeError, match="HxWx3"):
         score_t2smark_rgb(np.zeros((2, 2), dtype=np.uint8), pipeline, torch.zeros(16, dtype=torch.int64))
+    with pytest.raises(ValueError, match="16-bit"):
+        score_t2smark_rgb(np.zeros((2, 2, 3), dtype=np.uint8), pipeline, torch.zeros(15, dtype=torch.int64))
+
+
+def test_sd35_embedding_rejects_nonstandard_master_session_or_message_lengths() -> None:
+    base = torch.zeros(SD35_LATENT_SHAPE)
+    with pytest.raises(ValueError, match="16-bit"):
+        embed_t2smark_sd35(base, torch.zeros(15, dtype=torch.int64), torch.zeros(16, dtype=torch.int64), torch.zeros(256, dtype=torch.int64))
+    with pytest.raises(ValueError, match="16-bit"):
+        embed_t2smark_sd35(base, torch.zeros(16, dtype=torch.int64), torch.zeros(17, dtype=torch.int64), torch.zeros(256, dtype=torch.int64))
+    with pytest.raises(ValueError, match="256-bit"):
+        embed_t2smark_sd35(base, torch.zeros(16, dtype=torch.int64), torch.zeros(16, dtype=torch.int64), torch.zeros(255, dtype=torch.int64))
 
 
 def test_t2smark_adapter_plan_remains_gpu_unverified() -> None:

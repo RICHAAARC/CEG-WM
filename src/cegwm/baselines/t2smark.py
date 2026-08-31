@@ -80,11 +80,16 @@ class T2SMarkCodec:
 
     def _support_and_signs(self, key_bits: torch.Tensor, *, device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
         key = _validate_bits(key_bits, None, name="key_bits", device=device)
-        generator = torch.Generator(device=device)
+        # The official codec deliberately creates an unqualified CPU generator,
+        # draws both keyed vectors on CPU, and only then copies values to CUDA.
+        # Keeping that topology matters: CPU and CUDA generators have distinct
+        # seeded streams, so device-local generation would not decode official
+        # SD3.5 outputs faithfully.
+        generator = torch.Generator()
         generator.manual_seed(_bits_to_int(key))
-        signs = torch.randint(0, 2, (self.codeword_length,), generator=generator, device=device, dtype=torch.int64)
-        support = torch.randperm(self.noise_size, generator=generator, device=device)[:self.codeword_length]
-        return support, signs.to(dtype=dtype).mul(2).sub(1)
+        signs = torch.randint(0, 2, (self.codeword_length,), generator=generator, device="cpu", dtype=torch.int64)
+        support = torch.randperm(self.noise_size, generator=generator, device="cpu")[:self.codeword_length]
+        return support.to(device=device), signs.to(device=device, dtype=dtype).mul(2).sub(1)
 
     def encode(self, bits: torch.Tensor | Sequence[int], key_bits: torch.Tensor | Sequence[int], *, base_noise: torch.Tensor | None = None) -> torch.Tensor:
         """Encode bits using official tail/central magnitude rearrangement.
@@ -159,10 +164,13 @@ def embed_t2smark_sd35(
         raise ValueError(f"base_latent must have shape {SD35_LATENT_SHAPE}")
     if not base_latent.dtype.is_floating_point:
         raise TypeError("base_latent must have a floating dtype")
+    master_key = _validate_bits(master_key_bits, DEFAULT_KEY_LENGTH, name="master_key_bits", device=base_latent.device)
+    session_key = _validate_bits(session_key_bits, DEFAULT_KEY_LENGTH, name="session_key_bits", device=base_latent.device)
+    message = _validate_bits(message_bits, DEFAULT_MESSAGE_LENGTH, name="message_bits", device=base_latent.device)
     key_codec, message_codec = t2smark_sd35_codecs()
     result = base_latent.clone()
-    result[0, KEY_CHANNELS] = key_codec.encode(session_key_bits, master_key_bits, base_noise=base_latent[0, KEY_CHANNELS])
-    result[0, MESSAGE_CHANNELS] = message_codec.encode(message_bits, session_key_bits, base_noise=base_latent[0, MESSAGE_CHANNELS])
+    result[0, KEY_CHANNELS] = key_codec.encode(session_key, master_key, base_noise=base_latent[0, KEY_CHANNELS])
+    result[0, MESSAGE_CHANNELS] = message_codec.encode(message, session_key, base_noise=base_latent[0, MESSAGE_CHANNELS])
     return result
 
 
@@ -197,6 +205,7 @@ def score_t2smark_rgb(
         raise ValueError("num_inversion_steps must be a positive integer")
     resolved_device = torch.device(device) if device is not None else torch.device(getattr(pipeline, "_execution_device", "cpu"))
     resolved_dtype = dtype if dtype is not None else (torch.float16 if resolved_device.type == "cuda" else torch.float32)
+    master_key = _validate_bits(master_key_bits, DEFAULT_KEY_LENGTH, name="master_key_bits", device=resolved_device)
     image = torch.from_numpy(source.copy()).permute(2, 0, 1).unsqueeze(0).to(device=resolved_device, dtype=resolved_dtype)
     image = image.div(255.0).mul(2.0).sub(1.0)
     latents = pipeline.get_image_latents(image, sample=False)
@@ -204,7 +213,7 @@ def score_t2smark_rgb(
     if not isinstance(reversed_latents, torch.Tensor) or tuple(reversed_latents.shape) != SD35_LATENT_SHAPE:
         raise ValueError(f"pipeline must return reversed latents with shape {SD35_LATENT_SHAPE}")
     key_codec, _ = t2smark_sd35_codecs()
-    _, score = key_codec.decode(reversed_latents[0, KEY_CHANNELS], master_key_bits, detection=True)
+    _, score = key_codec.decode(reversed_latents[0, KEY_CHANNELS], master_key, detection=True)
     if not math.isfinite(score):
         raise RuntimeError("T2SMark native continuous score must be finite")
     return score
