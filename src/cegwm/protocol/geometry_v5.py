@@ -326,8 +326,11 @@ def _similarity_matrix(
     h10, h11, _ = matrix[1]
     h20, h21, h22 = matrix[2]
     if not (
-        _same(h20, 0.0) and _same(h21, 0.0) and _same(h22, 1.0)
-        and _same(h00, h11) and _same(h01, -h10)
+        h20 == 0.0
+        and h21 == 0.0
+        and h22 == 1.0
+        and _same(h00, h11)
+        and _same(h01, -h10)
     ):
         raise ValueError("H_hat must be a normalized attacked_to_canonical similarity")
     if h00 * h00 + h10 * h10 <= 0.0:

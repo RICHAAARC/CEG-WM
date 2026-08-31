@@ -16,6 +16,8 @@ _CONTRACT_PATH = _ROOT / geometry.GEOMETRY_V5_P0_CONTRACT_PATH
 _ROOT_KEY = b"geometry-v5-root-key-for-unit-tests-only"
 _IDENTITY_H = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 _UNIT_CORNERS = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+_ATTACKED_TO_CANONICAL_H = ((2.0, 0.0, -0.5), (0.0, 2.0, -0.5), (0.0, 0.0, 1.0))
+_ATTACKED_CORNERS = ((0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75))
 
 
 def _conditions(**changes: bool) -> geometry.ReliabilityConditions:
@@ -143,12 +145,39 @@ def test_public_output_is_exact_and_reliable_requires_all_structural_conditions(
 
 
 @pytest.mark.unit
+def test_nonidentity_attacked_to_canonical_similarity_enforces_direction_and_corners() -> None:
+    observation = geometry.GeometryV5Observation(
+        _ATTACKED_TO_CANONICAL_H,
+        _ATTACKED_CORNERS,
+        1,
+        1.0,
+        "RELIABLE",
+        _conditions(),
+    )
+
+    assert observation.H_hat == _ATTACKED_TO_CANONICAL_H
+    assert observation.corners_hat == _ATTACKED_CORNERS
+    canonical_to_attacked = ((0.5, 0.0, 0.25), (0.0, 0.5, 0.25), (0.0, 0.0, 1.0))
+    with pytest.raises(ValueError, match="inconsistent"):
+        geometry.GeometryV5Observation(
+            canonical_to_attacked,
+            _ATTACKED_CORNERS,
+            1,
+            1.0,
+            "RELIABLE",
+            _conditions(),
+        )
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("matrix", "corners", "message"),
     [
         (((True, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), _UNIT_CORNERS, "non-bool"),
         (((float("nan"), 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)), _UNIT_CORNERS, "finite"),
         (((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.1, 0.0, 1.0)), _UNIT_CORNERS, "similarity"),
+        (((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1e-15, 0.0, 1.0)), _UNIT_CORNERS, "similarity"),
+        (((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0 + 1e-15)), _UNIT_CORNERS, "similarity"),
         (((1.0, 0.0, 0.0), (0.0, -1.0, 0.0), (0.0, 0.0, 1.0)), _UNIT_CORNERS, "similarity"),
         (_IDENTITY_H, ((0.0, 0.0), (1.0, 0.0), (0.2, 0.2), (0.0, 1.0)), "strict convex"),
         (_IDENTITY_H, ((0.0, 0.0), (0.5, 0.0), (0.5, 1.0), (0.0, 1.0)), "inconsistent"),
