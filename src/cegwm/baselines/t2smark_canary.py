@@ -54,6 +54,17 @@ def atomic_png(path: Path, image: Image.Image) -> None:
         if os.path.exists(temporary): os.unlink(temporary)
 
 
+def atomic_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(value); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try: return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError): return None
@@ -84,6 +95,12 @@ def valid_generation(run_dir: Path, config: dict[str, Any]) -> bool:
     return all(valid_file(run_dir / name, checkpoint.get("files", {}).get(name)) for name in ("clean.png", "watermarked.png"))
 
 
+def generation_digest(run_dir: Path) -> str | None:
+    checkpoint = _read_json(run_dir / "generation_checkpoint.json")
+    if not checkpoint or not valid_generation(run_dir, checkpoint.get("identity", {})): return None
+    return hashlib.sha256(json.dumps(checkpoint, sort_keys=True).encode()).hexdigest()
+
+
 def observation_path(run_dir: Path, condition: str, role: str) -> Path:
     return run_dir / "observations" / f"{condition}__{role}.json"
 
@@ -91,7 +108,12 @@ def observation_path(run_dir: Path, condition: str, role: str) -> Path:
 def valid_observation(run_dir: Path, config: dict[str, Any], condition: str, role: str) -> bool:
     record = _read_json(observation_path(run_dir, condition, role))
     if not record or record.get("status") != "ok" or record.get("identity") != _identity(config): return False
-    image = run_dir / record.get("image", "")
+    expected_image = f"images/{condition}__{role}.png"
+    if record.get("source_role") not in ("clean.png", "watermarked.png") or record.get("image") != expected_image: return False
+    source = run_dir / record["source_role"]
+    checkpoint = _read_json(run_dir / "generation_checkpoint.json") or {}
+    if record.get("generation_digest") != generation_digest(run_dir) or record.get("source_sha256") != checkpoint.get("files", {}).get(record["source_role"]): return False
+    image = run_dir / expected_image
     score = record.get("score")
     return valid_file(image, record.get("image_sha256")) and isinstance(score, (int, float)) and math.isfinite(score)
 
@@ -128,10 +150,10 @@ def rebuild_partial(run_dir: Path, config: dict[str, Any]) -> list[dict[str, Any
     for condition in CONDITIONS:
         for role in ("clean_negative", "watermarked_positive"):
             record=_read_json(observation_path(run_dir,condition,role))
-            if record and record.get("identity")==_identity(config): rows.append(record)
-    atomic_json(run_dir/"partial_result.json", {"identity":_identity(config),"complete":len(rows)==12,"observations":rows})
+            if record and valid_observation(run_dir,config,condition,role): rows.append(record)
+    atomic_json(run_dir/"partial_result.json", {"identity":_identity(config),"complete":len(rows)==12,"valid_count":len(rows),"pending_count":12-len(rows),"observations":rows})
     csv="condition,role,status,score\n" + "".join(f"{r['condition']},{r['role']},{r['status']},{r.get('score','')}\n" for r in rows)
-    temporary=run_dir/".partial_scores.csv.tmp"; temporary.write_text(csv,encoding="utf-8"); os.replace(temporary,run_dir/"partial_scores.csv")
+    atomic_text(run_dir/"partial_scores.csv",csv)
     return rows
 
 
@@ -145,7 +167,8 @@ def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, st
             image,score=execute(condition,role)
             if not math.isfinite(score): raise RuntimeError("native score is non-finite")
             image_name=f"images/{condition}__{role}.png"; atomic_png(run_dir/image_name,image)
-            record={**attempt,"status":"ok","score":float(score),"image":image_name,"image_sha256":sha256_file(run_dir/image_name)}
+            source_role="clean.png" if role=="clean_negative" else "watermarked.png"
+            record={**attempt,"status":"ok","score":float(score),"image":image_name,"image_sha256":sha256_file(run_dir/image_name),"source_role":source_role,"source_sha256":sha256_file(run_dir/source_role),"generation_digest":generation_digest(run_dir)}
         except Exception as exc:
             record={**attempt,"status":"failed","failure":f"{type(exc).__name__}: {exc}"}
         atomic_json(observation_path(run_dir,condition,role),record); rebuild_partial(run_dir,config)
