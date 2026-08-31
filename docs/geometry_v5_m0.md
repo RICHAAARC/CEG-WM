@@ -1,95 +1,52 @@
 # Geometry-V5 M0 — global R/S/T development mechanism
 
-M0 independently adapts a global initial-`z_T` X-template route for frozen
-SD2.1-facing construction. It is not a real SD2.1 execution, detector,
-rectifier, crop method, content integration, or scientific result.
+M0 is a training-free, initial-`z_T`-only geometry mechanism for a frozen
+SD2.1-facing route. It is not a detector decision, rectifier, crop method,
+content integration, or scientific result. The X-template geometry/parameters
+are independently adapted from
+`Mao718/MaXsive@a9554024aed176e705cc15ca1cbd31b9c7f75bfb`; DDIM inversion
+equations/flow are independently adapted from
+`YuxinWenRick/tree-ring-watermark@3015283d9cf82e90b628f02ad2121bd37408ca9a`.
+Neither project is vendored or claimed byte-for-byte equivalent.
 
-The source bindings are `Mao718/MaXsive@a9554024aed176e705cc15ca1cbd31b9c7f75bfb`
-for X-template geometry/parameters and
-`YuxinWenRick/tree-ring-watermark@3015283d9cf82e90b628f02ad2121bd37408ca9a`
-for DDIM inversion equations/flow. License status is recorded only. M0 does not
-vendor or wholesale-copy either project. In particular, inspected MaXsive
-`Modified_DPMSolver` step-wise model-output peak injection is deliberately not
-copied: V5 writes initial `z_T` only, using a Hermitian real-latent adaptation,
-and makes no byte-for-byte official-parity claim. Phase-correlation translation
-is a minimal V5 extension, not an attribution to inspected MaXsive code.
+V5 writes the Hermitian X-template into initial `z_T` once, channel 3 only;
+it does not copy inspected step-wise model-output peak injection. The template
+uses scale 5 and radial lengths `[0.2, 0.3, 0.4, 0.5]`. The method covers only
+global rotation, scale, and translation—not local tiles, crops, attention,
+affine/projective transforms, learning, retries, fallback, content evidence, or
+SD3.5.
 
-The fixed conceptual adapter is 512×512 RGB, 4×64×64 latent, normal frozen
-generation, deterministic attacked-RGB preprocessing, VAE mode encoding,
-empty-prompt inversion, 50 steps, eta 0, and guidance 7.5. M0-R0 binds the
-public mirror model revision in its execution contract. Template identity
-is channel 3, scale 5, radial lengths `[0.2, 0.3, 0.4, 0.5]`.
+The concrete method chain is: attacked ordinary RGB → deterministic VAE mode
+encoding → empty-prompt, guidance-1 DDIM inversion → recovered `z_T` → blind
+R/S spectral search → R/S-normalized phase translation → strict
+attacked-to-canonical `H` → `ESTIMATE_AVAILABLE` or `FAILED`. The detector
+accepts only attacked ordinary RGB with frozen runtime identities; it cannot
+read a prompt, original latent, clean/pre-attack RGB, true geometry, attack
+parameters, residuals, content material, or evaluation truth.
 
-M0 covers only global rotation, scale, and translation. It excludes local tiles,
-holdout finalization, content integration, crops, SD3.5, attention,
-affine/projective models, learning/optimization, retries, and fallback. The
-production-facing boundary is attacked ordinary RGB plus frozen
-model/scheduler/inversion identities; it cannot use prompts, original latent,
-clean/pre-attack RGB, true geometry/attack values, writer residuals, content
-keys/scores, or evaluation truth. Truth belongs only to a later evaluator after
-a raw record is frozen.
+For forward `A=sR(theta)`, the spectrum follows
+`k_observed=A^-T k_canonical=(1/s)R(theta)k_canonical`. A blind candidate
+`cR(phi)` gives the attacked-to-canonical spatial linear map
+`B=cR(-phi)`: the reciprocal scale is already carried by the Fourier relation.
+Before translation, the recovered channel is resampled as `g(B^-1 q)` onto the
+canonical grid. Phase correlation uses normalized observed relative to the
+canonical reference and negates its signed shift, returning `u` in `H=B x+u`.
+Flat, non-finite, ambiguous, inadequate-overlap, and degenerate-phase inputs
+fail closed rather than producing a tie-break estimate.
 
-Raw M0 records are `ESTIMATE_AVAILABLE` or `FAILED`; they cannot emit
-`GeometryV5Observation.RELIABLE`, rectify an image, or add content evidence.
-The fixed four-seed, eleven-attack roster has denominator 44 with no replacement
-or retry. Its engineering exit is only
-`M0_SD21_global_RST_development_engineering_only_science_denominator_0`; it
-does not establish reliable geometry, crop handling, dual-chain behavior, SD3.5,
-fixed-FPR, regeneration, or science success.
+Public translations use centered unit-image coordinates: one image width is
+1.0, and a `p`-pixel latent displacement is `p/64`. The runtime's single
+conversion helper maps these translations to `grid_sample(align_corners=True)`
+endpoint coordinates. Similarity linear terms are unchanged across the two
+bases because they differ by a common scalar.
 
-## M0-R0 SD2.1 Colab-facing execution contract
+The runtime binds the community mirror
+`sd2-community/stable-diffusion-2-1-base` at revision
+`4e63672c03103b6c636b8fb4119ba982469b2955` where a runtime needs it. This is
+not a claim of byte equivalence with an unresolved `stabilityai` source. Local
+work has not loaded or run a model. GPU execution, if later authorized, belongs
+to a future Colab stage and is not established by the local static smoke.
 
-M0-R0 binds `sd2-community/stable-diffusion-2-1-base` at revision
-`4e63672c03103b6c636b8fb4119ba982469b2955`, using its bound scheduler
-configuration as `DDIMScheduler`. This is a public community mirror; no
-byte-equivalence claim is made for an unresolved `stabilityai` source. Generation
-uses each manifest prompt, 50 DDIM steps, eta 0, guidance 7.5, CUDA float16.
-Inversion uses empty prompt, guidance 1, 50 steps, eta 0, VAE
-`latent_dist.mode()`, and the bound VAE scaling factor.
-
-The concrete adapter is lazy and has not been executed locally: importing it
-does not import model packages, load weights, contact a network, or execute a
-model. Its one concrete combined entry accepts only a bound pipeline, attacked
-ordinary RGB, and the frozen runtime identity. It has no parameter for truth,
-clean RGB, original latent, prompt, or attack values.
-
-The runtime accepts only the exact frozen `SD21M0Identity`: model family and
-revision, 512×512/4×64×64 shapes, 50 steps, eta 0, generation guidance 7.5,
-inversion guidance 1, empty inversion prompt, and VAE mode encoding. A changed
-identity is rejected before scheduler or model calls; the loader binds the same
-single identity rather than a separate hard-coded model/revision pair.
-
-For spatial forward `A=sR(theta)`, the spectral relation is
-`k_observed=A^-T k_canonical=(1/s)R(theta)k_canonical`. The blind spectral
-candidate `cR(phi)` therefore produces the public attacked-to-canonical spatial
-estimate `R(-phi)` with scale `c`: the reciprocal relation is already in the
-frequency candidate. M0-R0 freezes a -15…15 degree, 1-degree spectral grid and
-0.85…1.15, 0.01 spatial-scale grid. This does not use truth or per-unit tuning.
-
-After selecting `B=cR(-phi)`, the recovered channel-3 plane is resampled into
-canonical orientation and scale as `g(B^-1 q)` using bilinear `grid_sample`,
-centered normalized coordinates, `align_corners=True`, and zero padding. Phase
-correlation compares this normalized observed plane with the canonical
-reference. Its signed relative shift is negated to form `u`, so the reported
-transform is exactly `H=B x+u`; for a forward translation `t_forward`, the
-compound fixture relation is `u=-B*t_forward`, not `-t`. The runtime records
-phase peak, PSR, and zero-padding overlap as diagnostics; these never establish
-RELIABLE. Flat, non-finite, insufficiently separated spectral candidates,
-inadequate overlap, or degenerate phase surfaces return `FAILED` rather than an
-equal-score tie-break estimate.
-
-Public `H` and attack translations use centered unit-image coordinates: 1.0 is
-one full width or height, and a phase displacement of `p` latent pixels is
-`p/64`. `grid_sample(align_corners=True)` instead uses endpoint `[-1,1]`
-coordinates; the sole runtime helper converts public translation `t` to grid
-delta `2*64/(64-1)*t` (and inversely). Thus a pixel displacement maps to
-`2*p/(64-1)` in a fixture grid while retaining `p/64` in public `H`. Centered
-similarity R/S has the same linear components in both bases because their
-coordinate scales differ only by a common scalar.
-
-The real runner is create-only and retains 44 raw/evaluation records, including
-seed-wide generation failures and attack/inversion failures. Truth is read only
-after raw detector records are frozen. No runner path emits RELIABLE, rectifies
-RGB, or votes content. Local static/fake checks remain engineering construction
-evidence only; real Colab execution requires a detached exact checkout and a
-separate execution authorization.
+Raw M0 output cannot emit `GeometryV5Observation.RELIABLE`, rectify RGB, or
+vote content. The current engineering claim ceiling remains
+`M0_SD21_global_RST_development_engineering_only_science_denominator_0`.
