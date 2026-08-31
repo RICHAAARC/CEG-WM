@@ -16,8 +16,8 @@ is a minimal V5 extension, not an attribution to inspected MaXsive code.
 
 The fixed conceptual adapter is 512×512 RGB, 4×64×64 latent, normal frozen
 generation, deterministic attacked-RGB preprocessing, VAE mode encoding,
-empty-prompt inversion, 50 steps, eta 0, and guidance 7.5. The exact HF model
-revision is deliberately unbound until real-run authorization. Template identity
+empty-prompt inversion, 50 steps, eta 0, and guidance 7.5. M0-R0 binds the
+public mirror model revision in its execution contract. Template identity
 is channel 3, scale 5, radial lengths `[0.2, 0.3, 0.4, 0.5]`.
 
 M0 covers only global rotation, scale, and translation. It excludes local tiles,

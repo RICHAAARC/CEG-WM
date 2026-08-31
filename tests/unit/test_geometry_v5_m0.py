@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import ast
 from pathlib import Path
 
 import pytest
@@ -130,3 +131,21 @@ def test_m0_contract_rejects_noncanonical_bytes_and_forbidden_detector_inputs_ar
     assert raw == protocol.canonical_json_bytes(json.loads(raw))
     forbidden = protocol.load_geometry_v5_m0_contract(_ROOT).config["scope"]["detector_forbidden_inputs"]
     assert set(forbidden) >= {"original_prompt", "original_z_T", "clean_RGB", "true_H", "evaluation_truth"}
+
+
+@pytest.mark.unit
+def test_fourier_spatial_duality_keeps_spectral_scale_and_inverts_only_rotation() -> None:
+    source = (_ROOT / "src/cegwm/method/geometry_v5_m0.py").read_text(encoding="utf-8")
+    assert "k_observed = c R(phi) k_canonical" in source
+    assert "_normalize_degrees(-forward_rotation_degrees), forward_scale" in source
+    assert "1.0 / forward_scale" not in source
+
+
+@pytest.mark.unit
+def test_torch_production_boundary_is_lazy_and_validates_template_before_fft_write() -> None:
+    source = (_ROOT / "src/cegwm/method/geometry_v5_m0.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imports = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    assert "torch" not in imports
+    assert "torch template entries must be XTemplatePoint" in source
+    assert "torch Hermitian inverse has non-real residual" in source

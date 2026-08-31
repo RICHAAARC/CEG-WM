@@ -135,17 +135,21 @@ def estimate_rotation_scale_from_recovered_z_t(
 def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTemplatePoint]) -> Any:
     """Torch-native FFT equivalent, without importing torch at module import."""
 
-    fft = getattr(latents, "fft", None)
-    if fft is not None:
-        raise TypeError("latents must be a tensor, not an FFT namespace")
     if getattr(latents, "ndim", None) != 4 or tuple(latents.shape[1:]) != (4, 64, 64):
         raise ValueError("M0 torch latents must be 1x4x64x64")
     torch = __import__("torch")
+    if not bool(latents.dtype.is_floating_point) or not bool(torch.isfinite(latents).all()):
+        raise ValueError("M0 torch latents must be finite floating tensors")
     spectrum = torch.fft.fft2(latents[:, M0_TEMPLATE_CHANNEL].float())
     for point in template:
-        y, x = _frequency_bin(point.frequency_y, 64), _frequency_bin(point.frequency_x, 64)
-        spectrum[:, y, x] = spectrum[:, y, x] + point.weight
-        spectrum[:, (-y) % 64, (-x) % 64] = spectrum[:, (-y) % 64, (-x) % 64] + point.weight
+        if not isinstance(point, XTemplatePoint):
+            raise TypeError("torch template entries must be XTemplatePoint")
+        y, x = _frequency_bin(_finite(point.frequency_y, "frequency_y"), 64), _frequency_bin(_finite(point.frequency_x, "frequency_x"), 64)
+        weight = _finite(point.weight, "template weight")
+        conjugate_y, conjugate_x = (-y) % 64, (-x) % 64
+        spectrum[:, y, x] = spectrum[:, y, x] + weight
+        if (conjugate_y, conjugate_x) != (y, x):
+            spectrum[:, conjugate_y, conjugate_x] = spectrum[:, conjugate_y, conjugate_x] + weight
     spatial = torch.fft.ifft2(spectrum)
     if float(spatial.imag.abs().max().item()) > 1e-10:
         raise ValueError("torch Hermitian inverse has non-real residual")
