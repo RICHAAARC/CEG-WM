@@ -61,3 +61,61 @@ def test_public_pilot_pairs_present_arms_only_with_their_absent_baselines():
     assert '_pilot_present_vs_absent(combined_record, content_only_record)' in source
     assert '_pilot_present_vs_absent(geometry_only_record, unwatermarked_record)' in source
     assert '_pilot_present_vs_absent(combined_record, geometry_only_record)' not in source
+
+
+def test_failure_diagnostic_is_bounded_and_redacts_explicit_and_common_secret_forms():
+    content_key = 'content-key-0001'
+    token = 'hf_token-0002'
+    try:
+        raise RuntimeError(f'{content_key} {token} Bearer bearer-token token=second-token ' + ('message ' * 100))
+    except RuntimeError as error:
+        diagnostic = engine._failure_diagnostic(error, content_key, token)
+    serialized = json.dumps(diagnostic)
+    assert diagnostic['failure_class'] == 'RuntimeError'
+    assert diagnostic['failure_stage'] == engine.FAILURE_STAGE
+    assert len(diagnostic['sanitized_message']) <= engine.FAILURE_MESSAGE_LIMIT
+    assert len(diagnostic['sanitized_traceback_tail']) <= engine.FAILURE_TRACEBACK_TAIL_LIMIT
+    assert content_key not in serialized and token not in serialized
+    assert 'bearer-token' not in serialized and 'second-token' not in serialized
+    assert '[REDACTED]' in serialized
+
+
+def test_runtime_environment_is_public_allowlisted_and_optional_versions_can_be_unavailable(monkeypatch):
+    monkeypatch.setattr(engine, '_package_version', lambda package: engine.UNAVAILABLE)
+    monkeypatch.setattr(engine.torch.cuda, 'is_available', lambda: False)
+    environment = engine._runtime_environment(_P())
+    assert set(environment) == engine._RUNTIME_ENVIRONMENT_FIELDS
+    assert environment['diffusers_version'] == engine.UNAVAILABLE
+    assert environment['transformers_version'] == engine.UNAVAILABLE
+    assert environment['cuda_device_name'] == engine.UNAVAILABLE
+    assert environment['model_id'] == engine.MODEL_ID
+    assert environment['vae_parameter_dtype'] == 'torch.float32'
+
+
+def test_failed_fixed_arms_are_retained_independently_without_retry(monkeypatch, tmp_path):
+    content_key = 'content-key-0001'
+    token = 'hf_token-0002'
+    calls = []
+    monkeypatch.setenv(engine.CONTENT_KEY_ENV, content_key)
+    monkeypatch.setenv('HF_TOKEN', token)
+    monkeypatch.setattr(engine, '_exact', lambda repo_root, expected: expected)
+    monkeypatch.setattr(engine, '_load_assets', lambda received_token: (_P(), SimpleNamespace(lf_public_assets=object(), hf_public_assets=object())))
+    monkeypatch.setattr(engine, '_runtime_environment', lambda pipeline: {'runtime': 'public-test-only'})
+    monkeypatch.setattr(engine, 'load_calibration_asset', lambda *paths: object())
+    monkeypatch.setattr(engine, 'FrozenContentWhiteningLFPublicAssets', lambda *values: object())
+    monkeypatch.setattr(engine, 'load_frozen_content_whitening_asset', lambda repo_root: object())
+    monkeypatch.setattr(engine.torch, 'Generator', lambda device: SimpleNamespace(manual_seed=lambda seed: (device, seed)))
+    def fail_arm(pipeline, prompt, arm, **kwargs):
+        calls.append((arm, kwargs['amplitude']))
+        raise RuntimeError(f'{content_key} {token} arm={arm}')
+    monkeypatch.setattr(engine, 'run_sd35_geometry_v6_r0_arm', fail_arm)
+    payload = engine._run(SimpleNamespace(repo_root=tmp_path, expected_exact='a' * 40, prompt='public prompt', seed=7, height=512, width=512))
+    expected_calls = [('content_only', None), ('unwatermarked', None)] + [item for amplitude in engine.R0_AMPLITUDE_CANDIDATES for item in (('content_geometry', amplitude), ('geometry_only', amplitude))]
+    assert calls == expected_calls
+    failures = [payload['baselines']['content_only']['failure_reason'], payload['baselines']['unwatermarked']['failure_reason']]
+    failures += [record[arm]['failure_reason'] for record in payload['amplitudes'] for arm in ('content_geometry', 'geometry_only')]
+    assert len(failures) == len(expected_calls)
+    assert all(item['failure_class'] == 'RuntimeError' and item['failure_stage'] == engine.FAILURE_STAGE for item in failures)
+    assert all(content_key not in json.dumps(item) and token not in json.dumps(item) for item in failures)
+    assert payload['evidence_ceiling'] == 'user_run_nonformal_colab_diagnostic; science_denominator=0'
+    assert all(record['content_compatibility'] == 'NOT_EVALUABLE_OPERATIONAL_FAILURE' for record in payload['amplitudes'])

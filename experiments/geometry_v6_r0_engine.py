@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
+import math
 import os
+import re
 import subprocess
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +42,18 @@ from cegwm.runtime.content_weighted_joint_sd35 import derive_stability_wrong_key
 CONTENT_KEY_ENV = "CEG_WM_ROOT_KEY"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 ARMS = ("content_only", "content_geometry", "geometry_only", "unwatermarked")
+FAILURE_STAGE = "run_sd35_geometry_v6_r0_arm"
+FAILURE_MESSAGE_LIMIT = 512
+FAILURE_TRACEBACK_TAIL_LIMIT = 4096
+UNAVAILABLE = "UNAVAILABLE"
+_RUNTIME_ENVIRONMENT_FIELDS = frozenset({
+    "torch_version", "torch_cuda_runtime_version", "cuda_device_name",
+    "diffusers_version", "transformers_version", "model_id", "pipeline_class",
+    "vae_class", "vae_parameter_dtype", "vae_scaling_factor", "vae_shift_factor",
+})
+_COMMON_SECRET_PATTERN = re.compile(
+    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+|\b(?:token|key|secret|password)\s*[:=]\s*[^\s,;]+"
+)
 
 
 def _exact(repo_root: Path, expected: str) -> str:
@@ -71,6 +87,79 @@ def _load_assets(token: str) -> tuple[Any, ContentEmbedAssets]:
     dino_model, dino_processor = load_dino_content_assets(token=token)
     dino_model.to("cuda").eval()
     return pipeline, ContentEmbedAssets(dino_model, dino_processor, hf, lf)
+
+
+def _sanitize_diagnostic(value: str, secrets: tuple[str, ...]) -> str:
+    """Remove explicit credentials and conventional credential-shaped fragments."""
+
+    sanitized = value
+    for secret in secrets:
+        if secret:
+            sanitized = sanitized.replace(secret, "[REDACTED]")
+    return _COMMON_SECRET_PATTERN.sub("[REDACTED]", sanitized)
+
+
+def _failure_diagnostic(error: Exception, content_key: str, token: str) -> dict[str, str]:
+    """Return a finite, JSON-safe description of the exception from this arm."""
+
+    secrets = (content_key, token)
+    message = _sanitize_diagnostic(str(error), secrets)[:FAILURE_MESSAGE_LIMIT]
+    rendered_traceback = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    traceback_tail = _sanitize_diagnostic(rendered_traceback, secrets)[-FAILURE_TRACEBACK_TAIL_LIMIT:]
+    return {
+        "failure_class": type(error).__name__,
+        "failure_stage": FAILURE_STAGE,
+        "sanitized_message": message,
+        "sanitized_traceback_tail": traceback_tail,
+    }
+
+
+def _package_version(package: str) -> str:
+    try:
+        return importlib.metadata.version(package)
+    except (importlib.metadata.PackageNotFoundError, ValueError):
+        return UNAVAILABLE
+
+
+def _vae_parameter_dtype(vae: Any) -> str:
+    try:
+        return str(next(vae.parameters()).dtype)
+    except (AttributeError, StopIteration, TypeError):
+        return UNAVAILABLE
+
+
+def _vae_config_value(vae: Any, name: str) -> float | str:
+    value = getattr(getattr(vae, "config", None), name, None)
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(value) else UNAVAILABLE
+
+
+def _cuda_device_name() -> str:
+    try:
+        return str(torch.cuda.get_device_name(0)) if torch.cuda.is_available() else UNAVAILABLE
+    except (AssertionError, RuntimeError):
+        return UNAVAILABLE
+
+
+def _runtime_environment(pipeline: Any) -> dict[str, Any]:
+    """Expose only the public runtime facts needed to diagnose an R0 failure."""
+
+    vae = getattr(pipeline, "vae", None)
+    environment = {
+        "torch_version": str(torch.__version__),
+        "torch_cuda_runtime_version": str(torch.version.cuda) if torch.version.cuda else UNAVAILABLE,
+        "cuda_device_name": _cuda_device_name(),
+        "diffusers_version": _package_version("diffusers"),
+        "transformers_version": _package_version("transformers"),
+        "model_id": MODEL_ID,
+        "pipeline_class": type(pipeline).__name__,
+        "vae_class": type(vae).__name__ if vae is not None else UNAVAILABLE,
+        "vae_parameter_dtype": _vae_parameter_dtype(vae),
+        "vae_scaling_factor": _vae_config_value(vae, "scaling_factor"),
+        "vae_shift_factor": _vae_config_value(vae, "shift_factor"),
+    }
+    if set(environment) != _RUNTIME_ENVIRONMENT_FIELDS:
+        raise AssertionError("runtime environment fields changed without authorization")
+    return environment
 
 
 def _content_raw(
@@ -158,6 +247,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     if not all(isinstance(value, str) and value.strip() for value in (content_key, token)):
         raise RuntimeError("R0 diagnostic requires content and HF credentials")
     pipeline, assets = _load_assets(token)
+    runtime_environment = _runtime_environment(pipeline)
     calibration = load_calibration_asset(
         repo_root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
         repo_root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
@@ -165,7 +255,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     whitening_lf_assets = FrozenContentWhiteningLFPublicAssets(
         assets.lf_public_assets, load_frozen_content_whitening_asset(repo_root)
     )
-    def generate(arm: str, amplitude: float | None) -> tuple[Any | None, str | None]:
+    def generate(arm: str, amplitude: float | None) -> tuple[Any | None, dict[str, str] | None]:
         # Every physical arm gets an independent generator reset to the same seed.
         generator = torch.Generator(device="cuda").manual_seed(args.seed)
         try:
@@ -177,9 +267,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
             return output.image, None
         except Exception as error:  # Record, do not retry or silently replace a failed physical arm.
-            return None, type(error).__name__
+            return None, _failure_diagnostic(error, content_key, token)
 
-    def record_arm(image: Any | None, failure: str | None) -> dict[str, Any]:
+    def record_arm(image: Any | None, failure: dict[str, str] | None) -> dict[str, Any]:
         if failure is not None:
             return {"status": "operational_failure", "failure_reason": failure}
         if image is None:
@@ -236,6 +326,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         "seed": args.seed,
         "amplitude_sequence": R0_AMPLITUDE_CANDIDATES,
         "public_pilot_spec_id": PUBLIC_PILOT_SPEC_ID,
+        "runtime_environment": runtime_environment,
         "baselines": {
             "content_only": content_only_record,
             "unwatermarked": unwatermarked_record,
