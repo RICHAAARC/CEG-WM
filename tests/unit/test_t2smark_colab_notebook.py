@@ -31,6 +31,8 @@ def test_t2smark_canary_notebook_contract() -> None:
         assert required in text
     assert "force_remount" not in text and "rmtree" not in text and "rm -" not in text
     assert "mock" not in text.lower() and "placeholder" not in text.lower()
+    assert "'watermark_seed':WATERMARK_SEED" not in text
+    assert "'watermark_key_material':'not persisted'" in text
     assert "TPR" in text and "FPR" in text and "threshold" in text
 
 
