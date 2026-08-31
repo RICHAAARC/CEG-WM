@@ -290,13 +290,15 @@ def main() -> None:
       "generation_seed":1701,"watermark_seed":9173,
       "parameters":{"height":512,"width":512,"guidance_scale":4.0,"num_inference_steps":40,
                     "num_inversion_steps":10,"key_length":16,"message_length":256,"tau":.674}}
-    root=Path(args.run_dir); establish_contract(root,config)
-    generation_rebuilt = not valid_generation(root,config) or args.force_rerun_all
-    if generation_rebuilt:
+    root = Path(args.run_dir); state: dict[str, Any] = {}
+    def get_pipe() -> Any:
+        if "pipe" in state: return state["pipe"]
         from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
-        pipe=InversionDiffusion3Pipeline.from_pretrained(config["model_id"],revision=config["model_revision"],
+        pipe = InversionDiffusion3Pipeline.from_pretrained(config["model_id"],revision=config["model_revision"],
             torch_dtype=torch.float16,token=os.environ["HF_TOKEN"]).to("cuda")
-        pipe.set_progress_bar_config(disable=True); device=torch.device(pipe._execution_device)
+        pipe.set_progress_bar_config(disable=True); state["pipe"] = pipe; return pipe
+    def generate() -> None:
+        pipe = get_pipe(); device=torch.device(pipe._execution_device)
         latent=torch.randn((1,16,64,64),generator=torch.Generator("cuda").manual_seed(config["generation_seed"]),device=device,dtype=torch.float16)
         keygen=torch.Generator("cuda").manual_seed(config["watermark_seed"])
         master=torch.randint(0,2,(16,),generator=keygen,device=device); session=torch.randint(0,2,(16,),generator=keygen,device=device)
@@ -306,13 +308,12 @@ def main() -> None:
         watermarked=pipe(latents=embed_t2smark_sd35(latent,master,session,message),**common).images[0].convert("RGB")
         atomic_png(root/"clean.png",clean); atomic_png(root/"watermarked.png",watermarked)
         atomic_json(root/"generation_checkpoint.json",{"identity":_identity(config),"files":{"clean.png":sha256_file(root/"clean.png"),"watermarked.png":sha256_file(root/"watermarked.png")}})
-    from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
-    pipe=InversionDiffusion3Pipeline.from_pretrained(config["model_id"],revision=config["model_revision"],torch_dtype=torch.float16,token=os.environ["HF_TOKEN"]).to("cuda")
-    keygen=torch.Generator("cuda").manual_seed(config["watermark_seed"]); master=torch.randint(0,2,(16,),generator=keygen,device=pipe._execution_device)
     def execute(condition: str, role: str) -> tuple[Image.Image,float]:
+        pipe = get_pipe()
+        keygen=torch.Generator("cuda").manual_seed(config["watermark_seed"]); master=torch.randint(0,2,(16,),generator=keygen,device=pipe._execution_device)
         image=_attack(Image.open(root/("clean.png" if role=="clean_negative" else "watermarked.png")),condition)
         return image,score_t2smark_rgb(np.asarray(image,dtype=np.uint8),pipe,master,10)
-    run_canary(root,config,execute,args.force_rerun_all or generation_rebuilt)
+    run_transaction(root, config, generate, execute, force=args.force_rerun_all)
 
 
 if __name__ == "__main__": main()

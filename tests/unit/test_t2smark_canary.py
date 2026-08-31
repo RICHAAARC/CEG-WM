@@ -118,3 +118,10 @@ def test_malformed_generation_returns_false_without_exception(tmp_path: Path) ->
 def test_clear_stale_lock_returns_owner(tmp_path: Path) -> None:
     atomic_json(tmp_path / ".run.lock", {"pid": 1, "token": "old"})
     assert clear_stale_lock(tmp_path)["token"] == "old" and not (tmp_path / ".run.lock").exists()
+
+
+def test_main_uses_transaction_not_lock_outside_generation() -> None:
+    source = Path("src/cegwm/baselines/t2smark_canary.py").read_text()
+    main_source = source[source.index("def main()"):]
+    assert "run_transaction(root, config, generate, execute, force=args.force_rerun_all)" in main_source
+    assert "run_canary(root,config" not in main_source and "establish_contract(root,config)" not in main_source
