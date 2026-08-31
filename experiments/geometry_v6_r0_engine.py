@@ -26,19 +26,16 @@ from cegwm.method.content_whitening import (
 from cegwm.method.hf import score_hf_image
 from cegwm.method.geometry_v6_roundtrip import (
     GEOMETRY_V6_METHOD_ID,
+    PUBLIC_PILOT_SPEC_ID,
     R0_AMPLITUDE_CANDIDATES,
     blind_geometry_observation,
-    derive_geometry_keys,
 )
 from cegwm.runtime.content_adaptive_sd35 import ContentEmbedAssets, load_dino_content_assets
 from cegwm.runtime.diffusers_sd35 import load_sd35_pipeline
 from cegwm.runtime.geometry_v6_sd35 import run_sd35_geometry_v6_r0_arm
-from cegwm.shared.keys import public_key_digest
 from cegwm.runtime.content_weighted_joint_sd35 import derive_stability_wrong_keys
 
 CONTENT_KEY_ENV = "CEG_WM_ROOT_KEY"
-GEOMETRY_KEY_ENV = "CEG_WM_GEOMETRY_KEY"
-WRONG_GEOMETRY_KEY_ENV = "CEG_WM_GEOMETRY_WRONG_KEY"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 ARMS = ("content_only", "content_geometry", "geometry_only", "unwatermarked")
 
@@ -124,14 +121,23 @@ def _per_unit_content_evidence(candidate: dict[str, dict[str, float]], primary_n
     }
 
 
-def _geometry_raw(image: Any, geometry_key: str, wrong_geometry_key: str, assets: ContentEmbedAssets) -> dict[str, float | None]:
+def _geometry_raw(image: Any, assets: ContentEmbedAssets) -> dict[str, float | int]:
     processor = assets.hf_public_assets.image_processor
     vae = assets.hf_public_assets.vae
-    # These are three separate blind calls before any arm comparison.
+    observation = blind_geometry_observation(image, processor, vae)
+    return {name: getattr(observation, name) for name in observation.__dataclass_fields__}
+
+
+def _pilot_present_vs_absent(present: dict[str, Any], absent: dict[str, Any]) -> dict[str, Any]:
+    if present.get("status") != "success" or absent.get("status") != "success":
+        return {"status": "NOT_EVALUABLE_OPERATIONAL_FAILURE"}
+    left, right = present["public_pilot_observation"], absent["public_pilot_observation"]
     return {
-        "correct": blind_geometry_observation(image, geometry_key, processor, vae).score,
-        "wrong": blind_geometry_observation(image, wrong_geometry_key, processor, vae).score,
-        "no_key": blind_geometry_observation(image, None, processor, vae).score,
+        "status": "RAW_OBSERVABILITY_ONLY",
+        "aggregate_delta": left["aggregate_score"] - right["aggregate_score"],
+        "search_delta": left["search_score"] - right["search_score"],
+        "fit_delta": left["fit_score"] - right["fit_score"],
+        "validate_delta": left["validate_score"] - right["validate_score"],
     }
 
 
@@ -148,13 +154,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     repo_root = args.repo_root.resolve()
     exact = _exact(repo_root, args.expected_exact)
     content_key = os.environ.get(CONTENT_KEY_ENV)
-    geometry_key = os.environ.get(GEOMETRY_KEY_ENV)
-    wrong_geometry_key = os.environ.get(WRONG_GEOMETRY_KEY_ENV)
     token = os.environ.get("HF_TOKEN")
-    if not all(isinstance(value, str) and value.strip() for value in (content_key, geometry_key, wrong_geometry_key, token)):
-        raise RuntimeError("R0 diagnostic requires separate content, geometry, wrong-geometry, and HF credentials")
-    if geometry_key == content_key or wrong_geometry_key in {geometry_key, content_key}:
-        raise ValueError("Geometry-V6 requires distinct content, geometry, and wrong-geometry key roots")
+    if not all(isinstance(value, str) and value.strip() for value in (content_key, token)):
+        raise RuntimeError("R0 diagnostic requires content and HF credentials")
     pipeline, assets = _load_assets(token)
     calibration = load_calibration_asset(
         repo_root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
@@ -169,7 +171,6 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         try:
             output = run_sd35_geometry_v6_r0_arm(
                 pipeline, args.prompt, arm, content_key=content_key if "content" in arm else None,
-                geometry_key=geometry_key if "geometry" in arm else None,
                 amplitude=amplitude if "geometry" in arm else None,
                 content_assets=assets if "content" in arm else None,
                 height=args.height, width=args.width, generator=generator,
@@ -186,7 +187,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         return {
             "status": "success",
             "content_raw": _content_raw(image, content_key, assets, whitening_lf_assets, calibration),
-            "geometry": _geometry_raw(image, geometry_key, wrong_geometry_key, assets),
+            "public_pilot_observation": _geometry_raw(image, assets),
         }
 
     content_only_image, content_only_failure = generate("content_only", None)
@@ -220,9 +221,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             "amplitude": amplitude,
             "content_geometry": combined_record,
             "geometry_only": geometry_only_record,
+            "pilot_present_vs_absent": _pilot_present_vs_absent(combined_record, geometry_only_record),
             "content_compatibility": compatibility,
         })
-    keys = derive_geometry_keys(geometry_key)
     return {
         "method_id": GEOMETRY_V6_METHOD_ID,
         "stage": "R0_clean_identity_only",
@@ -231,18 +232,14 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         "prompt_sha256": hashlib.sha256(args.prompt.encode("utf-8")).hexdigest(),
         "seed": args.seed,
         "amplitude_sequence": R0_AMPLITUDE_CANDIDATES,
-        "geometry_key_public_digest": public_key_digest(geometry_key),
-        "geometry_subkey_digests": {
-            "k_search": hashlib.sha256(keys.search).hexdigest(),
-            "k_fit": hashlib.sha256(keys.fit).hexdigest(),
-            "k_validate": hashlib.sha256(keys.validate).hexdigest(),
-        },
+        "public_pilot_spec_id": PUBLIC_PILOT_SPEC_ID,
         "baselines": {
             "content_only": content_only_record,
             "unwatermarked": unwatermarked_record,
         },
         "amplitudes": amplitudes,
         "carrier_window": "NOT_ADJUDICATED_NO_AUTHORIZED_GEOMETRY_OR_QUALITY_THRESHOLD",
+        "conditional_flow_fpr": "NOT_ADJUDICATED",
     }
 
 

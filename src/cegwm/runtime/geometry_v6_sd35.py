@@ -30,12 +30,10 @@ class _V6Callback:
         self,
         arm: R0Arm,
         content_key: str | bytes | bytearray | memoryview | None,
-        geometry_key: str | bytes | bytearray | memoryview | None,
         amplitude: float | None,
         content_assets: ContentEmbedAssets | None,
     ) -> None:
         self._arm = arm
-        self._geometry_key = geometry_key
         self._amplitude = amplitude
         self._content = (
             ContentAdaptiveInjectionCallback(content_key, content_assets)
@@ -59,7 +57,7 @@ class _V6Callback:
             updated = self._content(pipeline, step_index, timestep, updated)
         if step_index != 19:
             return updated
-        if self._geometry_key is None or self._amplitude is None:
+        if self._amplitude is None:
             return updated
         if self._geometry_written:
             raise RuntimeError("Geometry-V6 attempted final-latent write more than once")
@@ -68,14 +66,14 @@ class _V6Callback:
             raise TypeError("step-19 callback state must contain latents")
         vae = getattr(pipeline, "vae", None)
         updated = dict(updated)
-        updated["latents"] = apply_roundtrip_adjoint_update(latents, self._geometry_key, self._amplitude, vae)
+        updated["latents"] = apply_roundtrip_adjoint_update(latents, self._amplitude, vae)
         self._geometry_written = True
         return updated
 
     def require_complete(self) -> None:
         if self._content is not None and self._content.measurement is None:
             raise RuntimeError("pipeline completed without the frozen step-18 content write")
-        if self._geometry_key is not None and not self._geometry_written:
+        if self._amplitude is not None and not self._geometry_written:
             raise RuntimeError("pipeline completed without the required post-scheduler step-19 geometry write")
 
 
@@ -95,7 +93,6 @@ def run_sd35_geometry_v6_r0_arm(
     arm: R0Arm,
     *,
     content_key: str | bytes | bytearray | memoryview | None,
-    geometry_key: str | bytes | bytearray | memoryview | None,
     amplitude: float | None,
     content_assets: ContentEmbedAssets | None,
     height: int,
@@ -117,10 +114,10 @@ def run_sd35_geometry_v6_r0_arm(
     needs_geometry = arm in {"content_geometry", "geometry_only"}
     if needs_content != (content_key is not None and content_assets is not None):
         raise ValueError("content arms require exactly the frozen content key and assets")
-    if needs_geometry != (geometry_key is not None and amplitude is not None):
-        raise ValueError("geometry arms require exactly a geometry key and global amplitude")
+    if needs_geometry != (amplitude is not None):
+        raise ValueError("geometry arms require exactly one global amplitude")
     _validate_pipeline(pipeline)
-    callback = _V6Callback(arm, content_key, geometry_key, amplitude, content_assets)
+    callback = _V6Callback(arm, content_key, amplitude, content_assets)
     result = pipeline(
         prompt=prompt,
         num_inference_steps=20,
