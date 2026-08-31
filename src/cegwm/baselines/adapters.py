@@ -29,7 +29,7 @@ def adapter_plan(baseline_id: str) -> AdapterPlan:
     if baseline_id == "t2smark":
         return AdapterPlan(
             baseline_id, "official_sd35_native", baseline.official_entrypoint,
-            "implementation_ready", None,
+            "adapter_interface_available_gpu_unverified", "local GPU is unavailable; a Colab canary is required",
         )
     return AdapterPlan(
         baseline_id, "method_faithful_sd35_adaptation", baseline.official_entrypoint,

@@ -39,6 +39,19 @@ from cegwm.baselines.attacks import (
     resize_50_bicubic_restore,
     rotation_10_bicubic_reflect_center_crop,
 )
+from cegwm.baselines.t2smark import (
+    DEFAULT_KEY_LENGTH,
+    DEFAULT_MESSAGE_LENGTH,
+    DEFAULT_NUM_INVERSION_STEPS,
+    DEFAULT_TAU,
+    KEY_CHANNELS,
+    MESSAGE_CHANNELS,
+    SD35_LATENT_SHAPE,
+    T2SMarkCodec,
+    embed_t2smark_sd35,
+    score_t2smark_rgb,
+    t2smark_sd35_codecs,
+)
 
 __all__ = [
     "PRIMARY_BASELINES",
@@ -53,6 +66,14 @@ __all__ = [
     "GAUSSIAN_BLUR_SIGMA_1PX_ATTACK_ID",
     "FrozenAttackResult",
     "RotationAttackResult",
+    "T2SMarkCodec",
+    "DEFAULT_KEY_LENGTH",
+    "DEFAULT_MESSAGE_LENGTH",
+    "DEFAULT_TAU",
+    "DEFAULT_NUM_INVERSION_STEPS",
+    "SD35_LATENT_SHAPE",
+    "KEY_CHANNELS",
+    "MESSAGE_CHANNELS",
     "CLEAN_CONFIRMATION_NEGATIVES",
     "EVALUATION_PHYSICAL_UNITS",
     "FORMAL_ATTACK_CONDITIONS",
@@ -72,5 +93,8 @@ __all__ = [
     "resize_50_bicubic_restore",
     "center_crop_80_restore",
     "gaussian_blur_sigma_1px",
+    "t2smark_sd35_codecs",
+    "embed_t2smark_sd35",
+    "score_t2smark_rgb",
     "validate_observation",
 ]
