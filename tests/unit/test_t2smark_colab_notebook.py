@@ -23,6 +23,9 @@ def test_t2smark_canary_notebook_contract() -> None:
         "clean_no_attack", "jpeg_q50", "resize_50_bicubic_restore", "center_crop_80_restore",
         "gaussian_blur_sigma_1px", "rotation_10_bicubic_reflect_center_crop_v1", "planned_observations, rows, artifacts = 12",
         "exist_ok=False", "engineering_canary_complete", "local_adapter_exact",
+        "subsampling=2, optimize=False, progressive=False", "max(1, round(w * 0.50))",
+        "math.sqrt(0.80)", "mode='reflect'", "constant_values=0", "p_x=max(0,math.ceil",
+        "p_y=max(0,math.ceil", "return rgb.crop(box), np.asarray(valid.crop(box),dtype=np.uint8)",
     ]:
         assert required in text
     assert "force_remount" not in text and "rmtree" not in text and "rm -" not in text
