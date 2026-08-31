@@ -58,6 +58,10 @@ _COMMON_SECRET_PATTERN = re.compile(
     \b["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password)["']?
     [ \t]*[:=][ \t]*
     (?:["'][^"'\r\n]{0,512}["']|[^\s,;}\]\r\n]{1,512})
+    |
+    \b["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password)["']?
+    [ \t\r\n]{0,64}:[ \t\r\n]{0,64}
+    ["'][^"'\r\n]{0,512}["']
     '''
 )
 

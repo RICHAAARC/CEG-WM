@@ -94,6 +94,30 @@ def test_failure_diagnostic_is_bounded_and_redacts_prompt_and_common_secret_form
     assert '[REDACTED]' in serialized
 
 
+def test_failure_diagnostic_redacts_bounded_pretty_json_credentials_without_consuming_context():
+    pretty_access_token = 'PRETTYJSONACCESSSECRET'
+    pretty_token = 'PRETTYJSONTOKENSECRET'
+    exception_message = (
+        '{\n  "access_token"\n  :\n  "' + pretty_access_token + '"\n}\n'
+        'context=retained\n'
+        '{\n  "token"\n  :\n  "' + pretty_token + '"\n}\n'
+        'following_context=retained'
+    )
+    try:
+        raise RuntimeError(exception_message)
+    except RuntimeError as error:
+        diagnostic = engine._failure_diagnostic(error, 'content-key', 'hf-token', 'private prompt')
+    serialized = json.dumps(diagnostic)
+    for secret in (pretty_access_token, pretty_token):
+        assert secret not in diagnostic['sanitized_message']
+        assert secret not in diagnostic['sanitized_traceback_tail']
+        assert secret not in serialized
+    for context in ('context=retained', 'following_context=retained'):
+        assert context in diagnostic['sanitized_message']
+        assert context in diagnostic['sanitized_traceback_tail']
+    assert '[REDACTED]' in serialized
+
+
 def test_runtime_environment_is_public_allowlisted_and_optional_versions_can_be_unavailable(monkeypatch):
     monkeypatch.setattr(engine, '_package_version', lambda package: engine.UNAVAILABLE)
     monkeypatch.setattr(engine.torch.cuda, 'is_available', lambda: False)
