@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from cegwm.method.geometry_v4_g1r import _detect_g1r_engineering, measure_g1r_final_rgb, write_g1r_rgb
+from cegwm.method.geometry_v4_g1r import _detect_g1r_engineering, _probe_g1r_at_truth, measure_g1r_final_rgb, write_g1r_rgb
 from cegwm.method.geometry_v4_generative import build_reused_weighted_joint_content_adapter
 from cegwm.method.geometry_v4_proxy import _sample_h, _similarity_h
 from cegwm.protocol.geometry_v4_g1r import (
@@ -164,6 +164,11 @@ def _evaluate_frozen_arms(arms: BlindArms, truth_attacked_to_canonical: np.ndarr
     return evaluated
 
 
+def _truth_probe(attacked_marked: np.ndarray, correct_key: object, truth_attacked_to_canonical: np.ndarray) -> Mapping[str, object]:
+    """Post-freeze runner diagnostic; never feeds an arm, rank, or summary."""
+    return _probe_g1r_at_truth(attacked_marked, correct_key, truth_attacked_to_canonical)
+
+
 def run_cpu_canary() -> tuple[Mapping[str, object], ...]:
     records: list[Mapping[str, object]] = []
     for carrier_id in CPU_CARRIER_IDS:
@@ -278,8 +283,13 @@ def run_real_development(
                 attacked_marked = _apply_attack(marked_rgb, attack)
                 attacked_negative = _apply_attack(clean_rgb, attack)
                 arms = _blind_arms_for_keys(attacked_marked, attacked_negative, normalized, normalized_wrong)
-                evaluation = _evaluate_frozen_arms(arms, _truth_for_attack(attack))
-                records.append({**unit_base, "arms": evaluation})
+                truth = _truth_for_attack(attack)
+                evaluation = _evaluate_frozen_arms(arms, truth)
+                try:
+                    truth_probe: Mapping[str, object] = _truth_probe(attacked_marked, normalized, truth)
+                except Exception as error:
+                    truth_probe = {"failure": _failure(error, "truth_probe")}
+                records.append({**unit_base, "arms": evaluation, "truth_probe": truth_probe})
             except Exception as error:
                 records.append({**unit_base, "failure": _failure(error, "attacked_unit"), "arms": None})
     if len(sources) != 4 or len(records) != 20:

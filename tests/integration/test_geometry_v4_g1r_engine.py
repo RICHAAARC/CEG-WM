@@ -48,6 +48,21 @@ def test_keyed_joint_search_is_deterministic_bounded_and_contains_five_attack_tr
 
 
 @pytest.mark.integration
+def test_host_dominant_search_separates_correct_from_negative_and_wrong() -> None:
+    ordinary = engine._carrier("colored_texture", 96)
+    marked, _ = method.write_g1r_rgb(ordinary, engine.CPU_KEY)
+    correct_key = derive_g1r_keys(engine.CPU_KEY)["search"]
+    wrong_key = derive_g1r_keys(engine.CPU_WRONG_KEY)["search"]
+    correct = method._search_candidates(marked, correct_key)[0]
+    negative = method._search_candidates(ordinary, correct_key)[0]
+    wrong = method._search_candidates(marked, wrong_key)[0]
+    assert float(correct["component_consensus"]) > float(negative["component_consensus"])
+    assert float(correct["component_consensus"]) > float(wrong["component_consensus"])
+    assert float(correct["ncc"]) > float(negative["ncc"])
+    assert float(correct["ncc"]) > float(wrong["ncc"])
+
+
+@pytest.mark.integration
 def test_real_rosters_are_complete_disjoint_and_have_no_subset_interface() -> None:
     development = engine.build_real_roster(ROOT, "development")
     confirmation = engine.build_real_roster(ROOT, "confirmation")
@@ -82,6 +97,19 @@ def test_truth_metric_is_attacked_to_canonical_and_normalized_diagonal() -> None
     reliable = {"status": "RELIABLE", "H_hat": tuple(float(value) for value in truth.reshape(-1))}
     metrics = engine._truth_metrics(reliable, truth)
     assert metrics == pytest.approx({"mapped_corner_error": 0.0, "center_reprojection_error": 0.0, "rotation_abs_error_degrees": 0.0, "log_scale_abs_error": 0.0})
+
+
+@pytest.mark.integration
+def test_truth_probe_is_sanitized_record_only_evidence_at_declared_h() -> None:
+    ordinary = engine._carrier("gradient_shapes", 96)
+    marked, _ = method.write_g1r_rgb(ordinary, engine.CPU_KEY)
+    probe = engine._truth_probe(marked, engine.CPU_KEY, engine._truth_for_attack("identity"))
+    assert set(probe) == {"search_at_truth", "search_best_translation_at_truth_rs", "fit_at_truth", "holdout_at_truth", "holdout_after_fit"}
+    assert probe["fit_at_truth"]["support"] >= 6
+    assert len(probe["fit_at_truth"]["prethreshold_tiles"]) == 8
+    serialized = json.dumps(probe, allow_nan=False, sort_keys=True)
+    assert "key" not in serialized.lower() and "phase" not in serialized.lower()
+    assert engine.CPU_KEY.hex() not in serialized and engine.CPU_KEY.decode("ascii") not in serialized
 
 
 @pytest.mark.integration
@@ -156,13 +184,33 @@ def test_real_development_generates_each_source_once_retains_20_units_and_orders
     monkeypatch.setattr(engine, "measure_g1r_final_rgb", lambda *args: G1RFinalRGBObservability(50.0, .99, 0.0, 0.0, 0.0, {name: 1.0 for name in ("search", "fit", "validate")}, {name: 0.0 for name in ("search", "fit", "validate")}))
     monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm()))
     monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
+    monkeypatch.setattr(engine, "_truth_probe", lambda *args: events.append("probe") or {"record_only": True})
     sources, records, identity = engine.run_real_development(b"0123456789abcdef", b"wrong-key-0123456789", repo_root=ROOT, hf_token="test-token")
     assert generated == [6201, 6202, 6203, 6204]
     assert len(sources) == 4 and len(records) == 20 and all(record["failure"] is None for record in records)
     assert tuple(record["attack"] for record in records) == ATTACKS * 4
     assert all(set(record["arms"]) == {"correct", "wrong", "negative"} for record in records)
-    assert events == [item for _ in range(20) for item in ("blind", "truth")]
+    assert events == [item for _ in range(20) for item in ("blind", "truth", "probe")]
+    assert all(record["truth_probe"] == {"record_only": True} for record in records)
     assert identity == {"adapter_id": "fake-content-detector"}
+
+
+@pytest.mark.integration
+def test_truth_probe_runs_post_freeze_and_cannot_change_arm_or_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    quiet = engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm())
+    monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or quiet)
+    monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
+    monkeypatch.setattr(engine, "_truth_probe", lambda *args: (_ for _ in ()).throw(RuntimeError("diagnostic only")))
+    arms = engine._blind_arms_for_keys(np.zeros((32, 32, 3)), np.zeros((32, 32, 3)), b"correct", b"wrong")
+    truth = engine._truth_for_attack("identity")
+    evaluation = engine._evaluate_frozen_arms(arms, truth)
+    try:
+        engine._truth_probe(np.zeros((32, 32, 3)), b"correct", truth)
+    except RuntimeError:
+        pass
+    assert events == ["blind", "truth"]
+    assert all(evaluation[name]["status"] == "UNRELIABLE" and not evaluation[name]["unsafe"] for name in ("correct", "wrong", "negative"))
 
 
 @pytest.mark.integration

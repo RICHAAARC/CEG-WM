@@ -37,7 +37,11 @@ from cegwm.protocol.geometry_v4_g1r import (
     HOLDOUT_PATCH_WINDOW_DIVISORS,
     LUMA_PEAK_CAP,
     LUMA_RMS_CAP,
+    LOCAL_FREQUENCY_PAIRS,
+    SEARCH_ATOM_OFFSETS,
+    SEARCH_DIRECTIONS,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
+    SEARCH_MACRO_CYCLES,
     SEARCH_TOP_K,
     TRANSLATION_NMS_RADIUS_PIXELS,
     TRANSLATION_PEAKS_PER_RS,
@@ -109,11 +113,13 @@ def _fixed_local_search_basis(height: int, width: int, tile_id: int) -> np.ndarr
     yy, xx = np.mgrid[y0:y1, x0:x1]
     xn, yn = xx / width, yy / height
     columns = [np.ones((y1 - y0) * (x1 - x0), dtype=np.float64)]
-    for cycles in (8, 16, 24):
-        for angle_degrees in (0, 45, 90, 135):
-            angle = math.radians(angle_degrees)
-            argument = 2.0 * math.pi * cycles * (xn * math.cos(angle) + yn * math.sin(angle))
-            columns.extend((np.cos(argument).reshape(-1), np.sin(argument).reshape(-1)))
+    for cycles in SEARCH_MACRO_CYCLES:
+        for angle_degrees in SEARCH_DIRECTIONS:
+            for radial_offset, angular_offset in SEARCH_ATOM_OFFSETS:
+                atom_cycles = cycles + radial_offset
+                angle = math.radians(angle_degrees + angular_offset)
+                argument = 2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle))
+                columns.extend((np.cos(argument).reshape(-1), np.sin(argument).reshape(-1)))
     basis = np.linalg.qr(np.stack(columns, axis=1), mode="reduced")[0]
     basis.setflags(write=False)
     return basis
@@ -128,14 +134,16 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
     yy, xx = np.mgrid[:height, :width]
     xn, yn = xx / width, yy / height
     search = np.zeros((height, width), dtype=np.float64)
-    for cycles in (8, 16, 24):
-        for angle_degrees in (0, 45, 90, 135):
-            label = f"search:{cycles}:{angle_degrees}".encode("ascii")
-            phase = _seed(domain_keys["search"], label) / 2**64 * 2.0 * math.pi
-            sign = 1.0 if _seed(domain_keys["search"], b"sign:" + label) & 1 else -1.0
-            angle = math.radians(angle_degrees)
-            argument = 2.0 * math.pi * cycles * (xn * math.cos(angle) + yn * math.sin(angle))
-            search += sign * np.cos(argument + phase)
+    for cycles in SEARCH_MACRO_CYCLES:
+        for angle_degrees in SEARCH_DIRECTIONS:
+            for atom_id, (radial_offset, angular_offset) in enumerate(SEARCH_ATOM_OFFSETS):
+                label = f"search:{cycles:g}:{angle_degrees:g}:atom:{atom_id}".encode("ascii")
+                phase = _seed(domain_keys["search"], label) / 2**64 * 2.0 * math.pi
+                sign = 1.0 if _seed(domain_keys["search"], b"sign:" + label) & 1 else -1.0
+                atom_cycles = cycles + radial_offset
+                angle = math.radians(angle_degrees + angular_offset)
+                argument = 2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle))
+                search += sign * np.cos(argument + phase)
     search = _unit(search)
 
     def partition(name: str, tile_ids: tuple[int, ...]) -> np.ndarray:
@@ -149,7 +157,7 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
             local_y = (local_y + 0.5) / max(1, y1 - y0)
             label = f"{name}:tile:{tile_id}".encode("ascii")
             tile = np.zeros_like(local_x)
-            for component, (frequency_x, frequency_y) in enumerate(((2, 3), (3, -5), (5, 2), (6, -3), (4, 5), (7, 1))):
+            for component, (frequency_x, frequency_y) in enumerate(LOCAL_FREQUENCY_PAIRS):
                 component_label = label + f":{component}".encode("ascii")
                 phase = _seed(domain_keys[name], component_label) / 2**64 * 2.0 * math.pi
                 sign = 1.0 if _seed(domain_keys[name], b"sign:" + component_label) & 1 else -1.0
@@ -164,6 +172,26 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
     validate = partition("validate", VALIDATE_TILE_IDS)
     combined = math.sqrt(ENERGY_SHARES[0]) * search + math.sqrt(ENERGY_SHARES[1]) * fit + math.sqrt(ENERGY_SHARES[2]) * validate
     return G1RAnchorFields(combined, search, fit, validate)
+
+
+def _search_macro_fields(shape: tuple[int, int], search_key: bytes) -> tuple[np.ndarray, ...]:
+    """Return the fixed 3-scale x 4-direction constellation components."""
+    height, width = shape
+    yy, xx = np.mgrid[:height, :width]
+    xn, yn = xx / width, yy / height
+    fields: list[np.ndarray] = []
+    for cycles in SEARCH_MACRO_CYCLES:
+        for angle_degrees in SEARCH_DIRECTIONS:
+            macro = np.zeros((height, width), dtype=np.float64)
+            for atom_id, (radial_offset, angular_offset) in enumerate(SEARCH_ATOM_OFFSETS):
+                label = f"search:{cycles:g}:{angle_degrees:g}:atom:{atom_id}".encode("ascii")
+                phase = _seed(search_key, label) / 2**64 * 2.0 * math.pi
+                sign = 1.0 if _seed(search_key, b"sign:" + label) & 1 else -1.0
+                atom_cycles = cycles + radial_offset
+                angle = math.radians(angle_degrees + angular_offset)
+                macro += sign * np.cos(2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle)) + phase)
+            fields.append(_unit(macro))
+    return tuple(fields)
 
 
 def g1r_anchor_fields(shape: tuple[int, int], detection_key: str | bytes | bytearray | memoryview) -> G1RAnchorFields:
@@ -276,41 +304,33 @@ def _normalized_score(left: np.ndarray, right: np.ndarray, valid: np.ndarray) ->
     return -1.0 if denominator <= 1e-12 else float(np.sum(a * b) / denominator)
 
 
-def _search_band(plane: np.ndarray) -> np.ndarray:
-    """Fixed narrow neighborhoods around the twelve oriented search carriers."""
-    value = np.asarray(plane, dtype=np.float64) - float(np.mean(plane))
-    fy = np.fft.fftfreq(value.shape[0]) * value.shape[0]
-    fx = np.fft.fftfreq(value.shape[1]) * value.shape[1]
-    mask = np.zeros(value.shape, dtype=bool)
-    for cycles in (8.0, 16.0, 24.0):
-        for angle_degrees in (0.0, 45.0, 90.0, 135.0):
-            angle = math.radians(angle_degrees)
-            carrier_x, carrier_y = cycles * math.cos(angle), cycles * math.sin(angle)
-            for sign in (-1.0, 1.0):
-                distance = np.sqrt((fy[:, None] - sign * carrier_y) ** 2 + (fx[None, :] - sign * carrier_x) ** 2)
-                mask |= distance <= 1.5
-    return np.fft.ifft2(np.fft.fft2(value) * mask).real
-
-
-def _translation_surface(rs_rgb: np.ndarray, valid: np.ndarray, reference: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Candidate-specific normalized cross-power surface under the fixed mask/window."""
-    plane = _search_band(_luma(rs_rgb))
-    reference = _search_band(reference)
+def _translation_surface(rs_rgb: np.ndarray, valid: np.ndarray, references: tuple[np.ndarray, ...]) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, ...]]:
+    """Joint macro normalized cross-power on reference-derived near-exact bins."""
+    plane = _luma(rs_rgb)
     window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
     weight = valid.astype(np.float64) * window
     if float(weight.sum()) <= 1e-12:
-        return np.zeros_like(plane), plane, reference
+        return np.zeros_like(plane), plane, np.zeros_like(plane), ()
     observed = (plane - float(np.sum(plane * weight) / np.sum(weight))) * weight
-    keyed = (reference - float(np.sum(reference * weight) / np.sum(weight))) * weight
-    observed_fft, keyed_fft = np.fft.fft2(observed), np.fft.fft2(keyed)
-    cross = observed_fft * np.conj(keyed_fft)
-    magnitude, keyed_magnitude = np.abs(cross), np.abs(keyed_fft)
-    # A fixed keyed-reference support removes window-leakage bins where
-    # normalized cross-power would otherwise amplify unrelated image content.
-    valid_frequency = (keyed_magnitude >= SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION * float(np.max(keyed_magnitude))) & (magnitude > np.finfo(np.float64).eps * max(1.0, float(np.max(magnitude))))
-    normalized = np.zeros_like(cross)
-    normalized[valid_frequency] = cross[valid_frequency] / magnitude[valid_frequency]
-    return np.fft.ifft2(normalized).real, plane, reference
+    observed_fft = np.fft.fft2(observed)
+    surfaces: list[np.ndarray] = []
+    observed_bands: list[np.ndarray] = []
+    keyed_bands: list[np.ndarray] = []
+    for reference in references:
+        keyed = (reference - float(np.sum(reference * weight) / np.sum(weight))) * weight
+        keyed_fft = np.fft.fft2(keyed)
+        cross = observed_fft * np.conj(keyed_fft)
+        magnitude, keyed_magnitude = np.abs(cross), np.abs(keyed_fft)
+        valid_frequency = (keyed_magnitude >= SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION * float(np.max(keyed_magnitude))) & (magnitude > np.finfo(np.float64).eps * max(1.0, float(np.max(magnitude))))
+        normalized = np.zeros_like(cross)
+        normalized[valid_frequency] = cross[valid_frequency] / magnitude[valid_frequency]
+        component = np.fft.ifft2(normalized).real
+        component /= float(np.sqrt(np.mean(component * component))) + 1e-12
+        surfaces.append(component)
+        observed_bands.append(np.fft.ifft2(observed_fft * valid_frequency).real)
+        keyed_bands.append(np.fft.ifft2(keyed_fft * valid_frequency).real)
+    joint = np.mean(np.stack(surfaces), axis=0)
+    return joint, np.sum(observed_bands, axis=0), np.sum(keyed_bands, axis=0), tuple(surfaces)
 
 
 def _candidate_psr(surface: np.ndarray, dx: int, dy: int) -> float:
@@ -353,10 +373,10 @@ def _translation_peaks(surface: np.ndarray) -> tuple[tuple[int, int], ...]:
     return tuple(selected)
 
 
-def _joint_candidates_for_rs(image: np.ndarray, reference: np.ndarray, angle: float, scale: float) -> tuple[dict[str, object], ...]:
+def _joint_candidates_for_rs(image: np.ndarray, references: tuple[np.ndarray, ...], angle: float, scale: float) -> tuple[dict[str, object], ...]:
     rs = _similarity_h(angle, scale)
     rectified, valid = _valid_warp(image, rs)
-    surface, observed_band, reference_band = _translation_surface(rectified, valid, reference)
+    surface, observed_band, reference_band, component_surfaces = _translation_surface(rectified, valid, references)
     candidates = []
     for dx, dy in _translation_peaks(surface):
         tx, ty = dx / (image.shape[1] - 1), dy / (image.shape[0] - 1)
@@ -365,22 +385,24 @@ def _joint_candidates_for_rs(image: np.ndarray, reference: np.ndarray, angle: fl
         psr = _candidate_psr(surface, dx, dy)
         phase_peak = float(surface[dy % surface.shape[0], dx % surface.shape[1]])
         phase_consistency = phase_peak / (float(np.sqrt(np.mean(surface * surface))) + 1e-12)
+        component_values = sorted(float(item[dy % item.shape[0], dx % item.shape[1]]) for item in component_surfaces)
+        robust_component_consensus = float(np.mean(component_values[1:-1])) if len(component_values) > 2 else float(np.mean(component_values))
         translation = np.asarray(((1.0, 0.0, tx), (0.0, 1.0, ty), (0.0, 0.0, 1.0)), dtype=np.float64)
         canonical_to_attacked = rs @ translation
-        rank = (phase_consistency, ncc, psr, -abs(angle), -abs(math.log(scale)), -abs(tx) - abs(ty), -angle, -scale, -tx, -ty)
-        candidates.append({"angle": float(angle), "scale": float(scale), "canonical_to_attacked": canonical_to_attacked, "rank": rank, "ncc": ncc, "translation_psr": psr, "phase_consistency": phase_consistency})
+        rank = (robust_component_consensus, phase_consistency, ncc, psr, -abs(angle), -abs(math.log(scale)), -abs(tx) - abs(ty), -angle, -scale, -tx, -ty)
+        candidates.append({"angle": float(angle), "scale": float(scale), "canonical_to_attacked": canonical_to_attacked, "rank": rank, "ncc": ncc, "translation_psr": psr, "phase_consistency": phase_consistency, "component_consensus": robust_component_consensus})
     return tuple(candidates)
 
 
 def _search_candidates(image: np.ndarray, search_key: bytes) -> tuple[dict[str, object], ...]:
     ordinary = Image.fromarray((image * 255.0).round().clip(0, 255).astype(np.uint8), mode="RGB")
     resized = np.asarray(ordinary.resize((_SEARCH_SIZE, _SEARCH_SIZE), Image.Resampling.BICUBIC), dtype=np.float64) / 255.0
-    neutral = {"search": search_key, "fit": hashlib.sha256(b"fit-neutral").digest(), "validate": hashlib.sha256(b"validate-neutral").digest()}
-    reference = _domain_fields((_SEARCH_SIZE, _SEARCH_SIZE), neutral).search
+    references = _search_macro_fields((_SEARCH_SIZE, _SEARCH_SIZE), search_key)
+    coarse_references = references[:8]
     coarse = []
     for angle in _COARSE_ANGLES:
         for scale in _COARSE_SCALES:
-            candidates = _joint_candidates_for_rs(resized, reference, angle, scale)
+            candidates = _joint_candidates_for_rs(resized, coarse_references, angle, scale)
             if candidates:
                 coarse.append(max(candidates, key=lambda item: item["rank"]))
     coarse = sorted(coarse, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K]
@@ -391,7 +413,7 @@ def _search_candidates(image: np.ndarray, search_key: bytes) -> tuple[dict[str, 
                 angle, scale = float(seed["angle"]) + angle_offset, float(seed["scale"]) + scale_offset
                 if -10.0 <= angle <= 10.0 and 0.84 <= scale <= 1.16:
                     fine_pairs.add((round(angle, 12), round(scale, 12)))
-    joint = [candidate for angle, scale in sorted(fine_pairs) for candidate in _joint_candidates_for_rs(resized, reference, angle, scale)]
+    joint = [candidate for angle, scale in sorted(fine_pairs) for candidate in _joint_candidates_for_rs(resized, references, angle, scale)]
     return tuple(sorted(joint, key=lambda item: item["rank"], reverse=True)[:SEARCH_TOP_K])
 
 
@@ -608,6 +630,7 @@ def _detect_g1r_engineering_from_image(image: np.ndarray, detection_key: object)
             "translation_y": finite(matrix[1, 2]),
             "translation_psr": finite(item["translation_psr"]),
             "ncc": finite(item["ncc"]),
+            "component_consensus": finite(item.get("component_consensus", 0.0)),
         })
     fit_summary = {
         "valid": bool(fit.get("valid", False)),
@@ -649,3 +672,93 @@ def _detect_g1r_engineering_from_image(image: np.ndarray, detection_key: object)
         holdout_summary[name] = bool(value) if isinstance(value, (bool, np.bool_)) else int(value) if name in {"support", "secondary_window_support", "macro_regions"} else finite(value)
     diagnostics = {"search_top_k": tuple(search_summary), "selected_fit": fit_summary, "holdout": holdout_summary}
     return public, diagnostics
+
+
+def _probe_g1r_at_truth(attacked_rgb: np.ndarray, detection_key: object, truth_attacked_to_canonical: np.ndarray) -> Mapping[str, object]:
+    """Runner-only post-freeze diagnostic; its output cannot enter detection."""
+    image = _require_rgb(attacked_rgb)
+    truth = np.asarray(truth_attacked_to_canonical, dtype=np.float64)
+    if truth.shape != (3, 3) or not np.isfinite(truth).all() or abs(float(np.linalg.det(truth))) <= 1e-12:
+        raise ValueError("V4-G1R truth probe requires a finite invertible 3x3 H")
+    canonical_to_attacked = np.linalg.inv(truth)
+    canonical_to_attacked /= canonical_to_attacked[2, 2]
+    angle, scale = _rotation_scale(canonical_to_attacked)
+    rs = _similarity_h(angle, scale)
+    translation = np.linalg.inv(rs) @ canonical_to_attacked
+    expected_dx = int(round(float(translation[0, 2]) * (_SEARCH_SIZE - 1)))
+    expected_dy = int(round(float(translation[1, 2]) * (_SEARCH_SIZE - 1)))
+
+    ordinary = Image.fromarray((image * 255.0).round().clip(0, 255).astype(np.uint8), mode="RGB")
+    resized = np.asarray(ordinary.resize((_SEARCH_SIZE, _SEARCH_SIZE), Image.Resampling.BICUBIC), dtype=np.float64) / 255.0
+    rectified, valid = _valid_warp(resized, rs)
+    keys = derive_g1r_keys(detection_key)
+    references = _search_macro_fields((_SEARCH_SIZE, _SEARCH_SIZE), keys["search"])
+    surface, observed_band, reference_band, component_surfaces = _translation_surface(rectified, valid, references)
+    peaks = _translation_peaks(surface)
+    best_dx, best_dy = peaks[0] if peaks else (0, 0)
+
+    def peak_metrics(dx: int, dy: int) -> Mapping[str, float]:
+        aligned, aligned_valid = _align_translation(observed_band, valid, dx, dy)
+        values = sorted(float(item[dy % item.shape[0], dx % item.shape[1]]) for item in component_surfaces)
+        consensus = float(np.mean(values[1:-1])) if len(values) > 2 else float(np.mean(values)) if values else 0.0
+        phase_peak = float(surface[dy % surface.shape[0], dx % surface.shape[1]])
+        return {
+            "translation_x": float(dx / (_SEARCH_SIZE - 1)),
+            "translation_y": float(dy / (_SEARCH_SIZE - 1)),
+            "translation_psr": _candidate_psr(surface, dx, dy),
+            "ncc": _normalized_score(aligned, reference_band, aligned_valid),
+            "joint_peak_over_rms": phase_peak / (float(np.sqrt(np.mean(surface * surface))) + 1e-12),
+            "component_consensus": consensus,
+        }
+
+    expected_metrics = peak_metrics(expected_dx, expected_dy)
+    best_metrics = peak_metrics(best_dx, best_dy)
+    candidate = {
+        "angle": angle,
+        "scale": scale,
+        "canonical_to_attacked": canonical_to_attacked,
+        "rank": (0.0,),
+        "ncc": expected_metrics["ncc"],
+        "translation_psr": expected_metrics["translation_psr"],
+        "phase_consistency": expected_metrics["joint_peak_over_rms"],
+        "component_consensus": expected_metrics["component_consensus"],
+    }
+    fit = _fit_candidate(image, candidate, keys["fit"])
+    prethreshold = tuple({
+        "tile_id": int(item["tile_id"]),
+        "best_correlation": item.get("best_correlation"),
+        "margin": item.get("margin"),
+        "accepted": bool(item.get("accepted", False)),
+        "rejection": str(item.get("rejection", "invalid")),
+    } for item in fit.get("prethreshold", ()))
+    holdout_at_truth = _holdout_metrics(image, canonical_to_attacked, keys["validate"])
+    holdout_after_fit = {} if fit.get("canonical_to_attacked") is None else _holdout_metrics(image, np.asarray(fit["canonical_to_attacked"], dtype=np.float64), keys["validate"])
+
+    def safe_metrics(value: Mapping[str, object]) -> Mapping[str, object]:
+        answer: dict[str, object] = {}
+        for name, item in value.items():
+            if isinstance(item, (bool, np.bool_)):
+                answer[name] = bool(item)
+            elif isinstance(item, (int, np.integer)):
+                answer[name] = int(item)
+            elif isinstance(item, (float, np.floating)):
+                number = float(item)
+                answer[name] = number if math.isfinite(number) else None
+        return answer
+
+    return {
+        "search_at_truth": {"angle_degrees": float(angle), "scale": float(scale), **expected_metrics},
+        "search_best_translation_at_truth_rs": best_metrics,
+        "fit_at_truth": {
+            "valid": bool(fit.get("valid", False)),
+            "support": int(fit.get("support", 0)),
+            "coverage": float(fit.get("coverage", 0.0)),
+            "macro_regions": int(fit.get("macro_regions", 0)),
+            "inlier_ratio": float(fit.get("inlier_ratio", 0.0)),
+            "reprojection": None if not math.isfinite(float(fit.get("reprojection", math.inf))) else float(fit["reprojection"]),
+            "condition": None if not math.isfinite(float(fit.get("condition", math.inf))) else float(fit["condition"]),
+            "prethreshold_tiles": prethreshold,
+        },
+        "holdout_at_truth": safe_metrics(holdout_at_truth),
+        "holdout_after_fit": safe_metrics(holdout_after_fit),
+    }

@@ -41,7 +41,7 @@ output, immediately before ordinary RGB postprocess. The clean arm has no hook;
 the marked arm registers it only for its final decode, requires exactly one
 invocation, and removes it in a `finally` block. There is no latent-adjoint
 writer, final-RGB feedback, search, retry, fallback, or budget increase. The
-fixed update targets .375 of the luma RMS cap (half the prior fixed target) and
+fixed update targets .25 of the luma RMS cap and
 may not exceed luma RMS 2/255 or peak 8/255; it is never content-adaptive. CPU tests use only a fake
 decoder module; real final-RGB observability requires separate GPU authorization.
 
@@ -52,7 +52,12 @@ Truth, original or clean RGB, writer residuals, latents, and attack names are
 forbidden. Every fixed coarse and fine rotation/scale hypothesis is ranked by
 the keyed search reference's normalized complex cross-power phase-correlation
 under the same valid mask and Hann window. Magnitude-only FFT evidence is not a
-candidate control quantity. For each hypothesis, three deterministic translated
+candidate control quantity. The search field retains its 3-scale by 4-direction
+macro identity, with four fixed keyed phase atoms in each macro and
+unit-normalized total search energy. Coarse search uses the low/mid eight macros
+and a fixed trimmed component consensus; fine search jointly uses all twelve
+macros. Each macro's normalized cross-power is restricted to its keyed
+reference-derived near-exact support. For each hypothesis, three deterministic translated
 peaks are selected inside the frozen physical bounds with two-pixel NMS; each
 peak has its own PSR, phase consistency, and normalized narrow-band correlation.
 The joint candidates use the frozen lexicographic rank and retain exactly the
@@ -67,6 +72,12 @@ at least three macro regions, condition number at most 1e4, reprojection RMS at
 most .02, inlier ratio at least .5, and strictly convex H-consistent corners.
 Public H always maps attacked to canonical. Any translation or holdout PSR used
 by a `RELIABLE` decision must be at least 8.
+
+Fit and validation tile identities, coordinates, and checkerboard split remain
+unchanged. Each tile uses the same fixed 24-atom keyed spread-spectrum code;
+its moderate/high local frequency pairs are frozen in the contract for
+interpolation survival and remain orthogonalized against the global search
+basis. Total energy shares remain .40/.36/.24.
 
 Fit uses the fixed divisor-20 local window so translated edge tiles remain
 eligible without changing their canonical identity or any gate. Holdout uses
@@ -114,6 +125,12 @@ Truth is attached only after all arm outputs are frozen. A `RELIABLE` result is
 unsafe if maximum mapped-corner error or center reprojection error exceeds .02,
 rotation error exceeds 2 degrees, or absolute log-scale error exceeds .03.
 `UNRELIABLE` is safe fail-closed; `RELIABLE` within every tolerance is harmless.
+After that freeze and truth creation, the development runner records a
+`truth_probe` for the correct key at the declared H: exact-R/S search and
+translation evidence, fit pre-threshold tile evidence/support, and holdout
+metrics. The probe is record-only, cannot rerun or replace any arm, and is
+absent from candidate rank, H fitting, reliability, and summary calculation.
+It serializes no key, phase, field, pattern, RGB, latent, or secret material.
 
 The CPU engineering exit is synthetic-only with formal denominator zero: four
 fixed ordinary-RGB carriers crossed with five attacks, at least 18/20 safe
