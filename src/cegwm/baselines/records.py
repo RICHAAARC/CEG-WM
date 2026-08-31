@@ -26,7 +26,8 @@ class BaselineObservation:
     base_latent_commitment: str
     split: str
     sample_role: str
-    attack_id: str
+    attack_family: str
+    attack_condition: str
     continuous_score: float | None
     score_direction: str | None
     threshold_provenance: str | None
@@ -51,8 +52,28 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
         raise ValueError("prompt_id and base_latent_commitment are required")
     if observation.seed < 0:
         raise ValueError("seed must be non-negative")
-    if observation.status not in {"observed", "failed", "not_available"}:
+    if observation.status not in {"calibration_observed", "observed", "failed", "not_available"}:
         raise ValueError("status is not recognized")
+    if observation.sample_role not in {
+        "calibration_unwatermarked_negative",
+        "evaluation_unwatermarked_negative",
+        "evaluation_watermarked",
+        "wrong_key_diagnostic",
+    }:
+        raise ValueError("sample_role is not part of the baseline protocol")
+    if not observation.attack_family or not observation.attack_condition:
+        raise ValueError("attack_family and attack_condition are required")
+    if observation.status == "calibration_observed":
+        if observation.sample_role != "calibration_unwatermarked_negative":
+            raise ValueError("calibration records require unwatermarked-negative role")
+        if observation.continuous_score is None or observation.decision is not None:
+            raise ValueError("calibration records require a score and no decision")
+        if observation.threshold_provenance is not None:
+            raise ValueError("calibration records cannot claim a frozen threshold")
+        if baseline.source_status != "validated" or baseline.adapter_status != "validated":
+            raise ValueError("calibration records require validated source and adapter registry entries")
+        if observation.score_direction != baseline.score_direction:
+            raise ValueError("score_direction must equal the method-declared direction")
     if observation.status == "observed":
         required = (observation.source_exact, observation.adapter_exact, observation.threshold_provenance)
         if any(not value for value in required):

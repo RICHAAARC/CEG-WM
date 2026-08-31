@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, adapter_plan, baseline_by_id, validate_observation
+from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, adapter_plan, baseline_by_id, build_baseline_table_row, validate_observation
 from cegwm.baselines.registry import BaselineSpec
 
 
@@ -17,8 +17,9 @@ def _record(**changes: object) -> BaselineObservation:
         seed=7,
         base_latent_commitment="sha256:latent",
         split="test",
-        sample_role="watermarked_correct_key",
-        attack_id="clean",
+        sample_role="evaluation_watermarked",
+        attack_family="clean",
+        attack_condition="pending_user_freeze",
         continuous_score=None,
         score_direction=None,
         threshold_provenance=None,
@@ -115,6 +116,34 @@ def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.Mo
                 "threshold": "sha256:" + "2" * 64,
             },
         ).as_dict()
+
+
+@pytest.mark.unit
+def test_main_table_uses_unwatermarked_fpr_and_rejects_wrong_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BaselineSpec(
+        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
+        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
+        source_exact="0" * 40, adapter_exact="1" * 40,
+        source_artifact_digest="sha256:" + "0" * 64,
+        adapter_artifact_digest="sha256:" + "1" * 64,
+        threshold_provenance="tree_ring:calibration:approved",
+        threshold_artifact_digest="sha256:" + "2" * 64,
+    )
+    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
+    monkeypatch.setattr("cegwm.baselines.table.baseline_by_id", lambda _: spec)
+    common = {
+        "source_exact": spec.source_exact, "adapter_exact": spec.adapter_exact,
+        "continuous_score": 0.25, "score_direction": spec.score_direction,
+        "threshold_provenance": spec.threshold_provenance, "status": "observed",
+        "artifact_digests": {"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
+                             "threshold": spec.threshold_artifact_digest},
+    }
+    watermarked = _record(sample_role="evaluation_watermarked", decision=True, **common)
+    negative = _record(sample_role="evaluation_unwatermarked_negative", decision=False, **common)
+    row = build_baseline_table_row((watermarked, negative))
+    assert (row.true_positive, row.false_negative, row.false_positive, row.true_negative) == (1, 0, 0, 1)
+    with pytest.raises(ValueError, match="wrong-key diagnostics"):
+        build_baseline_table_row((replace(watermarked, sample_role="wrong_key_diagnostic"), negative))
 
 
 @pytest.mark.unit
