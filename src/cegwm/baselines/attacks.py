@@ -46,18 +46,31 @@ def _run_git(root: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def _verify_head_blob(*, head_blob: str, working_blob: str, path_clean_against_head: bool) -> None:
+    """Reject bytes that cannot be identified with the recorded HEAD exact."""
+
+    if not path_clean_against_head:
+        raise RuntimeError("rotation implementation file must be clean relative to HEAD before execution")
+    if head_blob != working_blob:
+        raise RuntimeError("rotation implementation bytes do not match the recorded HEAD blob")
+
+
 def _verified_implementation_identity() -> tuple[str, str]:
     """Bind executed module bytes to a clean checked-out Git exact."""
 
     module = Path(__file__).resolve()
     root = Path(_run_git(module.parent, "rev-parse", "--show-toplevel"))
     relative = module.relative_to(root).as_posix()
-    if subprocess.run(("git", "-C", str(root), "diff", "--quiet", "--", relative), check=False).returncode != 0:
-        raise RuntimeError("rotation implementation file must be clean before execution")
-    index_blob = _run_git(root, "ls-files", "-s", "--", relative).split()[1]
+    path_clean_against_head = subprocess.run(
+        ("git", "-C", str(root), "diff", "--quiet", "HEAD", "--", relative), check=False
+    ).returncode == 0
+    head_blob = _run_git(root, "rev-parse", f"HEAD:{relative}")
     working_blob = _run_git(root, "hash-object", relative)
-    if index_blob != working_blob:
-        raise RuntimeError("rotation implementation bytes do not match the checked-out index blob")
+    _verify_head_blob(
+        head_blob=head_blob,
+        working_blob=working_blob,
+        path_clean_against_head=path_clean_against_head,
+    )
     exact = _run_git(root, "rev-parse", "HEAD")
     if not re.fullmatch(r"[0-9a-f]{40}", exact):
         raise RuntimeError("rotation implementation checkout exact is invalid")

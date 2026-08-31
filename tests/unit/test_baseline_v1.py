@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -125,6 +126,46 @@ def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.Mo
                 "threshold": "sha256:" + "2" * 64,
             },
         ).as_dict()
+
+
+@pytest.mark.unit
+def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BaselineSpec(
+        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
+        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
+        source_exact="0" * 40, adapter_exact="1" * 40,
+        source_artifact_digest="sha256:" + "0" * 64,
+        adapter_artifact_digest="sha256:" + "1" * 64,
+        threshold_provenance="tree_ring:calibration:approved",
+        threshold_artifact_digest="sha256:" + "2" * 64,
+    )
+    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
+    digests = {name: "sha256:" + value * 64 for name, value in {
+        "input_rgb_digest": "3", "output_rgb_digest": "4", "input_mask_digest": "5",
+        "output_mask_digest": "6", "implementation_digest": "7",
+    }.items()}
+    rotation_provenance = {
+        "attack_id": "rotation_10_bicubic_reflect_center_crop_v1", "angle_degrees": 10.0,
+        "angle_convention": "Pillow visual counter-clockwise positive angle",
+        "center_formula_id": "pixel_center_w_minus_1_over_2_v1", "padding_x": 8, "padding_y": 9,
+        "bicubic_margin_pixels": 2, "padding_mode_rgb": "numpy.reflect_edge_not_repeated",
+        "padding_mode_mask": "numpy.constant_zero", "rgb_interpolation": "PIL.Image.Resampling.BICUBIC",
+        "mask_interpolation": "PIL.Image.Resampling.NEAREST", "crop_box": (8, 9, 81, 50),
+        "numpy_version": "2.0", "pillow_version": "11.0", "implementation_exact": "a" * 40,
+        "positive_negative_pipeline_identical": True, **digests,
+    }
+    observed = _record(
+        source_exact=spec.source_exact, adapter_exact=spec.adapter_exact,
+        continuous_score=0.25, score_direction=spec.score_direction,
+        threshold_provenance=spec.threshold_provenance, decision=True, status="observed",
+        attack_family="geometric", attack_condition="rotation_10_bicubic_reflect_center_crop_v1",
+        artifact_digests={"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
+                          "threshold": spec.threshold_artifact_digest},
+        attack_provenance=rotation_provenance,
+    )
+    round_tripped = json.loads(json.dumps(observed.as_dict()))
+    assert isinstance(round_tripped["attack_provenance"]["crop_box"], list)
+    assert validate_observation(BaselineObservation(**round_tripped)).status == "observed"
 
 
 @pytest.mark.unit

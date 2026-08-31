@@ -176,7 +176,12 @@ def _validate_rotation_provenance(provenance: Mapping[str, object] | None) -> No
         raise ValueError("rotation provenance must bind shared positive-negative pipeline")
     if not isinstance(provenance["padding_x"], int) or not isinstance(provenance["padding_y"], int):
         raise ValueError("rotation provenance padding must be Python integers")
-    if not isinstance(provenance["crop_box"], tuple) or len(provenance["crop_box"]) != 4:
+    crop_box = provenance["crop_box"]
+    if (
+        not isinstance(crop_box, (list, tuple))
+        or len(crop_box) != 4
+        or any(not isinstance(coordinate, int) for coordinate in crop_box)
+    ):
         raise ValueError("rotation provenance crop box is invalid")
     if not provenance["numpy_version"] or not provenance["pillow_version"]:
         raise ValueError("rotation provenance library versions are required")

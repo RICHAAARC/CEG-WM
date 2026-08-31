@@ -5,7 +5,7 @@ import inspect
 import numpy as np
 import pytest
 
-from cegwm.baselines.attacks import rotation_10_bicubic_reflect_center_crop
+from cegwm.baselines.attacks import _verify_head_blob, rotation_10_bicubic_reflect_center_crop
 
 
 @pytest.mark.unit
@@ -68,3 +68,11 @@ def test_non_rgb_or_non_uint8_input_fails_closed() -> None:
         rotation_10_bicubic_reflect_center_crop(np.zeros((41, 73), dtype=np.uint8))
     with pytest.raises(TypeError):
         rotation_10_bicubic_reflect_center_crop(np.zeros((41, 73, 3), dtype=np.float32))
+
+
+@pytest.mark.unit
+def test_staged_implementation_divergence_is_rejected() -> None:
+    with pytest.raises(RuntimeError, match="recorded HEAD blob"):
+        _verify_head_blob(head_blob="a" * 40, working_blob="b" * 40, path_clean_against_head=True)
+    with pytest.raises(RuntimeError, match="clean relative to HEAD"):
+        _verify_head_blob(head_blob="a" * 40, working_blob="a" * 40, path_clean_against_head=False)
