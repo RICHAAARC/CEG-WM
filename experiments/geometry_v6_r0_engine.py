@@ -76,13 +76,31 @@ def _load_assets(token: str) -> tuple[Any, ContentEmbedAssets]:
     )
 
     pipeline = load_sd35_pipeline(MODEL_ID, torch_dtype=torch.float16, token=token)
-    pipeline.to("cuda")
+    _enable_model_cpu_offload(pipeline)
     vae, processor = pipeline.vae, pipeline.image_processor
     hf = FrozenHFPublicAssets(vae=vae, image_processor=processor, image_processor_id=f"{MODEL_ID}:image_processor")
     lf = FrozenLFPublicAssets(vae=vae, image_processor=processor, image_processor_id=f"{MODEL_ID}:image_processor", candidate_id=LF_BALANCED_BLOCKS_CARRIER_METHOD_ID, detector_statistic_id=LF_BLOCKNORM_DETECTOR_STATISTIC_ID, evaluated_candidate_id=LF_BALANCED_BLOCKS_EVALUATED_CANDIDATE_ID)
     dino_model, dino_processor = load_dino_content_assets(token=token)
     dino_model.to("cuda").eval()
     return pipeline, ContentEmbedAssets(dino_model, dino_processor, hf, lf)
+
+
+def _enable_model_cpu_offload(pipeline: Any) -> None:
+    """Require Diffusers CPU offload; never fall back to an all-CUDA pipeline."""
+
+    try:
+        pipeline.enable_model_cpu_offload(device="cuda")
+    except AttributeError as error:
+        raise RuntimeError("R0 diagnostic requires pipeline.enable_model_cpu_offload") from error
+
+
+def _reset_pipeline_offload_state(pipeline: Any) -> None:
+    """Require a fresh offload-hook boundary before every physical arm."""
+
+    try:
+        pipeline.maybe_free_model_hooks()
+    except AttributeError as error:
+        raise RuntimeError("R0 diagnostic requires pipeline.maybe_free_model_hooks") from error
 
 
 def _sanitize_diagnostic(value: str, secrets: tuple[str, ...]) -> str:
@@ -253,8 +271,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     )
     def generate(arm: str, amplitude: float | None) -> tuple[Any | None, dict[str, str] | None]:
         # Every physical arm gets an independent generator reset to the same seed.
-        generator = torch.Generator(device="cuda").manual_seed(args.seed)
         try:
+            _reset_pipeline_offload_state(pipeline)
+            generator = torch.Generator(device="cuda").manual_seed(args.seed)
             output = run_sd35_geometry_v6_r0_arm(
                 pipeline, args.prompt, arm, content_key=content_key if "content" in arm else None,
                 amplitude=amplitude if "geometry" in arm else None,

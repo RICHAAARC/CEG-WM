@@ -16,7 +16,8 @@ class _V(torch.nn.Module):
     def decode(self,x,return_dict=True): return SimpleNamespace(sample=x*self.p)
     def encode(self,x): return SimpleNamespace(latent_dist=_D(x*self.p))
 class _P:
-    def __init__(self): self.vae=_V(); self.events=[]
+    def __init__(self): self.vae=_V(); self.events=[]; self.hook_calls=[]
+    def maybe_free_model_hooks(self): self.hook_calls.append('freed')
     def __call__(self,**kwargs):
         cb=kwargs['callback_on_step_end']; z=torch.zeros(1,4,16,16)
         for i in range(20):
@@ -83,6 +84,37 @@ def test_failure_diagnostic_is_bounded_and_redacts_exact_r0_sensitive_values():
     assert '[REDACTED]' in serialized
 
 
+def test_offload_helpers_require_the_diffusers_apis_without_cuda_fallback():
+    class Pipeline:
+        def __init__(self): self.offload_calls=[]; self.to_calls=[]; self.hook_calls=[]
+        def enable_model_cpu_offload(self, *, device): self.offload_calls.append(device)
+        def maybe_free_model_hooks(self): self.hook_calls.append('freed')
+        def to(self, *args, **kwargs): self.to_calls.append((args, kwargs)); raise AssertionError('all-CUDA fallback')
+    pipeline=Pipeline()
+    engine._enable_model_cpu_offload(pipeline)
+    engine._reset_pipeline_offload_state(pipeline)
+    assert pipeline.offload_calls==['cuda'] and pipeline.to_calls==[] and pipeline.hook_calls==['freed']
+    source=Path('experiments/geometry_v6_r0_engine.py').read_text()
+    assert '_enable_model_cpu_offload(pipeline)' in source and 'pipeline.to("cuda")' not in source
+    for helper in (engine._enable_model_cpu_offload, engine._reset_pipeline_offload_state):
+        try:
+            helper(object())
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('missing offload API must fail closed')
+    class FailingPipeline:
+        def enable_model_cpu_offload(self, *, device): raise RuntimeError('offload failure')
+        def maybe_free_model_hooks(self): raise RuntimeError('hook failure')
+    for helper in (engine._enable_model_cpu_offload, engine._reset_pipeline_offload_state):
+        try:
+            helper(FailingPipeline())
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('failed offload API must fail closed')
+
+
 def test_runtime_environment_is_public_allowlisted_and_optional_versions_can_be_unavailable(monkeypatch):
     monkeypatch.setattr(engine, '_package_version', lambda package: engine.UNAVAILABLE)
     monkeypatch.setattr(engine.torch.cuda, 'is_available', lambda: False)
@@ -102,12 +134,15 @@ def test_failed_fixed_arms_are_retained_independently_without_retry(monkeypatch,
     monkeypatch.setenv(engine.CONTENT_KEY_ENV, content_key)
     monkeypatch.setenv('HF_TOKEN', token)
     monkeypatch.setattr(engine, '_exact', lambda repo_root, expected: expected)
-    monkeypatch.setattr(engine, '_load_assets', lambda received_token: (_P(), SimpleNamespace(lf_public_assets=object(), hf_public_assets=object())))
+    pipeline=_P()
+    monkeypatch.setattr(engine, '_load_assets', lambda received_token: (pipeline, SimpleNamespace(lf_public_assets=object(), hf_public_assets=object())))
     monkeypatch.setattr(engine, '_runtime_environment', lambda pipeline: {'runtime': 'public-test-only'})
     monkeypatch.setattr(engine, 'load_calibration_asset', lambda *paths: object())
     monkeypatch.setattr(engine, 'FrozenContentWhiteningLFPublicAssets', lambda *values: object())
     monkeypatch.setattr(engine, 'load_frozen_content_whitening_asset', lambda repo_root: object())
-    monkeypatch.setattr(engine.torch, 'Generator', lambda device: SimpleNamespace(manual_seed=lambda seed: (device, seed)))
+    arm_boundaries=[]
+    monkeypatch.setattr(pipeline, 'maybe_free_model_hooks', lambda: arm_boundaries.append('hooks'))
+    monkeypatch.setattr(engine.torch, 'Generator', lambda device: arm_boundaries.append('generator') or SimpleNamespace(manual_seed=lambda seed: (device, seed)))
     def fail_arm(pipeline, prompt, arm, **kwargs):
         calls.append((arm, kwargs['amplitude']))
         raise RuntimeError(f'{content_key} {token} arm={arm}')
@@ -115,6 +150,7 @@ def test_failed_fixed_arms_are_retained_independently_without_retry(monkeypatch,
     payload = engine._run(SimpleNamespace(repo_root=tmp_path, expected_exact='a' * 40, prompt='public prompt', seed=7, height=512, width=512))
     expected_calls = [('content_only', None), ('unwatermarked', None)] + [item for amplitude in engine.R0_AMPLITUDE_CANDIDATES for item in (('content_geometry', amplitude), ('geometry_only', amplitude))]
     assert calls == expected_calls
+    assert arm_boundaries == ['hooks', 'generator'] * len(expected_calls)
     failures = [payload['baselines']['content_only']['failure_reason'], payload['baselines']['unwatermarked']['failure_reason']]
     failures += [record[arm]['failure_reason'] for record in payload['amplitudes'] for arm in ('content_geometry', 'geometry_only')]
     assert len(failures) == len(expected_calls)
