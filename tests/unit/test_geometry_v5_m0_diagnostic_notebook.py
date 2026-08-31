@@ -7,7 +7,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _NOTEBOOK = _ROOT / "notebooks/geometry_v5_m0_diagnostic_colab.ipynb"
-_RUNNER_EXACT = "027fbbc5591cea566f6f0b0dcc081266b5da8587"
+_RUNNER_EXACT = "1f9d2d8a87ae221a8107edb97870e0fc29cde6b7"
 
 
 def _notebook() -> dict[str, object]:
@@ -33,7 +33,7 @@ def test_diagnostic_notebook_pins_detached_clean_runner_once_and_calls_fixed_run
     source = "\n".join(cell["source"] for cell in _code_cells(_notebook()))  # type: ignore[arg-type]
     assert source.count(_RUNNER_EXACT) == 1
     assert "https://github.com/RICHAAARC/CEG-WM.git" in source
-    assert "RUNNER_EXACT = '027fbbc5591cea566f6f0b0dcc081266b5da8587'" in source
+    assert "RUNNER_EXACT = '1f9d2d8a87ae221a8107edb97870e0fc29cde6b7'" in source
     assert "'checkout', '--detach', RUNNER_EXACT" in source
     assert "'branch', '--show-current'" in source and "'status', '--porcelain'" in source
     assert source.count("'-m', 'pip', 'install', '.'") == 1
