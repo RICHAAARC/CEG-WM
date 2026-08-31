@@ -14,6 +14,15 @@ from experiments import geometry_v5_m0_diagnostic as diagnostic
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+class _FakeRGB:
+    mode = "RGB"
+    size = (512, 512)
+
+
+def _output(images: object) -> object:
+    return type("FakeDiffusersOutput", (), {"images": images})()
+
+
 def _passing_raw(case: dict[str, object]) -> GeometryV5M0RawRecord:
     truth = diagnostic._truth_h(case)
     return GeometryV5M0RawRecord(
@@ -22,7 +31,7 @@ def _passing_raw(case: dict[str, object]) -> GeometryV5M0RawRecord:
     )
 
 
-def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, fail_generation: bool = False, fail_case: str | None = None) -> diagnostic._Bindings:
+def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, fail_generation: bool = False, fail_case: str | None = None, generation_output: object | None = None) -> diagnostic._Bindings:
     contract = load_geometry_v5_m0_contract(_ROOT)
     cases = [case for case in contract.config["development"]["attacks"] if case["attack_id"] in {"identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"}]
 
@@ -36,13 +45,15 @@ def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, f
         calls["initial"].append(seed)
         return seed
 
-    def generate(_pipeline: object, prompt: str, initial_z_t: int) -> str:
+    def generate(_pipeline: object, _prompt: str, initial_z_t: int) -> object:
         calls["generate"].append(initial_z_t)
         if fail_generation:
             raise RuntimeError("secret generation")
-        return prompt
+        return _output([_FakeRGB()]) if generation_output is None else generation_output
 
-    def attack(_final_rgb: str, case: dict[str, object]) -> int:
+    def attack(final_rgb: object, case: dict[str, object]) -> int:
+        assert isinstance(final_rgb, _FakeRGB) and not hasattr(final_rgb, "images")
+        calls["attack_image"].append(final_rgb)
         calls["attack"].append(case["attack_id"])
         if case["attack_id"] == fail_case:
             raise ValueError("secret attack")
@@ -52,6 +63,7 @@ def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, f
         calls["detect"].append(attacked_rgb)
         return _passing_raw(cases[attacked_rgb])
 
+    calls.setdefault("attack_image", [])
     return diagnostic._Bindings(load, initial, generate, attack, detect)
 
 
@@ -62,7 +74,7 @@ def test_fake_diagnostic_runs_one_generation_four_independent_cases_and_freezes_
     output = tmp_path / "diagnostic.json"
     result, complete = diagnostic.run_diagnostic(_ROOT, output, _fake_bindings(calls), events.append)
     assert complete and calls["load"] == ["load"] and calls["initial"] == calls["generate"] == [7501]
-    assert calls["attack"] == ["identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"] and len(calls["detect"]) == 4
+    assert calls["attack"] == ["identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"] and len(calls["attack_image"]) == len(calls["detect"]) == 4
     assert all(events[index:index + 2] == ["raw_frozen", "truth_evaluated"] for index in range(0, 8, 2))
     assert result["diagnostic_denominator"] == 4 and result["science_denominator"] == 0 and result["claim"] == "nonformal_colab_method_diagnostic_only"
     text = output.read_text(encoding="utf-8")
@@ -81,6 +93,17 @@ def test_diagnostic_retains_four_failed_cases_for_model_generation_and_single_ca
     result, complete = diagnostic.run_diagnostic(_ROOT, tmp_path / "case.json", _fake_bindings(calls, fail_case="scale_1.1"))
     failed = [case for case in result["cases"] if case["attack_id"] == "scale_1.1"]
     assert not complete and len(result["cases"]) == 4 and failed[0]["failure_stage"] == "attack" and len(calls["detect"]) == 3
+
+
+@pytest.mark.integration
+def test_diagnostic_rejects_invalid_generation_output_containers_as_four_generation_failures(tmp_path: Path) -> None:
+    invalid_outputs = (object(), _output([]), _output([_FakeRGB(), _FakeRGB()]), _output([type("BadMode", (), {"mode": "RGBA", "size": (512, 512)})()]), _output([type("BadSize", (), {"mode": "RGB", "size": (256, 256)})()]))
+    for index, output in enumerate(invalid_outputs):
+        calls: dict[str, list[object]] = {key: [] for key in ("load", "initial", "generate", "attack", "detect")}
+        result, complete = diagnostic.run_diagnostic(_ROOT, tmp_path / f"invalid-{index}.json", _fake_bindings(calls, generation_output=output))
+        assert not complete and len(result["cases"]) == 4
+        assert all(case["failure_stage"] == "generation" and case["error_class"] == "ValueError" for case in result["cases"])
+        assert calls["attack"] == calls["detect"] == []
 
 
 @pytest.mark.integration

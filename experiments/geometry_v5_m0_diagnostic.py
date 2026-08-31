@@ -92,7 +92,7 @@ def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, even
         return _write_result(output_json, unit, identity, records)
     try:
         initial_z_t = bindings.initial_z_t(pipeline, unit.seed)
-        final_rgb = bindings.generate(pipeline, unit.prompt, initial_z_t)
+        final_rgb = _extract_single_rgb_image(bindings.generate(pipeline, unit.prompt, initial_z_t))
     except Exception as error:
         records = [_failed_case(case["attack_id"], "generation", error, event_sink) for case in cases]
         return _write_result(output_json, unit, identity, records)
@@ -111,6 +111,17 @@ def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, even
         except Exception as error:
             records.append(_failed_case(case["attack_id"], "detector", error, event_sink))
     return _write_result(output_json, unit, identity, records)
+
+
+def _extract_single_rgb_image(generation_output: Any) -> Any:
+    """Strictly unwrap the one ordinary RGB image from a diffusers output."""
+    images = getattr(generation_output, "images", None)
+    if not isinstance(images, (list, tuple)) or len(images) != 1:
+        raise ValueError("generation output must contain exactly one image")
+    image = images[0]
+    if getattr(image, "mode", None) != "RGB" or getattr(image, "size", None) != (512, 512):
+        raise ValueError("generation output image must be ordinary 512x512 RGB")
+    return image
 
 
 def _apply_forward_attack_pil(final_rgb: Any, case: Mapping[str, Any], image_module: Any) -> Any:
