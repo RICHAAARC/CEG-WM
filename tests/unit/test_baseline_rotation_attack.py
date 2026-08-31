@@ -5,7 +5,7 @@ import inspect
 import numpy as np
 import pytest
 
-from cegwm.baselines.attacks import _verify_head_blob, rotation_10_bicubic_reflect_center_crop
+from cegwm.baselines.attacks import rotation_10_bicubic_reflect_center_crop
 
 
 @pytest.mark.unit
@@ -19,7 +19,6 @@ def test_rotation_shape_dtype_mask_and_determinism(height: int, width: int) -> N
     assert first.valid_mask.shape == rgb.shape[:2]
     assert set(np.unique(first.valid_mask)) <= {0, 1}
     assert np.array_equal(first.rgb, second.rgb)
-    assert first.provenance["output_rgb_digest"] == second.provenance["output_rgb_digest"]
     assert first.provenance["positive_negative_pipeline_identical"]
     assert np.all(first.rgb == 255)  # black Pillow fill cannot leak into the center crop
     theta = np.radians(10.0)
@@ -27,10 +26,6 @@ def test_rotation_shape_dtype_mask_and_determinism(height: int, width: int) -> N
     expected_px = max(0, int(np.ceil(abs(np.cos(theta)) * a + abs(np.sin(theta)) * b + 2 - a)))
     expected_py = max(0, int(np.ceil(abs(np.sin(theta)) * a + abs(np.cos(theta)) * b + 2 - b)))
     assert (first.provenance["padding_x"], first.provenance["padding_y"]) == (expected_px, expected_py)
-    assert first.provenance["implementation_exact"] != "0" * 40
-    assert first.provenance["implementation_digest"].startswith("sha256:")
-    assert first.provenance["input_rgb_digest"].startswith("sha256:")
-    assert first.provenance["output_mask_digest"].startswith("sha256:")
     assert first.provenance["numpy_version"] and first.provenance["pillow_version"]
 
 
@@ -68,11 +63,3 @@ def test_non_rgb_or_non_uint8_input_fails_closed() -> None:
         rotation_10_bicubic_reflect_center_crop(np.zeros((41, 73), dtype=np.uint8))
     with pytest.raises(TypeError):
         rotation_10_bicubic_reflect_center_crop(np.zeros((41, 73, 3), dtype=np.float32))
-
-
-@pytest.mark.unit
-def test_staged_implementation_divergence_is_rejected() -> None:
-    with pytest.raises(RuntimeError, match="recorded HEAD blob"):
-        _verify_head_blob(head_blob="a" * 40, working_blob="b" * 40, path_clean_against_head=True)
-    with pytest.raises(RuntimeError, match="clean relative to HEAD"):
-        _verify_head_blob(head_blob="a" * 40, working_blob="a" * 40, path_clean_against_head=False)

@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import inspect
 import math
-import re
-import subprocess
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
 import PIL
 import pytest
 
+import cegwm.baselines.attacks as attacks
 from cegwm.baselines.attacks import (
     CENTER_CROP_80_RESTORE_ATTACK_ID,
     GAUSSIAN_BLUR_SIGMA_1PX_ATTACK_ID,
@@ -41,7 +39,7 @@ def _structured_rgb(height: int, width: int) -> np.ndarray:
 @pytest.mark.unit
 @pytest.mark.parametrize("height,width", [(7, 11), (8, 12)])
 @pytest.mark.parametrize("attack_id,attack", ATTACKS)
-def test_common_attacks_preserve_rgb_bind_provenance_and_are_deterministic(
+def test_common_attacks_preserve_rgb_parameters_and_are_deterministic(
     height: int, width: int, attack_id: str, attack: Attack
 ) -> None:
     rgb = _structured_rgb(height, width)
@@ -57,13 +55,16 @@ def test_common_attacks_preserve_rgb_bind_provenance_and_are_deterministic(
     assert (provenance["output_width"], provenance["output_height"]) == (width, height)
     assert provenance["output_crop_box"] == (0, 0, width, height)
     assert provenance["numpy_version"] == np.__version__ and provenance["pillow_version"] == PIL.__version__
-    assert re.fullmatch(r"sha256:[0-9a-f]{64}", provenance["input_rgb_digest"])
-    assert re.fullmatch(r"sha256:[0-9a-f]{64}", provenance["output_rgb_digest"])
-    assert re.fullmatch(r"sha256:[0-9a-f]{64}", provenance["implementation_digest"])
-    root = Path(__file__).resolve().parents[2]
-    exact = subprocess.run(("git", "rev-parse", "HEAD"), cwd=root, check=True, capture_output=True, text=True).stdout.strip()
-    assert provenance["implementation_exact"] == exact
     assert "sample_role" not in inspect.signature(attack).parameters
+
+
+@pytest.mark.unit
+def test_common_attacks_run_without_git_helper_api() -> None:
+    assert not hasattr(attacks, "_run_git")
+    assert not hasattr(attacks, "_verify_head_blob")
+    assert not hasattr(attacks, "_verified_implementation_identity")
+    rgb = _structured_rgb(9, 13)
+    assert all(attack(rgb).rgb.shape == rgb.shape for _, attack in ATTACKS)
 
 
 @pytest.mark.unit

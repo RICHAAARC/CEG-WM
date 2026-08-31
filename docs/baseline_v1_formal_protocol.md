@@ -47,9 +47,11 @@ as `max(1, round(dimension*sqrt(0.80)))` with the same rounding, takes
 `top=(H-crop_h)//2`, then restores with Pillow BICUBIC. `gaussian_blur_sigma_1px`
 uses `ImageFilter.GaussianBlur(radius=1.0)`; this protocol names that radius
 `sigma_px=1.0`. Each attack records its actual sizes/crop and frozen parameters.
-Pillow and JPEG codec output bytes may vary by library version, so provenance
-records library versions and the output digest; this protocol does not claim
-cross-version byte identity.
+Pillow and JPEG codec output bytes may vary by library version; this protocol
+does not claim cross-version byte identity. Attack execution records the frozen
+scientific parameters and actual geometry. A surrounding runner may optionally
+record library versions, digests, or implementation exacts, but they are not
+attack execution prerequisites or validator hard gates.
 
 Rotation uses attack ID `rotation_10_bicubic_reflect_center_crop_v1`: ordinary
 uint8 sRGB H×W×3 input (`H,W>=3`) whose computed `p_x<W,p_y<H`, +10.0 degrees in Pillow's visual
@@ -57,11 +59,11 @@ counter-clockwise convention, pixel-center center `(W-1)/2,(H-1)/2`, bicubic
 margin 2, NumPy `reflect` RGB padding (edge not repeated), Pillow bicubic rotate
 on the padded canvas, and an exact original-size center crop. The valid-support
 mask is padded constant-zero and rotated nearest-neighbor; reflected RGB outside
-original support is therefore mask=0. Runtime records bind all formulas, actual
-padding/crop, library versions, RGB/mask digests, and implementation exact/digest.
-Inputs outside this aspect-safe NumPy-reflect domain fail closed. The runtime
-resolves a clean Git checkout exact and verifies the implementation module blob
-before emitting provenance, so callers cannot supply an arbitrary exact.
+original support is therefore mask=0. Runtime records bind the frozen formulas
+and actual padding/crop. Inputs outside this aspect-safe NumPy-reflect domain
+fail closed. A surrounding runner may optionally record versions, digests, or
+implementation identity, but attacks execute in dirty, notebook, and non-Git
+environments without those records.
 
 ## Counts and failures
 

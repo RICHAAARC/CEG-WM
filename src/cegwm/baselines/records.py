@@ -154,9 +154,7 @@ def _validate_rotation_provenance(provenance: Mapping[str, object] | None) -> No
     required = {
         "attack_id", "angle_degrees", "angle_convention", "center_formula_id", "padding_x", "padding_y",
         "bicubic_margin_pixels", "padding_mode_rgb", "padding_mode_mask", "rgb_interpolation", "mask_interpolation",
-        "crop_box", "numpy_version", "pillow_version", "input_rgb_digest", "output_rgb_digest",
-        "input_mask_digest", "output_mask_digest", "implementation_exact", "implementation_digest",
-        "positive_negative_pipeline_identical",
+        "crop_box", "positive_negative_pipeline_identical",
     }
     if not required.issubset(provenance):
         raise ValueError("rotation provenance is incomplete")
@@ -183,10 +181,3 @@ def _validate_rotation_provenance(provenance: Mapping[str, object] | None) -> No
         or any(not isinstance(coordinate, int) for coordinate in crop_box)
     ):
         raise ValueError("rotation provenance crop box is invalid")
-    if not provenance["numpy_version"] or not provenance["pillow_version"]:
-        raise ValueError("rotation provenance library versions are required")
-    if not re.fullmatch(r"[0-9a-f]{40}", str(provenance["implementation_exact"])):
-        raise ValueError("rotation provenance implementation exact is invalid")
-    for field_name in ("input_rgb_digest", "output_rgb_digest", "input_mask_digest", "output_mask_digest", "implementation_digest"):
-        if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(provenance[field_name])):
-            raise ValueError("rotation provenance digest is invalid")

@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import math
-import re
-import subprocess
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -41,10 +37,6 @@ class FrozenAttackResult:
     provenance: dict[str, Any]
 
 
-def _sha256(array: np.ndarray) -> str:
-    return "sha256:" + hashlib.sha256(np.ascontiguousarray(array).tobytes()).hexdigest()
-
-
 def _require_rgb_uint8(rgb: Any) -> np.ndarray:
     if not isinstance(rgb, np.ndarray) or rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3:
         raise TypeError("rotation attack requires HxWx3 uint8 ordinary RGB")
@@ -54,48 +46,10 @@ def _require_rgb_uint8(rgb: Any) -> np.ndarray:
     return rgb
 
 
-def _run_git(root: Path, *arguments: str) -> str:
-    completed = subprocess.run(("git", "-C", str(root), *arguments), check=True, capture_output=True, text=True)
-    return completed.stdout.strip()
-
-
-def _verify_head_blob(*, head_blob: str, working_blob: str, path_clean_against_head: bool) -> None:
-    """Reject bytes that cannot be identified with the recorded HEAD exact."""
-
-    if not path_clean_against_head:
-        raise RuntimeError("attack implementation file must be clean relative to HEAD before execution")
-    if head_blob != working_blob:
-        raise RuntimeError("attack implementation bytes do not match the recorded HEAD blob")
-
-
-def _verified_implementation_identity() -> tuple[str, str]:
-    """Bind every attack's executed module bytes to a clean checked-out Git exact."""
-
-    module = Path(__file__).resolve()
-    root = Path(_run_git(module.parent, "rev-parse", "--show-toplevel"))
-    relative = module.relative_to(root).as_posix()
-    path_clean_against_head = subprocess.run(
-        ("git", "-C", str(root), "diff", "--quiet", "HEAD", "--", relative), check=False
-    ).returncode == 0
-    head_blob = _run_git(root, "rev-parse", f"HEAD:{relative}")
-    working_blob = _run_git(root, "hash-object", relative)
-    _verify_head_blob(
-        head_blob=head_blob,
-        working_blob=working_blob,
-        path_clean_against_head=path_clean_against_head,
-    )
-    exact = _run_git(root, "rev-parse", "HEAD")
-    if not re.fullmatch(r"[0-9a-f]{40}", exact):
-        raise RuntimeError("attack implementation checkout exact is invalid")
-    return exact, "sha256:" + hashlib.sha256(module.read_bytes()).hexdigest()
-
-
 def _common_provenance(
     attack_id: str,
     source: np.ndarray,
     output: np.ndarray,
-    implementation: str,
-    module_digest: str,
 ) -> dict[str, Any]:
     height, width = source.shape[:2]
     output_height, output_width = output.shape[:2]
@@ -108,10 +62,6 @@ def _common_provenance(
         "output_crop_box": (0, 0, output_width, output_height),
         "numpy_version": np.__version__,
         "pillow_version": PIL.__version__,
-        "input_rgb_digest": _sha256(source),
-        "output_rgb_digest": _sha256(output),
-        "implementation_exact": implementation,
-        "implementation_digest": module_digest,
         "positive_negative_pipeline_identical": True,
     }
 
@@ -119,8 +69,7 @@ def _common_provenance(
 def _frozen_result(attack_id: str, source: np.ndarray, output: np.ndarray, **parameters: Any) -> FrozenAttackResult:
     if output.shape != source.shape or output.dtype != np.uint8:
         raise RuntimeError("frozen image attack must preserve HxWx3 uint8")
-    implementation, module_digest = _verified_implementation_identity()
-    provenance = _common_provenance(attack_id, source, output, implementation, module_digest)
+    provenance = _common_provenance(attack_id, source, output)
     provenance.update(parameters)
     return FrozenAttackResult(output, provenance)
 
@@ -230,7 +179,6 @@ def rotation_10_bicubic_reflect_center_crop(
     """
 
     source = _require_rgb_uint8(rgb)
-    implementation, module_digest = _verified_implementation_identity()
     height, width = source.shape[:2]
     theta = math.radians(ROTATION_ANGLE_DEGREES)
     a, b = (width - 1) / 2.0, (height - 1) / 2.0
@@ -284,12 +232,6 @@ def rotation_10_bicubic_reflect_center_crop(
         "crop_box": crop_box,
         "numpy_version": np.__version__,
         "pillow_version": PIL.__version__,
-        "input_rgb_digest": _sha256(source),
-        "output_rgb_digest": _sha256(output),
-        "input_mask_digest": _sha256(original_mask),
-        "output_mask_digest": _sha256(valid_mask),
-        "implementation_exact": implementation,
-        "implementation_digest": module_digest,
         "positive_negative_pipeline_identical": True,
     }
     return RotationAttackResult(output, valid_mask, provenance)

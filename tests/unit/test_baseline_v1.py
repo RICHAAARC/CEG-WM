@@ -167,10 +167,6 @@ def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch
         threshold_artifact_digest="sha256:" + "2" * 64,
     )
     monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
-    digests = {name: "sha256:" + value * 64 for name, value in {
-        "input_rgb_digest": "3", "output_rgb_digest": "4", "input_mask_digest": "5",
-        "output_mask_digest": "6", "implementation_digest": "7",
-    }.items()}
     rotation_provenance = {
         "attack_id": "rotation_10_bicubic_reflect_center_crop_v1", "angle_degrees": 10.0,
         "angle_convention": "Pillow visual counter-clockwise positive angle",
@@ -178,8 +174,7 @@ def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch
         "bicubic_margin_pixels": 2, "padding_mode_rgb": "numpy.reflect_edge_not_repeated",
         "padding_mode_mask": "numpy.constant_zero", "rgb_interpolation": "PIL.Image.Resampling.BICUBIC",
         "mask_interpolation": "PIL.Image.Resampling.NEAREST", "crop_box": (8, 9, 81, 50),
-        "numpy_version": "2.0", "pillow_version": "11.0", "implementation_exact": "a" * 40,
-        "positive_negative_pipeline_identical": True, **digests,
+        "positive_negative_pipeline_identical": True,
     }
     observed = _record(
         source_exact=spec.source_exact, adapter_exact=spec.adapter_exact,
