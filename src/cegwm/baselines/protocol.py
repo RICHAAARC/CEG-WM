@@ -136,11 +136,15 @@ class ConfirmationGateResult:
 
 
 def operating_point_violation(false_positives: int, negatives: int) -> bool:
-    """Predeclared observed-rate flag; it does not authorize threshold retuning."""
+    """Return whether the predeclared exact-UCB admission condition fails.
+
+    This formal condition never authorizes threshold retuning, sample
+    replacement, or result deletion; those complete records remain reportable.
+    """
 
     if negatives <= 0 or false_positives < 0 or false_positives > negatives:
         raise ValueError("false-positive count must be within a positive negative denominator")
-    return false_positives / negatives > TARGET_FPR_UPPER_BOUND
+    return one_sided_clopper_pearson_upper(false_positives, negatives) > TARGET_FPR_UPPER_BOUND
 
 
 def evaluate_clean_confirmation(records: Iterable[BaselineObservation]) -> ConfirmationGateResult:

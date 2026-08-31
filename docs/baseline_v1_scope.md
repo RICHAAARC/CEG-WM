@@ -8,14 +8,18 @@ under ignored `external_sources/` as source-audit input, not project method code
 or executable adapters.
 
 Each observation records the method/source/adapter identity, prompt/seed/base
-latent commitment, attack family and unresolved-or-frozen condition, continuous
-score/direction, method-specific threshold identity and decision, quality/runtime,
-status/failure, and artifact digests. Calibration observations use only
-unwatermarked negatives and contain a score but no decision; the threshold is
-then independently method-calibrated at a common target FPR. The target FPR,
-attack conditions, seed, sample count, and denominator are all
-`pending_user_freeze` in this engineering contract. A threshold is never shared
-between methods.
+latent commitment, frozen attack family and condition, continuous score/direction,
+method-specific threshold identity and decision, quality/runtime, status/failure,
+and artifact digests. Calibration uses 2,000 independent clean unwatermarked
+negatives per method and contains a score but no decision; each method then
+independently calibrates its own threshold for the frozen target FPR of 0.1%.
+Clean confirmation uses 3,000 independent clean unwatermarked negatives and
+the exact one-sided 95% Clopper-Pearson UCB admission condition `UCB <= 0.001`.
+Evaluation uses 1,000 physical units over the six frozen conditions: clean,
+JPEG Q50, 50% bicubic restore, 80% center-crop restore, Gaussian blur sigma 1,
+and the frozen +10-degree rotation. The prompt roster, sampling-seed roster,
+and dataset identity remain unresolved; this document does not invent them. A
+threshold is never shared between methods.
 
 The main-table builder admits only watermarked evaluation and unwatermarked
 negative evaluation records from these four baselines. It counts TP/FN/FP/TN and

@@ -15,16 +15,18 @@ from cegwm.baselines.protocol import (
 
 
 @pytest.mark.unit
-def test_exact_clean_confirmation_interval_is_not_a_hard_gate() -> None:
+def test_exact_clean_confirmation_ucb_is_the_formal_admission_gate() -> None:
     upper_zero = one_sided_clopper_pearson_upper(0, CLEAN_CONFIRMATION_NEGATIVES)
     upper_one = one_sided_clopper_pearson_upper(1, CLEAN_CONFIRMATION_NEGATIVES)
+    upper_four = one_sided_clopper_pearson_upper(4, CLEAN_CONFIRMATION_NEGATIVES)
 
     assert upper_zero == pytest.approx(1.0 - 0.05 ** (1.0 / 3000.0), rel=0.0, abs=1e-15)
     assert upper_zero <= TARGET_FPR_UPPER_BOUND
     assert upper_one > TARGET_FPR_UPPER_BOUND
     assert upper_one > upper_zero
+    assert upper_four > TARGET_FPR_UPPER_BOUND
     assert not operating_point_violation(0, CLEAN_CONFIRMATION_NEGATIVES)
-    assert not operating_point_violation(1, CLEAN_CONFIRMATION_NEGATIVES)
+    assert operating_point_violation(1, CLEAN_CONFIRMATION_NEGATIVES)
     assert operating_point_violation(4, CLEAN_CONFIRMATION_NEGATIVES)
 
 
