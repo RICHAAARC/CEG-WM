@@ -46,7 +46,7 @@ def test_notebook_has_no_geometry_secret_and_fixed_handoff():
     nb=json.loads(Path('notebooks/geometry_v6_r0_colab.ipynb').read_text()); text=json.dumps(nb)
     assert nb['cells'][0]['source']==['from google.colab import drive\n',"drive.mount('/content/drive')\n"]
     assert all(c['execution_count'] is None and c['outputs']==[] for c in nb['cells'])
-    for constant in ("APPROVED_EXACT='70b675efa33ce82d02129bffb72dd8429b023e8a'", "R0_UNIT_ID='geometry-v6-r0-dev-0001'", "PROMPT='A watchmaker sorting steel springs beneath a magnifying lamp'", 'SEED=2026082400', 'HEIGHT=512', 'WIDTH=512'):
+    for constant in ("APPROVED_EXACT='6b8a2d926d5ea650fb8628a66679c17259e45774'", "R0_UNIT_ID='geometry-v6-r0-dev-0001'", "PROMPT='A watchmaker sorting steel springs beneath a magnifying lamp'", 'SEED=2026082400', 'HEIGHT=512', 'WIDTH=512'):
         assert constant in text
     assert 'CEG_WM_GEOMETRY_V6_APPROVED_EXACT' not in text and 'CEG_WM_GEOMETRY_V6_R0_PROMPT' not in text and 'CEG_WM_GEOMETRY_V6_R0_SEED' not in text
     assert 'GEOMETRY_KEY' not in text and 'wrong_geometry' not in text and '--amplitude' not in text
