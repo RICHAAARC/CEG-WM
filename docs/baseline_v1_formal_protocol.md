@@ -81,9 +81,8 @@ calibration, confirmation, and the main-table FPR.
 ## Final baseline robustness-table contract
 
 The machine-readable final artifact uses this ordered long-table contract:
-`baseline_id`, `source_exact`, `source_artifact_digest`, `adapter_exact`,
-`adapter_artifact_digest`, `threshold_identity`, `threshold_artifact_digest`,
-`attack_family`, `attack_condition`, `planned_positive_units`,
+`baseline_id`, `threshold_identity`, `attack_family`, `attack_condition`,
+`planned_positive_units`,
 `observed_positive_units`, `failed_positive_units`, `planned_negative_units`,
 `observed_negative_units`, `failed_negative_units`, `true_positive`,
 `false_negative`, `false_positive`, `true_negative`, `tpr`, `tpr_ci95_lower`,
@@ -108,4 +107,6 @@ rate/CI fields are null and `status=incomplete`; counts, failures, and the fixed
 denominators remain. Failures are never converted to TN, deleted, or removed
 from a denominator. Wrong-key is an optional supplementary diagnostic and never
 enters this contract or the primary table. Quality and runtime may remain in a
-supplementary artifact and are not baseline primary-table fields.
+supplementary artifact and are not baseline primary-table fields. Source/adapter
+exacts, digests, and license metadata may be peripheral table notes, but are not
+core row identity or score-admission fields.

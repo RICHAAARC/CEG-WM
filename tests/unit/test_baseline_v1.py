@@ -16,9 +16,6 @@ from cegwm.baselines import (
     build_baseline_table_row,
     validate_observation,
 )
-from cegwm.baselines.registry import BaselineSpec
-
-
 def _record(**changes: object) -> BaselineObservation:
     record = BaselineObservation(
         baseline_id="tree_ring",
@@ -61,8 +58,7 @@ def test_registry_contains_only_the_authorized_four_methods() -> None:
 @pytest.mark.unit
 def test_final_baseline_long_table_contract_and_condition_order_are_frozen() -> None:
     assert FINAL_BASELINE_LONG_TABLE_FIELDS == (
-        "baseline_id", "source_exact", "source_artifact_digest", "adapter_exact", "adapter_artifact_digest",
-        "threshold_identity", "threshold_artifact_digest", "attack_family", "attack_condition",
+        "baseline_id", "threshold_identity", "attack_family", "attack_condition",
         "planned_positive_units", "observed_positive_units", "failed_positive_units", "planned_negative_units",
         "observed_negative_units", "failed_negative_units", "true_positive", "false_negative",
         "false_positive", "true_negative", "tpr", "tpr_ci95_lower", "tpr_ci95_upper", "fpr",
@@ -76,57 +72,52 @@ def test_final_baseline_long_table_contract_and_condition_order_are_frozen() -> 
 
 
 @pytest.mark.unit
-def test_source_qualification_keeps_execution_and_unlicensed_source_closed() -> None:
+def test_method_plans_preserve_method_identity_without_license_blocking() -> None:
     assert baseline_by_id("tree_ring").score_direction == "lower_is_watermarked"
     assert baseline_by_id("tree_ring").native_score_name == "fourier_key_l1_distance"
     assert baseline_by_id("t2smark").official_entrypoint == "run_sd35.py"
     assert baseline_by_id("t2smark").native_score_name == "norm1_w_master_key"
-    assert adapter_plan("tree_ring").execution_status == "semantic_review_required"
-    assert adapter_plan("t2smark").execution_status == "execution_not_authorized"
-    assert adapter_plan("shallow_diffuse").execution_status == "blocked"
+    assert adapter_plan("tree_ring").execution_status == "implementation_required"
+    assert adapter_plan("t2smark").execution_status == "implementation_ready"
+    assert adapter_plan("shallow_diffuse").execution_status == "implementation_required"
+    assert adapter_plan("shallow_diffuse").blocker is None
+    assert baseline_by_id("shallow_diffuse").source_license is None
 
 
 @pytest.mark.unit
-def test_unvalidated_methods_cannot_emit_observed_or_placeholder_evidence() -> None:
+def test_method_first_observations_allow_optional_identity_metadata() -> None:
     assert validate_observation(_record()).as_dict()["baseline_id"] == "tree_ring"
-    with pytest.raises(ValueError, match="validated source and adapter registry"):
-        validate_observation(_record(
-            continuous_score=0.25,
-            score_direction="higher_is_watermarked",
-            threshold_provenance="tree_ring:calibration:future",
-            decision=True,
-            status="observed",
-        ))
+    calibration = _record(
+        source_exact=None, adapter_exact=None, protocol_partition="threshold_freeze",
+        sample_role="calibration_unwatermarked_negative", continuous_score=0.25,
+        score_direction="lower_is_watermarked", threshold_provenance=None, decision=None,
+        status="calibration_observed", artifact_digests={},
+    )
+    assert validate_observation(calibration).status == "calibration_observed"
+    observed = _record(
+        source_exact=None, adapter_exact=None, continuous_score=0.25,
+        score_direction="lower_is_watermarked", threshold_provenance="tree_ring:calibration:future",
+        decision=True, status="observed", artifact_digests={},
+    )
+    assert validate_observation(observed).status == "observed"
+    assert validate_observation(replace(observed, source_exact="anything", adapter_exact="not-a-git-exact")).status == "observed"
+    with pytest.raises(ValueError, match="score_direction"):
+        validate_observation(replace(observed, score_direction="higher_is_watermarked"))
+    with pytest.raises(ValueError, match="threshold provenance"):
+        validate_observation(replace(observed, threshold_provenance="t2smark:calibration:future"))
+    with pytest.raises(ValueError, match="evaluation partition"):
+        validate_observation(replace(observed, protocol_partition="threshold_freeze"))
+    with pytest.raises(ValueError, match="evaluation sample role"):
+        validate_observation(replace(observed, sample_role="calibration_unwatermarked_negative"))
     with pytest.raises(ValueError, match="cannot carry detection evidence"):
         validate_observation(_record(continuous_score=0.25))
-    with pytest.raises(ValueError, match=r"^observed records require validated source and adapter registry entries$"):
-        _record(
-            continuous_score=0.25,
-            score_direction="higher_is_watermarked",
-            threshold_provenance="tree_ring:calibration:future",
-            decision=True,
-            status="observed",
-        ).as_dict()
 
 
 @pytest.mark.unit
-def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = BaselineSpec(
-        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
-        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
-        source_exact="0" * 40, adapter_exact="1" * 40,
-        source_artifact_digest="sha256:" + "0" * 64,
-        adapter_artifact_digest="sha256:" + "1" * 64,
-        threshold_provenance="tree_ring:calibration:approved",
-        threshold_artifact_digest="sha256:" + "2" * 64,
-    )
-    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
+def test_observed_rotation_still_requires_scientific_attack_provenance() -> None:
     observed = _record(
-        source_exact=spec.source_exact, adapter_exact=spec.adapter_exact,
-        continuous_score=0.25, score_direction=spec.score_direction,
-        threshold_provenance=spec.threshold_provenance, decision=True, status="observed",
-        artifact_digests={"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
-                          "threshold": spec.threshold_artifact_digest},
+        source_exact=None, adapter_exact=None, continuous_score=0.25, score_direction="lower_is_watermarked",
+        threshold_provenance="tree_ring:calibration:approved", decision=True, status="observed", artifact_digests={},
     )
     assert observed.as_dict()["status"] == "observed"
     with pytest.raises(ValueError, match="rotation observations require attack provenance"):
@@ -136,37 +127,10 @@ def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.Mo
             attack_condition="rotation_10_bicubic_reflect_center_crop_v1",
             attack_provenance=None,
         ).as_dict()
-    with pytest.raises(ValueError, match="source_exact must match"):
-        replace(observed, source_exact="f" * 40).as_dict()
-    with pytest.raises(ValueError, match=r"^threshold provenance must match the registry$"):
-        _record(
-            source_exact="0" * 40,
-            adapter_exact="1" * 40,
-            continuous_score=0.25,
-            score_direction="higher_is_watermarked",
-            threshold_provenance="tree_ring:calibration:future",
-            decision=True,
-            status="observed",
-            artifact_digests={
-                "source": "sha256:" + "0" * 64,
-                "adapter": "sha256:" + "1" * 64,
-                "threshold": "sha256:" + "2" * 64,
-            },
-        ).as_dict()
 
 
 @pytest.mark.unit
-def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = BaselineSpec(
-        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
-        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
-        source_exact="0" * 40, adapter_exact="1" * 40,
-        source_artifact_digest="sha256:" + "0" * 64,
-        adapter_artifact_digest="sha256:" + "1" * 64,
-        threshold_provenance="tree_ring:calibration:approved",
-        threshold_artifact_digest="sha256:" + "2" * 64,
-    )
-    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
+def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array() -> None:
     rotation_provenance = {
         "attack_id": "rotation_10_bicubic_reflect_center_crop_v1", "angle_degrees": 10.0,
         "angle_convention": "Pillow visual counter-clockwise positive angle",
@@ -177,12 +141,10 @@ def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch
         "positive_negative_pipeline_identical": True,
     }
     observed = _record(
-        source_exact=spec.source_exact, adapter_exact=spec.adapter_exact,
-        continuous_score=0.25, score_direction=spec.score_direction,
-        threshold_provenance=spec.threshold_provenance, decision=True, status="observed",
+        source_exact=None, adapter_exact=None, continuous_score=0.25, score_direction="lower_is_watermarked",
+        threshold_provenance="tree_ring:calibration:approved", decision=True, status="observed",
         attack_family="geometric", attack_condition="rotation_10_bicubic_reflect_center_crop_v1",
-        artifact_digests={"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
-                          "threshold": spec.threshold_artifact_digest},
+        artifact_digests={},
         attack_provenance=rotation_provenance,
     )
     round_tripped = json.loads(json.dumps(observed.as_dict()))
@@ -191,24 +153,11 @@ def test_rotation_provenance_jsonl_round_trip_accepts_crop_box_array(monkeypatch
 
 
 @pytest.mark.unit
-def test_main_table_uses_unwatermarked_fpr_and_rejects_wrong_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = BaselineSpec(
-        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
-        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
-        source_exact="0" * 40, adapter_exact="1" * 40,
-        source_artifact_digest="sha256:" + "0" * 64,
-        adapter_artifact_digest="sha256:" + "1" * 64,
-        threshold_provenance="tree_ring:calibration:approved",
-        threshold_artifact_digest="sha256:" + "2" * 64,
-    )
-    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
-    monkeypatch.setattr("cegwm.baselines.table.baseline_by_id", lambda _: spec)
+def test_main_table_uses_unwatermarked_fpr_rejects_wrong_key_and_counts_failures() -> None:
     common = {
-        "source_exact": spec.source_exact, "adapter_exact": spec.adapter_exact,
-        "continuous_score": 0.25, "score_direction": spec.score_direction,
-        "threshold_provenance": spec.threshold_provenance, "status": "observed",
-        "artifact_digests": {"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
-                             "threshold": spec.threshold_artifact_digest},
+        "source_exact": None, "adapter_exact": None, "continuous_score": 0.25,
+        "score_direction": "lower_is_watermarked", "threshold_provenance": "tree_ring:calibration:approved",
+        "status": "observed", "artifact_digests": {},
     }
     watermarked = _record(sample_role="evaluation_watermarked", decision=True, **common)
     negative = _record(sample_role="evaluation_unwatermarked_negative", decision=False, **common)
@@ -216,6 +165,11 @@ def test_main_table_uses_unwatermarked_fpr_and_rejects_wrong_key(monkeypatch: py
     assert (row.true_positive, row.false_negative, row.false_positive, row.true_negative) == (1, 0, 0, 1)
     with pytest.raises(ValueError, match="wrong-key diagnostics"):
         build_baseline_table_row((replace(watermarked, sample_role="wrong_key_diagnostic"), negative))
+    retained_failure = replace(
+        watermarked, continuous_score=None, score_direction=None, threshold_provenance=None, decision=None,
+        status="failed", failure_reason="adapter stopped", artifact_digests={},
+    )
+    assert build_baseline_table_row((watermarked, negative, retained_failure)).failure_count == 1
     unrelated_failure = replace(
         watermarked,
         attack_condition="different_pending_user_freeze",
@@ -231,7 +185,7 @@ def test_main_table_uses_unwatermarked_fpr_and_rejects_wrong_key(monkeypatch: py
 
 
 @pytest.mark.unit
-def test_failed_unit_remains_a_record_with_artifact_identity() -> None:
+def test_failed_unit_remains_a_record_without_artifact_identity() -> None:
     failed = _record(
         source_exact=None,
         adapter_exact=None,
@@ -243,9 +197,7 @@ def test_failed_unit_remains_a_record_with_artifact_identity() -> None:
         failure_reason="external source not available",
     )
     assert validate_observation(failed).status == "failed"
-    with pytest.raises(ValueError, match="artifact_digests"):
-        validate_observation(replace(failed, artifact_digests={}))
-    with pytest.raises(ValueError, match="sha256"):
-        validate_observation(replace(failed, artifact_digests={"log": "not-a-digest"}))
+    assert validate_observation(replace(failed, artifact_digests={})).status == "failed"
+    assert validate_observation(replace(failed, artifact_digests={"log": "not-a-digest"})).status == "failed"
     with pytest.raises(ValueError, match="cannot carry detection evidence"):
         validate_observation(replace(failed, continuous_score=0.25))

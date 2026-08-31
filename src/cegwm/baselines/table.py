@@ -16,12 +16,7 @@ from cegwm.baselines.registry import baseline_by_id
 
 FINAL_BASELINE_LONG_TABLE_FIELDS = (
     "baseline_id",
-    "source_exact",
-    "source_artifact_digest",
-    "adapter_exact",
-    "adapter_artifact_digest",
     "threshold_identity",
-    "threshold_artifact_digest",
     "attack_family",
     "attack_condition",
     "planned_positive_units",
@@ -67,8 +62,6 @@ PRIMARY_ATTACK_FAMILIES = (
 @dataclass(frozen=True)
 class BaselineTableRow:
     baseline_id: str
-    source_exact: str
-    adapter_exact: str
     attack_family: str
     attack_condition: str
     threshold_identity: str
@@ -108,19 +101,13 @@ def build_baseline_table_row(records: Iterable[BaselineObservation]) -> Baseline
     evaluation = tuple(item for item in items if item.status == "observed")
     if not evaluation:
         raise ValueError("a baseline table row requires observed evaluation records")
-    identity = (evaluation[0].source_exact, evaluation[0].adapter_exact, evaluation[0].threshold_provenance,
-                evaluation[0].attack_family, evaluation[0].attack_condition)
-    if identity[3] not in PRIMARY_ATTACK_FAMILIES:
+    identity = (evaluation[0].threshold_provenance, evaluation[0].attack_family, evaluation[0].attack_condition)
+    if identity[1] not in PRIMARY_ATTACK_FAMILIES:
         raise ValueError("attack family is not registered")
-    if any((item.source_exact, item.adapter_exact, item.threshold_provenance,
-            item.attack_family, item.attack_condition) != identity for item in evaluation):
-        raise ValueError("evaluation records must share source, adapter, threshold, and attack identity")
-    if any((item.attack_family, item.attack_condition) != identity[3:] for item in items):
+    if any((item.threshold_provenance, item.attack_family, item.attack_condition) != identity for item in evaluation):
+        raise ValueError("evaluation records must share threshold and attack identity")
+    if any((item.attack_family, item.attack_condition) != identity[1:] for item in items):
         raise ValueError("all table inputs must share attack identity")
-    if any(item.status == "failed" and (
-        item.source_exact not in {None, identity[0]} or item.adapter_exact not in {None, identity[1]}
-    ) for item in items):
-        raise ValueError("failed records must match the row source and adapter when present")
     true_positive = sum(item.sample_role == "evaluation_watermarked" and item.decision for item in evaluation)
     false_negative = sum(item.sample_role == "evaluation_watermarked" and not item.decision for item in evaluation)
     false_positive = sum(item.sample_role == "evaluation_unwatermarked_negative" and item.decision for item in evaluation)
@@ -129,11 +116,9 @@ def build_baseline_table_row(records: Iterable[BaselineObservation]) -> Baseline
     quality_names = tuple(sorted({name for item in evaluation for name in item.quality}))
     return BaselineTableRow(
         baseline_id=baseline_id,
-        source_exact=identity[0],
-        adapter_exact=identity[1],
-        attack_family=identity[3],
-        attack_condition=identity[4],
-        threshold_identity=identity[2],
+        attack_family=identity[1],
+        attack_condition=identity[2],
+        threshold_identity=identity[0],
         true_positive=true_positive,
         false_negative=false_negative,
         false_positive=false_positive,

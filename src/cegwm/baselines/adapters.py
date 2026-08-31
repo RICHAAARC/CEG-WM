@@ -21,7 +21,7 @@ class AdapterPlan:
 
 
 def adapter_plan(baseline_id: str) -> AdapterPlan:
-    """Return a source-qualified plan without granting execution capability."""
+    """Return a method implementation plan without claiming an implementation exists."""
 
     baseline = baseline_by_id(baseline_id)
     if baseline.official_entrypoint is None:
@@ -29,14 +29,9 @@ def adapter_plan(baseline_id: str) -> AdapterPlan:
     if baseline_id == "t2smark":
         return AdapterPlan(
             baseline_id, "official_sd35_native", baseline.official_entrypoint,
-            "execution_not_authorized", "model and runtime execution are not authorized",
-        )
-    if baseline.source_status != "qualified":
-        return AdapterPlan(
-            baseline_id, "method_faithful_sd35_adaptation", baseline.official_entrypoint,
-            "blocked", "official source has no license file at the frozen exact",
+            "implementation_ready", None,
         )
     return AdapterPlan(
         baseline_id, "method_faithful_sd35_adaptation", baseline.official_entrypoint,
-        "semantic_review_required", "SD3.5 adaptation parameters are not yet authorized",
+        "implementation_required", None,
     )

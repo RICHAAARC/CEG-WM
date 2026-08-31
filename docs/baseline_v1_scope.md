@@ -7,12 +7,14 @@ for its official `run_sd35.py` native path. Detached official sources are kept
 under ignored `external_sources/` as source-audit input, not project method code
 or executable adapters.
 
-Each observation records the method/source/adapter identity, prompt/seed/base
-latent commitment, frozen attack family and condition, continuous score/direction,
-method-specific threshold identity and decision, quality/runtime, status/failure,
-and artifact digests. Calibration uses 2,000 independent clean unwatermarked
-negatives per method and contains a score but no decision; each method then
-independently calibrates its own threshold for the frozen target FPR of 0.1%.
+Each observation records method identity, prompt/seed/base latent commitment,
+frozen attack family and condition, continuous score/direction, method-specific
+threshold identity and decision, quality/runtime, and status/failure. Source,
+adapter, exact, digest, license, and other provenance metadata are optional
+context rather than score, adapter, or main-table hard gates. Calibration uses
+2,000 independent clean unwatermarked negatives per method and contains a score
+but no decision; each method then independently calibrates its own threshold for
+the frozen target FPR of 0.1%.
 Clean confirmation uses 3,000 independent clean unwatermarked negatives and
 the exact one-sided 95% Clopper-Pearson UCB admission condition `UCB <= 0.001`.
 Evaluation uses 1,000 physical units over the six frozen conditions: clean,
@@ -28,15 +30,13 @@ method-native diagnostic role: it is excluded from calibration, rejected by the
 main-table builder, and never mixed into the unwatermarked FPR. Proposed CEG or
 Geometry-V4 rows are not baseline IDs and are rejected.
 
-The source audit registers method-native score directions, but adapter exacts
-and threshold provenance remain unresolved. Therefore the current registry
-rejects `observed` records; failed and `not_available` records
-cannot contain placeholder scores or decisions.  Future observed records must bind a
-registered method direction, a `baseline_id:calibration:` provenance identity,
-a validated source/adapter registry state, lowercase 40-character source and
-adapter Git exacts, and named SHA-256 source/adapter/threshold artifact digests.
-Those six identities are frozen in the method registry and must match each
-observed record exactly; current adapter and calibration identities are unresolved.
+The source audit registers method-native score directions. `observed` and
+`confirmation_observed` records require a real score/decision, that method's
+direction, and a `baseline_id:calibration:` threshold provenance prefix; optional
+source/adapter exacts or artifact digests never decide their admissibility.
+Failed and `not_available` records still cannot carry placeholder scores or
+decisions. The registry and adapter plan describe implementation work, not a
+claim that an adapter, calibration, or scientific result is complete.
 
 No record here supplies geometry (`H_hat` or corners), alters Geometry-V4, or
 constitutes a model execution, threshold calibration, attack roster, denominator,
