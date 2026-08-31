@@ -8,13 +8,14 @@ from cegwm.baselines.protocol import (
     TARGET_FPR_UPPER_BOUND,
     THRESHOLD_FREEZE_NEGATIVES,
     one_sided_clopper_pearson_upper,
+    operating_point_violation,
     per_method_scale,
     rotation_execution_blocker,
 )
 
 
 @pytest.mark.unit
-def test_exact_clean_confirmation_boundary_is_not_hardcoded() -> None:
+def test_exact_clean_confirmation_interval_is_not_a_hard_gate() -> None:
     upper_zero = one_sided_clopper_pearson_upper(0, CLEAN_CONFIRMATION_NEGATIVES)
     upper_one = one_sided_clopper_pearson_upper(1, CLEAN_CONFIRMATION_NEGATIVES)
 
@@ -22,6 +23,9 @@ def test_exact_clean_confirmation_boundary_is_not_hardcoded() -> None:
     assert upper_zero <= TARGET_FPR_UPPER_BOUND
     assert upper_one > TARGET_FPR_UPPER_BOUND
     assert upper_one > upper_zero
+    assert not operating_point_violation(0, CLEAN_CONFIRMATION_NEGATIVES)
+    assert not operating_point_violation(1, CLEAN_CONFIRMATION_NEGATIVES)
+    assert operating_point_violation(4, CLEAN_CONFIRMATION_NEGATIVES)
 
 
 @pytest.mark.unit

@@ -13,10 +13,17 @@ cannot read or receive feedback from the separate confirmation partition.
 The primary FPR gate uses **3,000 independent clean unwatermarked-negative**
 `clean_confirmation` units. It computes the exact one-sided 95% Clopper-Pearson
 upper limit `BetaInv(0.95; FP + 1, n - FP)`, with the exact zero-count form
-`1 - 0.05^(1/n)`. The gate passes only when that bound is at most 0.001. At
-`n=3000`, `FP=0` gives about 0.000998 and passes; `FP>=1` fails. Confirmation
-outcomes never adjust a frozen threshold. Attacked negatives report their own
-per-condition FPR and interval and never enter this clean-confirmation gate.
+`1 - 0.05^(1/n)`. This interval is explanatory uncertainty, not a result-admission
+or experiment-success gate. At `n=3000`, `FP=0` gives about 0.000998; `FP=1`
+has a larger upper bound, but both complete results remain reportable.
+
+The predeclared operating-point flag is instead the observed rate: set
+`operating_point_violation` when `FP / 3000 > 0.001` (thus four or more false
+positives). A violation preserves every result, forbids threshold retuning or
+sample replacement, and is reported alongside the threshold statement: **TPR at
+a threshold calibrated for target FPR=0.1%**. It must never be worded as a
+confirmed true FPR bound. Attacked negatives report their own per-condition FPR
+and interval and never enter this clean-confirmation denominator.
 
 ## Evaluation and attacks
 

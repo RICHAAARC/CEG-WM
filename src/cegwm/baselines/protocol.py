@@ -130,8 +130,17 @@ class ConfirmationGateResult:
     observed_negatives: int
     failure_count: int
     false_positives: int
+    observed_fpr: float | None
     upper_bound: float | None
-    passed: bool
+    operating_point_violation: bool | None
+
+
+def operating_point_violation(false_positives: int, negatives: int) -> bool:
+    """Predeclared observed-rate flag; it does not authorize threshold retuning."""
+
+    if negatives <= 0 or false_positives < 0 or false_positives > negatives:
+        raise ValueError("false-positive count must be within a positive negative denominator")
+    return false_positives / negatives > TARGET_FPR_UPPER_BOUND
 
 
 def evaluate_clean_confirmation(records: Iterable[BaselineObservation]) -> ConfirmationGateResult:
@@ -148,8 +157,9 @@ def evaluate_clean_confirmation(records: Iterable[BaselineObservation]) -> Confi
     failures = sum(item.status == "failed" for item in items)
     observed = tuple(item for item in items if item.status == "confirmation_observed")
     if failures or len(observed) != CLEAN_CONFIRMATION_NEGATIVES:
-        return ConfirmationGateResult(CLEAN_CONFIRMATION_NEGATIVES, len(observed), failures, 0, None, False)
+        return ConfirmationGateResult(CLEAN_CONFIRMATION_NEGATIVES, len(observed), failures, 0, None, None, None)
     false_positives = sum(item.decision for item in observed)
     upper_bound = one_sided_clopper_pearson_upper(false_positives, CLEAN_CONFIRMATION_NEGATIVES)
-    return ConfirmationGateResult(CLEAN_CONFIRMATION_NEGATIVES, len(observed), 0, false_positives, upper_bound,
-                                  upper_bound <= TARGET_FPR_UPPER_BOUND)
+    observed_fpr = false_positives / CLEAN_CONFIRMATION_NEGATIVES
+    return ConfirmationGateResult(CLEAN_CONFIRMATION_NEGATIVES, len(observed), 0, false_positives, observed_fpr,
+                                  upper_bound, operating_point_violation(false_positives, CLEAN_CONFIRMATION_NEGATIVES))

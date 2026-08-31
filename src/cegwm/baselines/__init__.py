@@ -16,6 +16,7 @@ from cegwm.baselines.protocol import (
     THRESHOLD_FREEZE_NEGATIVES,
     evaluate_clean_confirmation,
     one_sided_clopper_pearson_upper,
+    operating_point_violation,
     per_method_scale,
     rotation_execution_blocker,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "build_baseline_table_row",
     "evaluate_clean_confirmation",
     "one_sided_clopper_pearson_upper",
+    "operating_point_violation",
     "per_method_scale",
     "rotation_execution_blocker",
     "evaluate_clean_confirmation",
