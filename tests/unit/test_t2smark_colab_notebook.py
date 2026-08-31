@@ -14,6 +14,7 @@ def test_thin_launcher_contract() -> None:
                    "checkout','--detach',resolved_exact", "status','--porcelain",
                    "cegwm.baselines.t2smark_canary", "RUN_ID='t2smark_sd35_one_unit_v1'",
                    "FORCE_RERUN_ALL=False", "HF_TOKEN", "cwd=checkout", "0xD009/T2SMark.git",
-                   "--official-source", "0c1fbfd50fcd1fba135477a2c016e284d5d"):
+                   "--official-source", "OFFICIAL_EXACT=", "official_head==OFFICIAL_EXACT",
+                   "symbolic-ref','-q','--short','HEAD", "official_dirty"):
         assert marker in text
     assert "force_remount" not in text and "T2SMarkCodec" not in text
