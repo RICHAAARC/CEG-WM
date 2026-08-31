@@ -124,13 +124,16 @@ def valid_file(path: Path, expected_sha256: str | None = None) -> bool:
 
 def valid_generation(run_dir: Path, config: dict[str, Any]) -> bool:
     checkpoint = _read_json(run_dir / "generation_checkpoint.json")
-    if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("files"), dict) or checkpoint.get("identity") != _identity(config): return False
-    return all(valid_file(run_dir / name, checkpoint.get("files", {}).get(name)) for name in ("clean.png", "watermarked.png"))
+    try:
+        if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("files"), dict) or checkpoint.get("identity") != _identity(config): return False
+        files = checkpoint["files"]
+        return all(isinstance(files.get(name), str) and len(files[name]) == 64 and valid_file(run_dir / name, files[name]) for name in ("clean.png", "watermarked.png"))
+    except (KeyError, TypeError): return False
 
 
 def generation_digest(run_dir: Path) -> str | None:
     checkpoint = _read_json(run_dir / "generation_checkpoint.json")
-    if not checkpoint or not valid_generation(run_dir, checkpoint.get("identity", {})): return None
+    if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("identity"), dict) or not valid_generation(run_dir, checkpoint["identity"]): return None
     return hashlib.sha256(json.dumps(checkpoint, sort_keys=True).encode()).hexdigest()
 
 
@@ -253,7 +256,11 @@ def run_transaction(run_dir: Path, config: dict[str, Any], generate: Callable[[]
 
 def validate_final_publication(run_dir: Path) -> bool:
     manifest = _read_json(run_dir / "final_manifest.json")
-    if not isinstance(manifest, dict): return False
+    result = _read_json(run_dir / "canary_result.json")
+    if not isinstance(manifest, dict) or not isinstance(result, dict) or result.get("engineering_canary_complete") is not True or not isinstance(result.get("observations"), list) or len(result["observations"]) != 12: return False
+    keys = ("generation_digest", "observation_set_digest", "csv_sha256")
+    if any(not isinstance(manifest.get(key), str) or manifest.get(key) != result.get(key) for key in keys): return False
+    if hashlib.sha256((run_dir / "scores.csv").read_bytes()).hexdigest() != manifest["csv_sha256"]: return False
     return all(isinstance(manifest.get(key), str) and len(manifest[key]) == 64 for key in ("result_sha256", "scores_sha256")) and valid_file(run_dir / "canary_result.json", manifest["result_sha256"]) and valid_file(run_dir / "scores.csv", manifest["scores_sha256"])
 
 
