@@ -54,7 +54,7 @@ def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> No
             decision=True,
             status="observed",
         ))
-    with pytest.raises(ValueError, match="placeholder detection evidence"):
+    with pytest.raises(ValueError, match="cannot carry detection evidence"):
         validate_observation(_record(continuous_score=0.25))
 
 
