@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, baseline_by_id, validate_observation
+from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, adapter_plan, baseline_by_id, validate_observation
 from cegwm.baselines.registry import BaselineSpec
 
 
@@ -42,6 +42,15 @@ def test_registry_contains_only_the_authorized_four_methods() -> None:
     assert baseline_by_id("t2smark").sd35_path == "official_run_sd35_native_path"
     with pytest.raises(ValueError, match="out-of-scope"):
         baseline_by_id("image_domain_method")
+
+
+@pytest.mark.unit
+def test_source_qualification_keeps_execution_and_unlicensed_source_closed() -> None:
+    assert baseline_by_id("tree_ring").score_direction == "lower_is_watermarked"
+    assert baseline_by_id("t2smark").official_entrypoint == "run_sd35.py"
+    assert adapter_plan("tree_ring").execution_status == "semantic_review_required"
+    assert adapter_plan("t2smark").execution_status == "execution_not_authorized"
+    assert adapter_plan("shallow_diffuse").execution_status == "blocked"
 
 
 @pytest.mark.unit
