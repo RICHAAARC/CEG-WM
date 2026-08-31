@@ -7,7 +7,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _NOTEBOOK = _ROOT / "notebooks/geometry_v5_m0_diagnostic_colab.ipynb"
-_EXACT = "d193d0fe39702e373e087ca3e9a64e8d7f3cbfef"
+_EXACT = "78f6a955b9a3d79a1fcb1c6aaa47a825fd23c9d3"
 
 
 def _notebook() -> dict[str, object]:
