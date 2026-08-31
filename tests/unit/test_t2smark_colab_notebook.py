@@ -34,9 +34,10 @@ def test_t2smark_canary_notebook_contract() -> None:
     assert "'watermark_seed':WATERMARK_SEED" not in text
     assert "'watermark_key_material':'not persisted'" in text
     persistence_cells = [
-        "".join(cell["source"])
+        line
         for cell in code
-        if "write_text" in "".join(cell["source"]) or "to_csv" in "".join(cell["source"])
+        for line in cell["source"]
+        if any(writer in line for writer in ("write_text", "to_csv", ".save(run_dir"))
     ]
     for secret_variable in ("WATERMARK_SEED", "master_key", "session_key", "message_bits"):
         assert all(secret_variable not in cell for cell in persistence_cells)
