@@ -31,3 +31,10 @@ model. CPU fixtures check formula and interface wiring only, with
 `science_denominator=0`; they are not robustness or scientific results. The
 next authorized execution node is a Colab one-physical-unit clean/watermarked
 pair and clean plus five-attack real-score canary.
+
+The self-contained handoff notebook is
+`notebooks/baseline_v1_t2smark_colab_canary.ipynb`. It clones the official
+source at its pinned exact, uses a gated SD3.5 model only on a CUDA Colab
+runtime, and writes a create-only Drive artifact. It is an unexecuted local
+handoff: the notebook's 12 planned calls are not results until a real Colab run
+creates and preserves its artifact directory.
