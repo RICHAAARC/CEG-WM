@@ -119,3 +119,47 @@ def test_r0_content_raw_uses_the_frozen_whitened_lf_scorer_for_all_keys(monkeypa
     assert [item[1] for item in calls[::2]] == ["content-key-0001", *wrong_keys]
     assert all(item[2] == "frozen-hf" for item in calls[1::2])
     assert all(record["lf"] == 0.25 and record["hf"] == 0.5 and record["weighted_joint"] == 0.75 for record in records.values())
+
+
+def test_run_wires_one_loaded_whitening_asset_to_every_candidate_and_matched_null(monkeypatch, tmp_path):
+    loaded_asset, frozen_lf_assets, carrier = object(), object(), object()
+    loader_calls, wrapper_calls, lf_calls, hf_calls = [], [], [], []
+    wrong_keys = tuple(f"wrong-{index}".encode() for index in range(16))
+
+    monkeypatch.setenv(r0_engine.CONTENT_KEY_ENV, "content-key-0001")
+    monkeypatch.setenv(r0_engine.GEOMETRY_KEY_ENV, "geometry-key-0001")
+    monkeypatch.setenv(r0_engine.WRONG_GEOMETRY_KEY_ENV, "wrong-geometry-0001")
+    monkeypatch.setenv("HF_TOKEN", "token")
+    monkeypatch.setattr(r0_engine, "_exact", lambda root, exact: exact)
+    assets = SimpleNamespace(lf_public_assets=carrier, hf_public_assets="frozen-hf")
+    monkeypatch.setattr(r0_engine, "_load_assets", lambda token: ("pipeline", assets))
+    monkeypatch.setattr(r0_engine, "load_calibration_asset", lambda *paths: "calibration")
+    monkeypatch.setattr(r0_engine, "load_frozen_content_whitening_asset", lambda root: loader_calls.append(root) or loaded_asset)
+    monkeypatch.setattr(r0_engine, "FrozenContentWhiteningLFPublicAssets", lambda got_carrier, got_asset: wrapper_calls.append((got_carrier, got_asset)) or frozen_lf_assets)
+    monkeypatch.setattr(r0_engine, "derive_stability_wrong_keys", lambda key: wrong_keys)
+    monkeypatch.setattr(r0_engine.torch, "Generator", lambda device: SimpleNamespace(manual_seed=lambda seed: object()))
+    monkeypatch.setattr(r0_engine, "run_sd35_geometry_v6_r0_arm", lambda pipeline, prompt, arm, **kwargs: SimpleNamespace(image=f"{arm}:{kwargs.get('amplitude')}"))
+    monkeypatch.setattr(r0_engine, "score_content_whitened_lf_image", lambda image, key, got_assets: lf_calls.append((image, key, got_assets)) or 0.25)
+    monkeypatch.setattr(r0_engine, "score_hf_image", lambda image, key, got_assets: hf_calls.append((image, key, got_assets)) or 0.5)
+    monkeypatch.setattr(r0_engine, "weighted_joint_score", lambda lf, hf, calibration: lf + hf)
+    gate = SimpleNamespace(weighted_gate_a=True, weighted_gate_b=True, lf_gate_a_diagnostic=True, lf_gate_b_diagnostic=True, hf_gate_a_diagnostic=True, hf_gate_b_diagnostic=True)
+    monkeypatch.setattr(r0_engine, "weighted_gate_evidence", lambda *args: gate)
+    monkeypatch.setattr(r0_engine, "_geometry_raw", lambda *args: {"correct": 0.0, "wrong": 0.0, "no_key": None})
+    keys = SimpleNamespace(search=b"s", fit=b"f", validate=b"v")
+    monkeypatch.setattr(r0_engine, "derive_geometry_keys", lambda key: keys)
+    monkeypatch.setattr(r0_engine, "public_key_digest", lambda key: "0" * 64)
+
+    exact = "a" * 40
+    payload = r0_engine._run(SimpleNamespace(repo_root=tmp_path, expected_exact=exact, prompt="frozen prompt", seed=7, height=256, width=256))
+
+    assert loader_calls == [tmp_path.resolve()]
+    assert wrapper_calls == [(carrier, loaded_asset)]
+    expected_images = {"content_only:None", "unwatermarked:None"}
+    expected_images.update(f"{arm}:{amplitude}" for amplitude in r0_engine.R0_AMPLITUDE_CANDIDATES for arm in ("content_geometry", "geometry_only"))
+    assert {image for image, _, _ in lf_calls} == expected_images
+    assert len(lf_calls) == len(expected_images) * 17
+    assert all(got_assets is frozen_lf_assets for _, _, got_assets in lf_calls)
+    assert {key for _, key, _ in lf_calls} == {"content-key-0001", *wrong_keys}
+    assert len(hf_calls) == len(lf_calls) and all(got_assets == "frozen-hf" for _, _, got_assets in hf_calls)
+    assert payload["baselines"]["content_only"]["content_evidence"]["per_unit_frozen_content_positive"] is True
+    assert all(item["content_geometry"]["content_evidence"]["per_unit_frozen_content_positive"] is True for item in payload["amplitudes"])
