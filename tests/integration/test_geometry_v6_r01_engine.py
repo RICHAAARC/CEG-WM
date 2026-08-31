@@ -1,3 +1,4 @@
+import json
 import math
 from pathlib import Path
 
@@ -33,6 +34,22 @@ def test_r01_carrier_and_quality_are_strict_and_fail_closed():
 
 def _content_record(gates, positive=True):
     return {"content_evidence": {"per_unit_frozen_content_positive": positive, "per_unit_frozen_content_evidence": gates}}
+
+
+def test_r01_notebook_has_fixed_execution_handoff_and_create_only_drive_sink():
+    notebook = json.loads(Path("notebooks/geometry_v6_r01_colab.ipynb").read_text(encoding="utf-8"))
+    text = json.dumps(notebook)
+    assert notebook["cells"][0]["source"] == ["from google.colab import drive\n", "drive.mount('/content/drive')\n"]
+    assert all(cell["execution_count"] is None and cell["outputs"] == [] for cell in notebook["cells"])
+    assert "force_remount" not in text
+    assert "APPROVED_EXECUTION_EXACT='bcecbf63a2218eabd7dd878f19dd379feedf2b26'" in text
+    assert "['git','checkout','--detach',APPROVED_EXECUTION_EXACT]" in text
+    assert "git('rev-parse','HEAD')==APPROVED_EXECUTION_EXACT" in text
+    assert "git('branch','--show-current')==''" in text and "git('status','--porcelain')==''" in text
+    assert "/content/drive/MyDrive/CEG-WM/Geometry-V6/R01" in text
+    assert "RUN_ROOT.mkdir(parents=True,exist_ok=False)" in text
+    assert "[sys.executable,'-m','experiments.geometry_v6_r01_engine'" in text
+    assert "--expected-exact" in text and "--output-json" in text
 
 
 def test_r01_one_complete_amplitude_is_a_candidate_and_all_incomplete_fail_closed():
