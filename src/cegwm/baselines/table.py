@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from cegwm.baselines.protocol import FORMAL_ATTACK_CONDITIONS
 from cegwm.baselines.records import BaselineObservation, validate_observation
 from cegwm.baselines.registry import baseline_by_id
 
@@ -48,13 +49,8 @@ FINAL_BASELINE_LONG_TABLE_FIELDS = (
 )
 
 
-FINAL_BASELINE_PRIMARY_CONDITION_ORDER = (
-    "clean_no_attack",
-    "jpeg_q50",
-    "resize_50_bicubic_restore",
-    "center_crop_80_restore",
-    "gaussian_blur_sigma_1px",
-    "rotation_10_bicubic_reflect_center_crop_v1",
+FINAL_BASELINE_PRIMARY_CONDITION_ORDER = tuple(
+    condition.condition for condition in FORMAL_ATTACK_CONDITIONS
 )
 
 
