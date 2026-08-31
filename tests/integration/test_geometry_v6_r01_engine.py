@@ -29,3 +29,26 @@ def test_r01_carrier_and_quality_are_strict_and_fail_closed():
     metrics = engine._v4_rgb_quality(clean, marked)
     assert math.isfinite(metrics["psnr_db"]) and math.isfinite(metrics["ssim"])
     assert engine._matched_quality(None, clean)["status"] == "FAIL_CLOSED_QUALITY_UNAVAILABLE"
+
+
+def _content_record(gates, positive=True):
+    return {"content_evidence": {"per_unit_frozen_content_positive": positive, "per_unit_frozen_content_evidence": gates}}
+
+
+def test_r01_one_complete_amplitude_is_a_candidate_and_all_incomplete_fail_closed():
+    summaries = [
+        {"amplitude": 0.0025, "passed_units": 4, "status": "PASS"},
+        {"amplitude": 0.005, "passed_units": 3, "status": "FAIL_CLOSED"},
+        {"amplitude": 0.01, "passed_units": 0, "status": "FAIL_CLOSED"},
+    ]
+    assert engine._carrier_window(summaries) == (True, [0.0025])
+    assert engine._carrier_window([{**item, "passed_units": 3, "status": "FAIL_CLOSED"} for item in summaries]) == (False, [])
+
+
+def test_r01_content_compatibility_requires_matching_complete_six_gate_vector():
+    gates = {field: True for field in engine._CONTENT_GATE_FIELDS}
+    assert engine._content_compatibility(_content_record(gates), _content_record(dict(gates))) is True
+    changed = dict(gates); changed["hf_gate_b_diagnostic"] = False
+    assert engine._content_compatibility(_content_record(gates), _content_record(changed)) is False
+    missing = dict(gates); missing.pop("weighted_gate_b")
+    assert engine._content_compatibility(_content_record(missing), _content_record(missing)) is False

@@ -25,6 +25,7 @@ ROSTER_SIZE = 4
 QUALITY_PSNR_MIN = 40.0
 QUALITY_SSIM_MIN = 0.98
 _DELTA_FIELDS = ("search_score", "fit_score", "validate_score", "aggregate_score")
+_CONTENT_GATE_FIELDS = ("lf_gate_a_diagnostic", "lf_gate_b_diagnostic", "hf_gate_a_diagnostic", "hf_gate_b_diagnostic", "weighted_gate_a", "weighted_gate_b")
 _EXPECTED_ROSTER = (
     ("content-chain-seed-01-0001", "A cartographer inking river contours beside a brass compass", 2026101000),
     ("content-chain-seed-01-0002", "A falconer repairing a leather glove in a stone courtyard", 2026101001),
@@ -102,14 +103,30 @@ def _unit_amplitude(
     content_only: dict[str, Any], unwatermarked: dict[str, Any], combined: dict[str, Any], geometry_only: dict[str, Any],
     content_only_image: Any | None, unwatermarked_image: Any | None, combined_image: Any | None, geometry_only_image: Any | None,
 ) -> dict[str, Any]:
-    content = combined.get("content_evidence", {})
-    content_pass = content_only.get("content_evidence", {}).get("per_unit_frozen_content_positive") is True and content.get("per_unit_frozen_content_positive") is True
+    content_pass = _content_compatibility(content_only, combined)
     comparisons = {
         "content_geometry_vs_content_only": {"carrier": _matched_carrier(combined, content_only), "quality": _matched_quality(combined_image, content_only_image)},
         "geometry_only_vs_unwatermarked": {"carrier": _matched_carrier(geometry_only, unwatermarked), "quality": _matched_quality(geometry_only_image, unwatermarked_image)},
     }
     pairs_pass = all(item["carrier"]["status"] == "PASS" and item["quality"]["status"] == "PASS" for item in comparisons.values())
     return {"status": "PASS" if content_pass and pairs_pass else "FAIL_CLOSED", "content_compatibility_pass": content_pass, "matched_pairs": comparisons}
+
+
+def _content_compatibility(content_only: dict[str, Any], combined: dict[str, Any]) -> bool:
+    left, right = content_only.get("content_evidence", {}), combined.get("content_evidence", {})
+    if left.get("per_unit_frozen_content_positive") is not True or right.get("per_unit_frozen_content_positive") is not True:
+        return False
+    left_evidence, right_evidence = left.get("per_unit_frozen_content_evidence"), right.get("per_unit_frozen_content_evidence")
+    if not isinstance(left_evidence, dict) or not isinstance(right_evidence, dict):
+        return False
+    if set(left_evidence) != set(_CONTENT_GATE_FIELDS) or set(right_evidence) != set(_CONTENT_GATE_FIELDS):
+        return False
+    return all(isinstance(left_evidence[field], bool) and isinstance(right_evidence[field], bool) and left_evidence[field] is True and left_evidence[field] == right_evidence[field] for field in _CONTENT_GATE_FIELDS)
+
+
+def _carrier_window(amplitude_summaries: list[dict[str, Any]]) -> tuple[bool, list[float]]:
+    passing = [item["amplitude"] for item in amplitude_summaries if item.get("status") == "PASS" and item.get("passed_units") == ROSTER_SIZE]
+    return bool(passing), passing
 
 
 def _generate(pipeline: Any, assets: Any, content_key: str, prompt: str, seed: int, arm: str, amplitude: float | None) -> tuple[Any | None, dict[str, str] | None]:
@@ -169,8 +186,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     for index, amplitude in enumerate(R0_AMPLITUDE_CANDIDATES):
         passed = sum(unit["amplitudes"][index]["r01_gate"]["status"] == "PASS" for unit in units)
         amplitude_summaries.append({"amplitude": amplitude, "passed_units": passed, "required_units": ROSTER_SIZE, "status": "PASS" if passed == ROSTER_SIZE else "FAIL_CLOSED"})
-    candidate = all(item["status"] == "PASS" for item in amplitude_summaries)
-    return {"method_id": R01_METHOD_ID, "stage": "R0.1_fixed_carrier_candidate_only", "evidence_ceiling": "fixed_four_unit_carrier_window_candidate_only; science_denominator=0; no_formal_fpr_or_robustness_claim", "exact": exact, "runtime_environment": r0._runtime_environment(pipeline), "roster_manifest": ROSTER_MANIFEST, "roster_manifest_sha256": ROSTER_MANIFEST_SHA256, "ordered_roster": [{key: unit[key] for key in ("unit_id", "prompt", "seed", "height", "width")} for unit in roster], "amplitude_sequence": R0_AMPLITUDE_CANDIDATES, "units": units, "amplitude_summaries": amplitude_summaries, "carrier_window": "CARRIER_WINDOW_CANDIDATE" if candidate else "FAIL_CLOSED_NO_CARRIER_WINDOW_CANDIDATE", "conditional_flow_fpr": "NOT_ADJUDICATED", "science_denominator": 0}
+    candidate, passing_amplitudes = _carrier_window(amplitude_summaries)
+    return {"method_id": R01_METHOD_ID, "stage": "R0.1_fixed_carrier_candidate_only", "evidence_ceiling": "fixed_four_unit_carrier_window_candidate_only; science_denominator=0; no_formal_fpr_or_robustness_claim", "exact": exact, "runtime_environment": r0._runtime_environment(pipeline), "roster_manifest": ROSTER_MANIFEST, "roster_manifest_sha256": ROSTER_MANIFEST_SHA256, "ordered_roster": [{key: unit[key] for key in ("unit_id", "prompt", "seed", "height", "width")} for unit in roster], "amplitude_sequence": R0_AMPLITUDE_CANDIDATES, "units": units, "amplitude_summaries": amplitude_summaries, "passing_amplitudes": passing_amplitudes, "carrier_window": "CARRIER_WINDOW_CANDIDATE" if candidate else "FAIL_CLOSED_NO_CARRIER_WINDOW_CANDIDATE", "conditional_flow_fpr": "NOT_ADJUDICATED", "science_denominator": 0}
 
 
 def _write_create_only(path: Path, payload: dict[str, Any]) -> None:
