@@ -167,14 +167,16 @@ def test_torch_template_injection_rejects_bad_entries_and_nonfinite_weights_when
 
 
 @pytest.mark.unit
-def test_torch_template_injection_accepts_seeded_random_float32_cpu_when_available() -> None:
+@pytest.mark.parametrize("dtype_name", ("float32", "float16"))
+def test_torch_template_injection_accepts_seeded_random_cpu_latent_when_available(dtype_name: str) -> None:
     torch = pytest.importorskip("torch")
     torch.manual_seed(6033)
-    latents = torch.randn((1, 4, 64, 64), dtype=torch.float32)
+    dtype = getattr(torch, dtype_name)
+    latents = torch.randn((1, 4, 64, 64), dtype=dtype)
 
     injected = method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
 
-    assert injected.dtype is torch.float32 and injected.device.type == "cpu"
+    assert injected.dtype is dtype and injected.device.type == "cpu"
     assert torch.isfinite(injected).all()
     assert torch.equal(injected[:, :3], latents[:, :3])
     assert not torch.equal(injected[:, 3], latents[:, 3])
@@ -227,4 +229,22 @@ def test_torch_template_injection_rejects_nonfinite_ifft_components_when_availab
     monkeypatch.setattr(torch.fft, "ifft2", nonfinite_ifft2)
     latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
     with pytest.raises(ValueError, match="non-finite spatial components"):
+        method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
+
+
+@pytest.mark.unit
+def test_torch_template_injection_rejects_finite_ifft_that_overflows_latent_dtype_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    original_ifft2 = torch.fft.ifft2
+
+    def overflow_ifft2(*args: object, **kwargs: object) -> object:
+        spatial = original_ifft2(*args, **kwargs)
+        finite_real = torch.full_like(spatial.real, torch.finfo(torch.float16).max * 2.0)
+        return torch.complex(finite_real, torch.zeros_like(spatial.real))
+
+    monkeypatch.setattr(torch.fft, "ifft2", overflow_ifft2)
+    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float16)
+    with pytest.raises(ValueError, match="cast to latent dtype has non-finite"):
         method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())

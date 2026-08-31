@@ -155,8 +155,11 @@ def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTempla
         raise ValueError("torch Hermitian inverse has non-finite spatial components")
     if float(spatial.imag.abs().max().item()) > _torch_hermitian_residual_tolerance(spatial, torch):
         raise ValueError("torch Hermitian inverse has non-real residual beyond dtype-aware numerical tolerance")
+    updated_template_plane = spatial.real.to(dtype=latents.dtype)
+    if not bool(torch.isfinite(updated_template_plane).all()):
+        raise ValueError("torch Hermitian inverse cast to latent dtype has non-finite components")
     result = latents.clone()
-    result[:, M0_TEMPLATE_CHANNEL] = spatial.real.to(dtype=latents.dtype)
+    result[:, M0_TEMPLATE_CHANNEL] = updated_template_plane
     return result
 
 
