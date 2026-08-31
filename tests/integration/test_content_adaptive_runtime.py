@@ -41,10 +41,12 @@ class _VAE(torch.nn.Module):
         self.anchor = torch.nn.Parameter(torch.zeros(()), requires_grad=False)
         self.config = SimpleNamespace(scaling_factor=0.5, shift_factor=0.1)
         self.decode_calls = 0
+        self.decode_inputs: list[torch.Tensor] = []
 
     def decode(self, latents: torch.Tensor, return_dict: bool) -> SimpleNamespace:
         assert return_dict is True
         self.decode_calls += 1
+        self.decode_inputs.append(latents.detach().clone())
         return SimpleNamespace(sample=functional.interpolate(latents[:, :3], size=(64, 64), mode="nearest"))
 
     def encode(self, pixels: torch.Tensor) -> SimpleNamespace:
@@ -153,10 +155,35 @@ def test_adaptive_callback_executes_i0_y0_then_64_temporary_probes_and_one_embed
     )
     assert output.image.mode == "RGB"
     assert assets.hf_public_assets.vae.decode_calls == 65
+    assert all(item.device == assets.hf_public_assets.vae.anchor.device for item in assets.hf_public_assets.vae.decode_inputs)
     assert output.measurement.probe_evaluation_count == 64
     assert 0.0 < output.measurement.combined_budget.relative_l2 <= 0.012
     assert output.measurement.lf_effective_relative_l2 > 0.0
     assert output.measurement.hf_effective_relative_l2 > 0.0
+
+
+@pytest.mark.integration
+def test_callback_decode_routes_coordinates_to_accelerate_execution_device() -> None:
+    vae = _VAE()
+    vae.anchor = torch.nn.Parameter(torch.empty((), device="meta"), requires_grad=False)
+    vae._hf_hook = SimpleNamespace(execution_device="cpu")
+    pipeline = SimpleNamespace(vae=vae, image_processor=_ImageProcessor())
+
+    image = runtime._decode_callback_latents(pipeline, torch.zeros((1, 4, 8, 8)))
+
+    assert vae.anchor.device.type == "meta"
+    assert vae.decode_inputs[0].device.type == "cpu"
+    assert image.mode == "RGB"
+
+
+@pytest.mark.integration
+def test_callback_decode_invalid_accelerate_hook_fails_as_content_runtime_error() -> None:
+    vae = _VAE()
+    vae._hf_hook = SimpleNamespace(execution_device="not-a-device")
+    pipeline = SimpleNamespace(vae=vae, image_processor=_ImageProcessor())
+
+    with pytest.raises(RuntimeError, match="device and dtype cannot be resolved"):
+        runtime._decode_callback_latents(pipeline, torch.zeros((1, 4, 8, 8)))
 
 
 @pytest.mark.integration

@@ -34,7 +34,7 @@ from cegwm.method.lf import (
     LF_BLOCKNORM_DETECTOR_STATISTIC_ID,
     FrozenLFPublicAssets,
 )
-from cegwm.runtime.observation import encode_final_rgb_image, require_ordinary_rgb_image
+from cegwm.runtime.observation import _vae_device_dtype, encode_final_rgb_image, require_ordinary_rgb_image
 
 _SD35_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 _SD35_IMAGE_PROCESSOR_ID = f"{_SD35_MODEL_ID}:image_processor"
@@ -255,14 +255,12 @@ def _decode_callback_latents(pipeline: Any, latents: torch.Tensor) -> Image.Imag
     scaling = _config_scalar(config, "scaling_factor", positive=True)
     shift = _config_scalar(config, "shift_factor", positive=False)
     try:
-        parameter = next(vae.parameters())
-    except (AttributeError, StopIteration, TypeError) as error:
+        device, dtype = _vae_device_dtype(vae)
+    except TypeError as error:
         raise RuntimeError("SD3 pipeline VAE device and dtype cannot be resolved") from error
-    if not parameter.dtype.is_floating_point:
-        raise RuntimeError("SD3 pipeline VAE must use a floating dtype")
     coordinate = (latents.to(torch.float32) / scaling + shift).to(
-        device=parameter.device,
-        dtype=parameter.dtype,
+        device=device,
+        dtype=dtype,
     )
     with torch.no_grad():
         decoded = vae.decode(coordinate, return_dict=True)
