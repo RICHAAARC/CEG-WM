@@ -7,7 +7,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _NOTEBOOK = _ROOT / "notebooks/geometry_v5_m0_diagnostic_colab.ipynb"
-_RUNNER_EXACT = "d17d30b4bca7cf6e29bebf08aa384d773e8550c3"
+_RUNNER_EXACT = "027fbbc5591cea566f6f0b0dcc081266b5da8587"
 
 
 def _notebook() -> dict[str, object]:
@@ -33,7 +33,7 @@ def test_diagnostic_notebook_pins_detached_clean_runner_once_and_calls_fixed_run
     source = "\n".join(cell["source"] for cell in _code_cells(_notebook()))  # type: ignore[arg-type]
     assert source.count(_RUNNER_EXACT) == 1
     assert "https://github.com/RICHAAARC/CEG-WM.git" in source
-    assert "RUNNER_EXACT = 'd17d30b4bca7cf6e29bebf08aa384d773e8550c3'" in source
+    assert "RUNNER_EXACT = '027fbbc5591cea566f6f0b0dcc081266b5da8587'" in source
     assert "'checkout', '--detach', RUNNER_EXACT" in source
     assert "'branch', '--show-current'" in source and "'status', '--porcelain'" in source
     assert source.count("'-m', 'pip', 'install', '.'") == 1
@@ -62,7 +62,20 @@ def test_diagnostic_notebook_reports_only_preflight_and_per_case_json_fields() -
     assert "for case in cases:" in source
     assert "('attack_id', 'failure_stage', 'error_class')" in source
     assert "report['raw.status'] = raw['status']" in source
-    assert "report['diagnostics'] = raw['diagnostics']" in source
-    assert "diagnostic incomplete; preflight and per-case status printed" in source
-    for forbidden in ("completed.stdout", "completed.stderr", "traceback", "original_prompt", "initial_z_t", "final_rgb"):
+    assert "report['raw.diagnostics'] = raw['diagnostics']" in source
+    assert "isolation = case.get('isolation_diagnostics')" in source
+    assert "report['isolation_diagnostics'] = isolation" in source
+    assert "diagnostic incomplete; preflight, raw case fields, and isolation status printed" in source
+    assert source.count("print(json.dumps(report") == 2
+    for forbidden in ("completed.stdout", "completed.stderr", "traceback", "original_prompt", "initial_z_t", "final_rgb", "exception"):
         assert forbidden not in source
+
+
+def test_diagnostic_notebook_names_only_failure_isolation_claim_and_keeps_frozen_roster() -> None:
+    notebook = _notebook()
+    prose = "\n".join(cell["source"] for cell in notebook["cells"])  # type: ignore[arg-type,index]
+    source = "\n".join(cell["source"] for cell in _code_cells(notebook))  # type: ignore[arg-type]
+    assert "failure-isolation" in prose
+    assert "science denominator is 0" in prose
+    assert "seed7501" in source
+    assert "force_remount" not in source
