@@ -143,5 +143,5 @@ def test_diagnostic_module_is_lazy_concrete_and_has_no_formal_gate() -> None:
     assert all(name in source for name in ("load_bound_sd21_pipeline", "generate_bound_sd21", "recover_and_estimate_bound_sd21"))
     assert "aggregate" not in source and "GeometryV5Observation" not in source and "RELIABLE" not in source
     assert "diagnostic_only_not_a_gate" in source and "fake" not in diagnostic._DIAGNOSTIC_ID
-    assert diagnostic._METHOD_SOURCE_EXACT == "fb48ad94a1aedd8b30adbc90918cdebe4973b20b"
+    assert diagnostic._METHOD_SOURCE_EXACT == "7252e0f712db8d857be9b9bfb019e1776cf03978"
     assert "method_preflight" in source and "_preflight_blocked_case" in source
