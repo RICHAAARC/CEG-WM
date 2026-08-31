@@ -18,15 +18,15 @@ def _record(**changes: object) -> BaselineObservation:
         split="test",
         sample_role="watermarked_correct_key",
         attack_id="clean",
-        continuous_score=0.25,
-        score_direction="higher_is_watermarked",
-        threshold_provenance="tree_ring:calibration:unresolved",
-        decision=True,
+        continuous_score=None,
+        score_direction=None,
+        threshold_provenance=None,
+        decision=None,
         quality={"clip": 0.8},
         runtime_seconds=1.0,
-        status="observed",
+        status="not_available",
         failure_reason=None,
-        artifact_digests={"image": "sha256:image"},
+        artifact_digests={"status": "sha256:" + "0" * 64},
     )
     return replace(record, **changes)
 
@@ -44,12 +44,18 @@ def test_registry_contains_only_the_authorized_four_methods() -> None:
 
 
 @pytest.mark.unit
-def test_observation_requires_own_identities_and_threshold_provenance() -> None:
+def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> None:
     assert validate_observation(_record()).as_dict()["baseline_id"] == "tree_ring"
-    with pytest.raises(ValueError, match="threshold provenance"):
-        validate_observation(_record(threshold_provenance=None, decision=True))
-    with pytest.raises(ValueError, match="source, adapter, and threshold"):
-        validate_observation(_record(adapter_exact=None))
+    with pytest.raises(ValueError, match="score direction is unresolved"):
+        validate_observation(_record(
+            continuous_score=0.25,
+            score_direction="higher_is_watermarked",
+            threshold_provenance="tree_ring:calibration:future",
+            decision=True,
+            status="observed",
+        ))
+    with pytest.raises(ValueError, match="placeholder detection evidence"):
+        validate_observation(_record(continuous_score=0.25))
 
 
 @pytest.mark.unit
@@ -57,6 +63,8 @@ def test_failed_unit_remains_a_record_with_artifact_identity() -> None:
     failed = _record(
         source_exact=None,
         adapter_exact=None,
+        continuous_score=None,
+        score_direction=None,
         threshold_provenance=None,
         decision=None,
         status="failed",
@@ -65,3 +73,5 @@ def test_failed_unit_remains_a_record_with_artifact_identity() -> None:
     assert validate_observation(failed).status == "failed"
     with pytest.raises(ValueError, match="artifact_digests"):
         validate_observation(replace(failed, artifact_digests={}))
+    with pytest.raises(ValueError, match="sha256"):
+        validate_observation(replace(failed, artifact_digests={"log": "not-a-digest"}))

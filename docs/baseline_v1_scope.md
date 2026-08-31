@@ -13,6 +13,13 @@ status/failure, and artifact digests.  A threshold is method-specific and may
 not be borrowed across methods.  Failed units remain records; there is no retry,
 replacement, or success-subset selection in this interface.
 
+All four detector score directions are intentionally unresolved until a
+method-faithful source/adapter audit is separately authorized.  Therefore the
+current registry rejects `observed` records; `not_available` records cannot
+contain placeholder scores or decisions.  Future observed records must bind a
+registered method direction, a `baseline_id:calibration:` provenance identity,
+and SHA-256 artifact digests.
+
 No record here supplies geometry (`H_hat` or corners), alters Geometry-V4, or
 constitutes a model execution, threshold calibration, attack roster, denominator,
 or scientific result.  Other baseline families are future extensions and are

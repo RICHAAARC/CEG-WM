@@ -13,6 +13,7 @@ class BaselineSpec:
     display_name: str
     official_repository_url: str
     sd35_path: str
+    score_direction: str | None = None
     source_status: str = "not_available"
     adapter_status: str = "not_available"
     result_status: str = "not_available"
