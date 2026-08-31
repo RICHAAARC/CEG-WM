@@ -15,8 +15,8 @@ replacement, or success-subset selection in this interface.
 
 All four detector score directions are intentionally unresolved until a
 method-faithful source/adapter audit is separately authorized.  Therefore the
-current registry rejects `observed` records; `not_available` records cannot
-contain placeholder scores or decisions.  Future observed records must bind a
+current registry rejects `observed` records; failed and `not_available` records
+cannot contain placeholder scores or decisions.  Future observed records must bind a
 registered method direction, a `baseline_id:calibration:` provenance identity,
 and SHA-256 artifact digests.
 

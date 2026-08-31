@@ -66,10 +66,10 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
         expected_prefix = f"{observation.baseline_id}:calibration:"
         if not observation.threshold_provenance.startswith(expected_prefix):
             raise ValueError("threshold provenance must be bound to the baseline")
-    elif observation.status == "not_available":
+    elif observation.status in {"failed", "not_available"}:
         if any(value is not None for value in (observation.continuous_score, observation.score_direction,
                                                 observation.threshold_provenance, observation.decision)):
-            raise ValueError("not_available records cannot carry placeholder detection evidence")
+            raise ValueError("failed or unavailable records cannot carry detection evidence")
     if observation.status == "failed" and not observation.failure_reason:
         raise ValueError("failed records require failure_reason")
     if not observation.artifact_digests:

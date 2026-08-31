@@ -75,3 +75,5 @@ def test_failed_unit_remains_a_record_with_artifact_identity() -> None:
         validate_observation(replace(failed, artifact_digests={}))
     with pytest.raises(ValueError, match="sha256"):
         validate_observation(replace(failed, artifact_digests={"log": "not-a-digest"}))
+    with pytest.raises(ValueError, match="cannot carry detection evidence"):
+        validate_observation(replace(failed, continuous_score=0.25))
