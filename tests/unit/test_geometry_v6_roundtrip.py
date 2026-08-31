@@ -49,3 +49,14 @@ def test_single_adjoint_update_is_global_amplitude_only_and_finite():
     assert updated.dtype == latents.dtype
     assert bool(torch.isfinite(updated).all())
     assert not torch.equal(updated, latents)
+
+
+def test_single_adjoint_update_works_under_no_grad_and_inference_mode_without_vae_grads():
+    vae = _VAE()
+    latents = torch.randn(1, 4, 16, 16)
+    with torch.no_grad():
+        no_grad_updated = apply_roundtrip_adjoint_update(latents, "geometry-key-0001", R0_AMPLITUDE_CANDIDATES[0], vae)
+    with torch.inference_mode():
+        inference_updated = apply_roundtrip_adjoint_update(latents, "geometry-key-0001", R0_AMPLITUDE_CANDIDATES[0], vae)
+    assert bool(torch.isfinite(no_grad_updated).all()) and bool(torch.isfinite(inference_updated).all())
+    assert all(parameter.grad is None for parameter in vae.parameters())

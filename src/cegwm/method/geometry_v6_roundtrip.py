@@ -116,22 +116,24 @@ def apply_roundtrip_adjoint_update(
 
     _require_latents(latents)
     amplitude = _amplitude(amplitude)
-    # SD3.5 commonly holds the frozen VAE in fp16.  Keep its call coordinate in
-    # the VAE's actual dtype; the spectral projection below performs its own
-    # stable fp32 arithmetic.
-    source = latents.detach().to(dtype=_vae_dtype(vae)).requires_grad_(True)
-    template = keyed_template(source, geometry_key)
-    observation = frozen_roundtrip_observation(source, vae)
-    objective = (observation * template).sum()
-    (gradient,) = torch.autograd.grad(objective, source, create_graph=False, only_inputs=True)
-    projected = _project_midfrequency(gradient)
-    norm = torch.linalg.vector_norm(projected)
-    if not bool(torch.isfinite(norm)) or float(norm.item()) <= 0.0:
-        raise RuntimeError("Geometry-V6 matched adjoint has no supported energy")
-    result = source + amplitude * projected / norm
-    if not bool(torch.isfinite(result).all()):
-        raise RuntimeError("Geometry-V6 adjoint update produced nonfinite latents")
-    return result.detach().to(dtype=latents.dtype)
+    # Diffusers invokes callbacks in inference mode.  Locally leave that mode
+    # and make a fresh normal tensor so an inference tensor cannot enter the
+    # one required adjoint graph.  This does not alter global grad state or VAE
+    # parameters, and autograd.grad never writes parameter .grad fields.
+    with torch.inference_mode(False), torch.enable_grad():
+        source = latents.detach().clone().to(dtype=_vae_dtype(vae)).requires_grad_(True)
+        template = keyed_template(source, geometry_key)
+        observation = frozen_roundtrip_observation(source, vae)
+        objective = (observation * template).sum()
+        (gradient,) = torch.autograd.grad(objective, source, create_graph=False, only_inputs=True)
+        projected = _project_midfrequency(gradient)
+        norm = torch.linalg.vector_norm(projected)
+        if not bool(torch.isfinite(norm)) or float(norm.item()) <= 0.0:
+            raise RuntimeError("Geometry-V6 matched adjoint has no supported energy")
+        result = source + amplitude * projected / norm
+        if not bool(torch.isfinite(result).all()):
+            raise RuntimeError("Geometry-V6 adjoint update produced nonfinite latents")
+        return result.detach().to(dtype=latents.dtype)
 
 
 def blind_geometry_observation(
