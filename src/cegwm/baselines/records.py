@@ -38,9 +38,9 @@ class BaselineObservation:
     artifact_digests: Mapping[str, str]
 
     def as_dict(self) -> dict[str, object]:
-        """Return plain data suitable for an append-only JSONL writer."""
+        """Validate before returning data suitable for an append-only JSONL writer."""
 
-        return asdict(self)
+        return asdict(validate_observation(self))
 
 
 def validate_observation(observation: BaselineObservation) -> BaselineObservation:

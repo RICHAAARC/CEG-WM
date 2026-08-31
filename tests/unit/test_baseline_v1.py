@@ -56,6 +56,14 @@ def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> No
         ))
     with pytest.raises(ValueError, match="cannot carry detection evidence"):
         validate_observation(_record(continuous_score=0.25))
+    with pytest.raises(ValueError, match="source, adapter, and threshold"):
+        _record(
+            continuous_score=0.25,
+            score_direction="higher_is_watermarked",
+            threshold_provenance="tree_ring:calibration:future",
+            decision=True,
+            status="observed",
+        ).as_dict()
 
 
 @pytest.mark.unit
