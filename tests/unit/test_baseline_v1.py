@@ -56,9 +56,9 @@ def test_source_qualification_keeps_execution_and_unlicensed_source_closed() -> 
 
 
 @pytest.mark.unit
-def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> None:
+def test_unvalidated_methods_cannot_emit_observed_or_placeholder_evidence() -> None:
     assert validate_observation(_record()).as_dict()["baseline_id"] == "tree_ring"
-    with pytest.raises(ValueError, match="score direction is unresolved"):
+    with pytest.raises(ValueError, match="validated source and adapter registry"):
         validate_observation(_record(
             continuous_score=0.25,
             score_direction="higher_is_watermarked",
