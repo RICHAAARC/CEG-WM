@@ -12,13 +12,18 @@ from typing import Any
 
 import torch
 
-from cegwm.method.content_adaptive import score_content_image
 from cegwm.method.content_weighted_joint import (
     LFHFScorePair,
     load_calibration_asset,
     weighted_gate_evidence,
     weighted_joint_score,
 )
+from cegwm.method.content_whitening import (
+    FrozenContentWhiteningLFPublicAssets,
+    load_frozen_content_whitening_asset,
+    score_content_whitened_lf_image,
+)
+from cegwm.method.hf import score_hf_image
 from cegwm.method.geometry_v6_roundtrip import (
     GEOMETRY_V6_METHOD_ID,
     R0_AMPLITUDE_CANDIDATES,
@@ -71,18 +76,25 @@ def _load_assets(token: str) -> tuple[Any, ContentEmbedAssets]:
     return pipeline, ContentEmbedAssets(dino_model, dino_processor, hf, lf)
 
 
-def _content_raw(image: Any, content_key: str, assets: ContentEmbedAssets, calibration: Any) -> dict[str, dict[str, float]]:
+def _content_raw(
+    image: Any,
+    content_key: str,
+    assets: ContentEmbedAssets,
+    whitening_lf_assets: FrozenContentWhiteningLFPublicAssets,
+    calibration: Any,
+) -> dict[str, dict[str, float]]:
     """Use the unchanged blind content scorer for registered plus 16 frozen wrong keys."""
 
     keys = (content_key, *derive_stability_wrong_keys(content_key))
     labels = ("registered", *(f"wrong_{index:02d}" for index in range(16)))
     records: dict[str, dict[str, float]] = {}
     for label, key in zip(labels, keys, strict=True):
-        score = score_content_image(image, key, assets.hf_public_assets, assets.lf_public_assets)
+        lf = float(score_content_whitened_lf_image(image, key, whitening_lf_assets))
+        hf = float(score_hf_image(image, key, assets.hf_public_assets))
         records[label] = {
-            "lf": score.lf,
-            "hf": score.hf,
-            "weighted_joint": weighted_joint_score(score.lf, score.hf, calibration),
+            "lf": lf,
+            "hf": hf,
+            "weighted_joint": weighted_joint_score(lf, hf, calibration),
         }
     return records
 
@@ -148,6 +160,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         repo_root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
         repo_root / "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
     )
+    whitening_lf_assets = FrozenContentWhiteningLFPublicAssets(
+        assets.lf_public_assets, load_frozen_content_whitening_asset(repo_root)
+    )
     def generate(arm: str, amplitude: float | None) -> tuple[Any | None, str | None]:
         # Every physical arm gets an independent generator reset to the same seed.
         generator = torch.Generator(device="cuda").manual_seed(args.seed)
@@ -170,7 +185,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             raise RuntimeError("successful R0 arm omitted its image")
         return {
             "status": "success",
-            "content_raw": _content_raw(image, content_key, assets, calibration),
+            "content_raw": _content_raw(image, content_key, assets, whitening_lf_assets, calibration),
             "geometry": _geometry_raw(image, geometry_key, wrong_geometry_key, assets),
         }
 

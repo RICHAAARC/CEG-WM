@@ -8,6 +8,7 @@ from PIL import Image
 
 import cegwm.runtime.geometry_v6_sd35 as runtime
 from cegwm.runtime.geometry_v6_sd35 import run_sd35_geometry_v6_r0_arm
+from experiments import geometry_v6_r0_engine as r0_engine
 
 
 class _Distribution:
@@ -99,3 +100,22 @@ def test_notebook_delegates_the_fixed_full_sequence_to_the_engine():
     serialized = json.dumps(notebook)
     assert "CEG_WM_GEOMETRY_V6_R0_AMPLITUDE" not in serialized
     assert "--amplitude" not in serialized
+
+
+def test_r0_content_raw_uses_the_frozen_whitened_lf_scorer_for_all_keys(monkeypatch):
+    calls = []
+    wrong_keys = tuple(f"wrong-{index}".encode() for index in range(16))
+
+    monkeypatch.setattr(r0_engine, "derive_stability_wrong_keys", lambda key: wrong_keys)
+    monkeypatch.setattr(r0_engine, "score_content_whitened_lf_image", lambda image, key, assets: calls.append(("lf", key, assets)) or 0.25)
+    monkeypatch.setattr(r0_engine, "score_hf_image", lambda image, key, assets: calls.append(("hf", key, assets)) or 0.5)
+    monkeypatch.setattr(r0_engine, "weighted_joint_score", lambda lf, hf, calibration: lf + hf)
+    assets = SimpleNamespace(hf_public_assets="frozen-hf")
+    whitening = object()
+    records = r0_engine._content_raw("ordinary-rgb", "content-key-0001", assets, whitening, "calibration")
+    assert not hasattr(r0_engine, "score_content_image")
+    assert tuple(records) == ("registered", *(f"wrong_{index:02d}" for index in range(16)))
+    assert all(item[2] == whitening for item in calls[::2])
+    assert [item[1] for item in calls[::2]] == ["content-key-0001", *wrong_keys]
+    assert all(item[2] == "frozen-hf" for item in calls[1::2])
+    assert all(record["lf"] == 0.25 and record["hf"] == 0.5 and record["weighted_joint"] == 0.75 for record in records.values())
