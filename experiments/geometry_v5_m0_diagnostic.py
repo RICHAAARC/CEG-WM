@@ -16,7 +16,8 @@ from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord, load_geometry_v
 
 _DIAGNOSTIC_ID = "geometry_v5_m0_sd21_failure_isolation_v1"
 _METHOD_SOURCE_EXACT = "ac1cbe2ae733a93ec94b0022b1e63a298e2fbea9"
-_FROZEN_BASELINE_ARTIFACT_EXACT = "d17d30b4bca7cf6e29bebf08aa384d773e8550c3"
+_FROZEN_BASELINE_RUNNER_EXACT = "d17d30b4bca7cf6e29bebf08aa384d773e8550c3"
+_FROZEN_BASELINE_ARTIFACT_SHA256 = "d7011ccc79080e820b679369d19838181fb26e2f8528ee8fc5d622a4d268580a"
 _CASE_IDS = ("identity", "rotation_+10", "scale_1.1", "translation_x_+0.08")
 _ISOLATION_CASE_IDS = ("rotation_+10", "scale_1.1")
 
@@ -444,7 +445,8 @@ def _write_result(output_json: Path, unit: Any, identity: Any, cases: list[dict[
         "diagnostic_id": _DIAGNOSTIC_ID,
         "method_source_exact": _METHOD_SOURCE_EXACT,
         "frozen_reference_evidence": {
-            "artifact_exact": _FROZEN_BASELINE_ARTIFACT_EXACT,
+            "runner_exact": _FROZEN_BASELINE_RUNNER_EXACT,
+            "artifact_sha256": _FROZEN_BASELINE_ARTIFACT_SHA256,
             "method_preflight_available": 4,
             "raw_estimate_available": 4,
             "within_existing_m0_tolerances": 2,

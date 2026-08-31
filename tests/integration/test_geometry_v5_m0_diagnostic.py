@@ -126,10 +126,12 @@ def test_fake_diagnostic_runs_one_generation_four_independent_cases_and_freezes_
     assert [case["isolation_diagnostics"]["status"] for case in result["cases"]] == ["NOT_SELECTED", "ISOLATION_AVAILABLE", "ISOLATION_AVAILABLE", "NOT_SELECTED"]
     assert result["diagnostic_denominator"] == 4 and result["science_denominator"] == 0 and result["claim"] == "nonformal_colab_failure_isolation_only"
     assert result["frozen_reference_evidence"] == {
-        "artifact_exact": "d17d30b4bca7cf6e29bebf08aa384d773e8550c3",
+        "runner_exact": "d17d30b4bca7cf6e29bebf08aa384d773e8550c3",
+        "artifact_sha256": "d7011ccc79080e820b679369d19838181fb26e2f8528ee8fc5d622a4d268580a",
         "method_preflight_available": 4, "raw_estimate_available": 4,
         "within_existing_m0_tolerances": 2, "diagnostic_denominator": 4, "science_denominator": 0,
     }
+    assert "artifact_exact" not in diagnostic._canonical_json(result).decode("utf-8")
     text = output.read_text(encoding="utf-8")
     assert text == diagnostic._canonical_json(json.loads(text)).decode("utf-8") and "secret" not in text
     with pytest.raises(FileExistsError):
