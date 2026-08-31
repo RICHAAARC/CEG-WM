@@ -30,7 +30,12 @@ method-native diagnostic role: it is excluded from calibration, rejected by the
 main-table builder, and never mixed into the unwatermarked FPR. Proposed CEG or
 Geometry-V4 rows are not baseline IDs and are rejected.
 
-The source audit registers method-native score directions. `observed` and
+The source audit registers method-native score directions. Tree-Ring, Gaussian
+Shading, and Shallow Diffuse have an `implemented_unexecuted` SD3.5 adapter
+status: the mechanism and CPU fixtures were migrated from the non-git SLM-WM
+adapter archive, which supplies neither a source exact nor a real GPU result.
+Their `result_status` remains `not_available` and `paper_claim_support` remains
+false. `observed` and
 `confirmation_observed` records require a real score/decision, that method's
 direction, and a `baseline_id:calibration:` threshold provenance prefix; optional
 source/adapter exacts or artifact digests never decide their admissibility.

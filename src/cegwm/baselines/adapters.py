@@ -33,5 +33,5 @@ def adapter_plan(baseline_id: str) -> AdapterPlan:
         )
     return AdapterPlan(
         baseline_id, "method_faithful_sd35_adaptation", baseline.official_entrypoint,
-        "implementation_required", None,
+        "implemented_unexecuted", None,
     )

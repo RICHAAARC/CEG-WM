@@ -77,10 +77,10 @@ def test_method_plans_preserve_method_identity_without_license_blocking() -> Non
     assert baseline_by_id("tree_ring").native_score_name == "fourier_key_l1_distance"
     assert baseline_by_id("t2smark").official_entrypoint == "run_sd35.py"
     assert baseline_by_id("t2smark").native_score_name == "norm1_w_master_key"
-    assert adapter_plan("tree_ring").execution_status == "implementation_required"
+    assert adapter_plan("tree_ring").execution_status == "implemented_unexecuted"
     assert adapter_plan("t2smark").execution_status == "adapter_interface_available_gpu_unverified"
     assert adapter_plan("t2smark").blocker == "local GPU is unavailable; a Colab canary is required"
-    assert adapter_plan("shallow_diffuse").execution_status == "implementation_required"
+    assert adapter_plan("shallow_diffuse").execution_status == "implemented_unexecuted"
     assert adapter_plan("shallow_diffuse").blocker is None
     assert baseline_by_id("shallow_diffuse").source_license is None
 

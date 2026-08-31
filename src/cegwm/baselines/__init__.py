@@ -98,3 +98,4 @@ __all__ = [
     "score_t2smark_rgb",
     "validate_observation",
 ]
+"""Baseline adapters and engineering-only canary support."""
