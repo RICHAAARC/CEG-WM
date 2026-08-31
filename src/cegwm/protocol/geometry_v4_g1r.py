@@ -12,10 +12,10 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "1231298b12c81140b5482053b9c3a6fdf662ca7bf8272753e5fbeb970aafc713"
+CONFIG_SHA256 = "47bad09bf03da1017fc9b43e208cb2e9f68c3bac361c9b3c3cb325387c612f56"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
-WRITER_ID = "geometry_v4_g1r_vae_decoder_output_writer_v2"
+WRITER_ID = "geometry_v4_g1r_vae_decoder_output_opponent_writer_v3"
 STAGE = "V4-G1R"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 PLACEMENT = "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess"
@@ -24,6 +24,13 @@ LUMA_RMS_CAP = 2.0 / 255.0
 LUMA_PEAK_CAP = 8.0 / 255.0
 ENERGY_SHARES = (0.40, 0.36, 0.24)
 WRITER_TARGET_RMS_FRACTION = 0.25
+REC709 = (0.2126, 0.7152, 0.0722)
+_OPPONENT_RAW = (1.0, -(REC709[0] + REC709[2]) / REC709[1], 1.0)
+_OPPONENT_NORMALIZER = math.sqrt(sum(value * value for value in _OPPONENT_RAW) / 3.0)
+OPPONENT_AXIS = tuple(value / _OPPONENT_NORMALIZER for value in _OPPONENT_RAW)
+OPPONENT_PROJECTION_DENOMINATOR = sum(value * value for value in OPPONENT_AXIS) / 3.0
+RGB_CHANNEL_RMS_CAP = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP
+RGB_CHANNEL_PEAK_CAP = LUMA_PEAK_CAP
 FIT_TILE_IDS = (0, 2, 5, 7, 8, 10, 13, 15)
 VALIDATE_TILE_IDS = (1, 3, 4, 6, 9, 11, 12, 14)
 ATTACKS = ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9")
@@ -94,6 +101,8 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("V4-G1R anchor partition differs")
     if anchor.get("luma_rms_cap") != LUMA_RMS_CAP or anchor.get("luma_peak_cap") != LUMA_PEAK_CAP or anchor.get("writer_target_rms_fraction") != WRITER_TARGET_RMS_FRACTION:
         raise ValueError("V4-G1R budget differs")
+    if anchor.get("carrier_axis") != "fixed_rec709_orthogonal_opponent_q_v1" or anchor.get("carrier_axis_raw_formula") != "[1,-((0.2126+0.0722)/0.7152),1]" or anchor.get("carrier_axis_normalization") != "mean_q_squared_equals_1" or anchor.get("carrier_projection") != "rgb_dot_q_over_q_dot_q_div_3" or anchor.get("rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or anchor.get("rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP:
+        raise ValueError("V4-G1R opponent carrier differs")
     if tuple(rosters.get("attacks", ())) != ATTACKS or tuple(rosters.get("development", {}).get("seeds", ())) != DEVELOPMENT_SEEDS or tuple(rosters.get("confirmation", {}).get("seeds", ())) != CONFIRMATION_SEEDS or tuple(rosters.get("forbidden_legacy_seeds", ())) != LEGACY_SEEDS or rosters.get("units_per_split") != 20:
         raise ValueError("V4-G1R roster differs")
     if set(FIT_TILE_IDS) & set(VALIDATE_TILE_IDS) or set(FIT_TILE_IDS) | set(VALIDATE_TILE_IDS) != set(range(16)):
@@ -115,7 +124,7 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     if (holdout.get("primary_patch_window_divisor"), holdout.get("secondary_patch_window_divisor"), tuple(holdout.get("narrow_band_frequency_radius", ())), holdout.get("strong_keyed_frequency_support_min_fraction")) != (*HOLDOUT_PATCH_WINDOW_DIVISORS, HOLDOUT_FREQUENCY_RADIUS, HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION):
         raise ValueError("V4-G1R holdout preprocessing differs")
     development = value.get("development_runner", {})
-    if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
+    if tuple(development.get("artifact_files", ())) != DEVELOPMENT_ARTIFACT_FILES or development.get("notebook_identity") != DEVELOPMENT_NOTEBOOK_ID or development.get("stage") != "development" or development.get("confirmation_allowed") is not False or development.get("units") != 20 or development.get("source_observability_required") != DEVELOPMENT_SOURCE_REQUIRED or development.get("correct_safe_reliable_required") != DEVELOPMENT_CORRECT_SAFE_REQUIRED or development.get("unsafe_per_arm_max") != 0 or development.get("unit_failures_max") != 0 or development.get("final_rgb_psnr_min_exclusive") != FINAL_RGB_PSNR_MIN or development.get("final_rgb_ssim_min_exclusive") != FINAL_RGB_SSIM_MIN or development.get("final_rgb_luma_rms_max") != LUMA_RMS_CAP or development.get("final_rgb_luma_peak_max") != LUMA_PEAK_CAP or development.get("final_rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or development.get("final_rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP or development.get("content_score_drift_max_exclusive") != CONTENT_SCORE_DRIFT_MAX:
         raise ValueError("V4-G1R development runner differs")
     if development.get("truth_probe") != "post_arm_freeze_record_only_noninterfering":
         raise ValueError("V4-G1R truth probe boundary differs")

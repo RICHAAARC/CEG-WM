@@ -1,4 +1,4 @@
-"""Versioned one-shot VAE decoder-output hook for the V4-G1R writer."""
+"""Versioned one-shot VAE decoder-output hook for the V4-G1R v3 opponent writer."""
 from __future__ import annotations
 
 from dataclasses import dataclass

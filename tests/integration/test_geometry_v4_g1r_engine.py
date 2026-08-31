@@ -181,7 +181,7 @@ def test_real_development_generates_each_source_once_retains_20_units_and_orders
         return G1RGeneratedPair(image, image)
 
     monkeypatch.setattr(engine, "run_g1r_sd35_pair", fake_pair)
-    monkeypatch.setattr(engine, "measure_g1r_final_rgb", lambda *args: G1RFinalRGBObservability(50.0, .99, 0.0, 0.0, 0.0, {name: 1.0 for name in ("search", "fit", "validate")}, {name: 0.0 for name in ("search", "fit", "validate")}))
+    monkeypatch.setattr(engine, "measure_g1r_final_rgb", lambda *args: G1RFinalRGBObservability(50.0, .99, 0.0, 0.0, 0.0, 0.0, 0.0, {name: 1.0 for name in ("search", "fit", "validate")}, {name: 0.0 for name in ("search", "fit", "validate")}))
     monkeypatch.setattr(engine, "_blind_arms_for_keys", lambda *args: events.append("blind") or engine.BlindArms(_unreliable_arm(), _unreliable_arm(), _unreliable_arm()))
     monkeypatch.setattr(engine, "_truth_for_attack", lambda attack: events.append("truth") or np.eye(3))
     monkeypatch.setattr(engine, "_truth_probe", lambda *args: events.append("probe") or {"record_only": True})

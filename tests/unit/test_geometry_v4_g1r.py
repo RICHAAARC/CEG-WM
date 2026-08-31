@@ -25,6 +25,10 @@ from cegwm.protocol.geometry_v4_g1r import (
     HOLDOUT_PATCH_WINDOW_DIVISORS,
     LOCAL_PREPROCESSING,
     LOCAL_FREQUENCY_PAIRS,
+    OPPONENT_AXIS,
+    OPPONENT_PROJECTION_DENOMINATOR,
+    RGB_CHANNEL_PEAK_CAP,
+    RGB_CHANNEL_RMS_CAP,
     SEARCH_ATOM_OFFSETS,
     SEARCH_DIRECTIONS,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
@@ -82,6 +86,9 @@ def test_contract_freezes_domains_tiles_rosters_and_old_seed_rejection() -> None
     assert SEARCH_MACRO_CYCLES == (14.0, 22.0, 30.0)
     assert SEARCH_DIRECTIONS == (0.0, 45.0, 90.0, 135.0)
     assert len(SEARCH_ATOM_OFFSETS) == 4 and len(LOCAL_FREQUENCY_PAIRS) == 24
+    assert np.mean(np.asarray(OPPONENT_AXIS) ** 2) == pytest.approx(1.0)
+    assert np.dot(np.asarray((.2126, .7152, .0722)), np.asarray(OPPONENT_AXIS)) == pytest.approx(0.0, abs=1e-15)
+    assert OPPONENT_PROJECTION_DENOMINATOR == pytest.approx(1.0)
     assert FIT_PATCH_WINDOW_DIVISOR == 20
     assert HOLDOUT_PATCH_WINDOW_DIVISORS == (20, 24) and HOLDOUT_FREQUENCY_RADIUS == (12.0, 31.0)
     assert HOLDOUT_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION == .1
@@ -123,12 +130,20 @@ def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> 
     assert not np.array_equal(marked, ordinary)
     assert budget["luma_rms"] <= budget["luma_rms_cap"] == 2 / 255
     assert budget["luma_peak"] <= budget["luma_peak_cap"] == 8 / 255
-    assert budget["luma_rms"] == pytest.approx(WRITER_TARGET_RMS_FRACTION * 2 / 255)
+    assert budget["luma_rms"] == pytest.approx(0.0, abs=1e-12)
+    assert budget["opponent_rms"] == pytest.approx(WRITER_TARGET_RMS_FRACTION * 2 / 255)
+    assert budget["rgb_channel_rms_max"] <= budget["rgb_channel_rms_cap"] == RGB_CHANNEL_RMS_CAP
+    assert budget["rgb_channel_peak"] <= budget["rgb_channel_peak_cap"] == RGB_CHANNEL_PEAK_CAP
     decoded = torch.zeros((1, 3, 64, 64), dtype=torch.float32)
     updated = method.write_g1r_decoder_output(decoded, KEY)
-    final_luma_delta = updated[0, 0].numpy() / 2.0
+    final_rgb_delta = updated[0].permute(1, 2, 0).numpy() / 2.0
+    final_luma_delta = method._luma(final_rgb_delta)
+    final_opponent_delta = method._opponent_plane(final_rgb_delta)
     assert float(np.sqrt(np.mean(final_luma_delta**2))) <= 2 / 255
     assert float(np.max(np.abs(final_luma_delta))) <= 8 / 255
+    assert float(np.sqrt(np.mean(final_opponent_delta**2))) == pytest.approx(WRITER_TARGET_RMS_FRACTION * 2 / 255, rel=1e-5)
+    assert float(np.max(np.sqrt(np.mean(final_rgb_delta**2, axis=(0, 1))))) <= RGB_CHANNEL_RMS_CAP
+    assert float(np.max(np.abs(final_rgb_delta))) <= RGB_CHANNEL_PEAK_CAP
 
     hook = G1RDecoderOutputHook(KEY)
     assert not torch.equal(hook(None, (), decoded), decoded)
@@ -158,6 +173,7 @@ def test_final_rgb_observability_uses_all_three_domains_and_frozen_quality_limit
     assert set(observation.correct_domain_scores) == set(observation.wrong_domain_scores) == {"search", "fit", "validate"}
     assert observation.psnr > 40.0 and observation.ssim > .98
     assert observation.luma_rms <= 2 / 255 and observation.luma_peak <= 8 / 255
+    assert observation.rgb_channel_rms_max <= RGB_CHANNEL_RMS_CAP and observation.rgb_channel_peak <= RGB_CHANNEL_PEAK_CAP
     assert observation.content_score_drift == 0.0
     assert observation.passed
     assert all(observation.correct_domain_scores[name] > observation.wrong_domain_scores[name] for name in ("search", "fit", "validate"))
@@ -198,6 +214,9 @@ def test_detector_has_no_oracle_surface_and_preserves_original_fit_gates() -> No
     assert all(set(item) == {"tile_id", "best_correlation", "margin", "accepted", "rejection"} for item in diagnostics["selected_fit"]["prethreshold_tiles"])
     forbidden = {"truth", "original", "clean", "residual", "latent", "attack"}
     assert not forbidden & set(inspect.signature(method._search_candidates).parameters)
+    for blind_stage in (method._translation_surface, method._tile_matches, method._holdout_metrics):
+        source = inspect.getsource(blind_stage)
+        assert "_opponent_plane" in source and "_luma(" not in source
     assert FIT_GATES["support"] == 6 and FIT_GATES["coverage"] == .75 and FIT_GATES["macro_regions"] == 3
     assert FIT_GATES["condition"] == 1e4 and FIT_GATES["reprojection"] == .02
     assert FIT_GATES["correlation"] >= .42 and FIT_GATES["margin"] >= .025

@@ -7,6 +7,18 @@ completed, its old gate passed 2/20, and its records SHA-256 is
 Those seeds, files, artifact, thresholds, and verdict are historical read-only
 evidence and are neither modified nor rerun by G1R.
 
+The later development artifact at source
+`a3877d6491308057547caf5993ec9bb1629e791c` is also retained as failed method
+evidence; its records SHA-256 is
+`df2f9957d73b0eac9172fba2ec5f5be76168c750bc436905041455292cdab20f`.
+All 20 units completed with zero unsafe arm, but correct safe `RELIABLE` was
+0/20 and final observability was 2/4. Its post-freeze truth probes found no
+valid truth-H fit or holdout; fit support was fixed by source at 0, 0, 0, and
+2 across each source's five attacks. Paired residual scores separated the
+correct domains from wrong keys, while blind evidence remained host-dominated.
+This motivates only the fixed carrier/extraction-plane change below; the
+artifact is not rerun, discarded, or treated as a positive result.
+
 Using only the predeclared normalized-diagonal .02 safety tolerance, the frozen
 outputs reclassify as correct: 19 `RELIABLE` (0 safe, 19 unsafe) and 1
 `UNRELIABLE`; wrong: 18 `RELIABLE` (0 harmless, 18 unsafe) and 2 `UNRELIABLE`.
@@ -36,18 +48,31 @@ spatially disjoint local partitions are constructed independently: each field
 reads only its own derived domain key, so changing one key cannot change either
 of the other two fields. Tile identity and coordinates never depend on RGB.
 
-The versioned G1R writer is one forward hook on the real `AutoencoderKL.decoder`
+The versioned v3 G1R opponent writer is one forward hook on the real `AutoencoderKL.decoder`
 output, immediately before ordinary RGB postprocess. The clean arm has no hook;
 the marked arm registers it only for its final decode, requires exactly one
 invocation, and removes it in a `finally` block. There is no latent-adjoint
 writer, final-RGB feedback, search, retry, fallback, or budget increase. The
-fixed update targets .25 of the luma RMS cap and
-may not exceed luma RMS 2/255 or peak 8/255; it is never content-adaptive. CPU tests use only a fake
+fixed scalar update targets .25 of the luma RMS cap. It is carried only on the
+fixed, key-independent REC709-orthogonal axis
+`q = normalize_mean_square([1,-((.2126+.0722)/.7152),1])`; extraction is always
+`(RGB dot q)/(q dot q/3)`. The writer uses `q/3`, so the extracted plane receives
+exactly the scalar anchor while REC709 luma receives zero before clipping. No
+image, key, content detector, or residual can choose or adapt this axis.
+
+The original luma RMS 2/255 and peak 8/255 limits remain. In addition, every
+actual RGB channel must have RMS no greater than the unchanged scalar target
+`.25 * 2/255`, and no channel peak may exceed 8/255. Thus luma orthogonality
+cannot hide increased RGB energy. PSNR above 40, SSIM above .98, and content
+drift below .05 are unchanged; the writer is never content-adaptive. CPU tests use only a fake
 decoder module; real final-RGB observability requires separate GPU authorization.
 
 ## Blind detector
 
 The detector accepts only current attacked ordinary RGB and normalized key.
+Search translation, local fit, and holdout correlation/PSR all read the same
+fixed opponent projection used by the writer; none reads luma or chooses a
+channel from the attacked image.
 Truth, original or clean RGB, writer residuals, latents, and attack names are
 forbidden. Every fixed coarse and fine rotation/scale hypothesis is ranked by
 the keyed search reference's normalized complex cross-power phase-correlation
@@ -113,10 +138,12 @@ retaining correct-key, wrong-key, and unwatermarked-negative blind arms for all
 20 units. Confirmation is rejected by this CLI. Its create-only artifact
 directory contains full records, summary, and manifest JSON files, each with
 an independent SHA-256 sidecar. Source observability measures all three G1R
-domain scores only on the final-RGB luma residual `(marked-clean)`; this paired
+domain scores only on the fixed opponent projection of the paired final-RGB
+residual `(marked-clean)`; this paired
 writer evaluator is forbidden from the blind detector. It requires every
 correct domain score to beat its corresponding wrong-key score, PSNR above 40,
-SSIM above .98, luma RMS and peak within 2/255 and 8/255, and unchanged-content
+SSIM above .98, luma RMS and peak within 2/255 and 8/255, per-channel RGB RMS
+within `.25 * 2/255`, RGB peak within 8/255, and unchanged-content
 score drift below .05. The real gate requires 4/4 observable sources, 20/20
 safe correct-key recoveries, zero unsafe result in every arm, and zero retained
 failure.

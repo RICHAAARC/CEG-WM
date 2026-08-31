@@ -38,6 +38,10 @@ from cegwm.protocol.geometry_v4_g1r import (
     LUMA_PEAK_CAP,
     LUMA_RMS_CAP,
     LOCAL_FREQUENCY_PAIRS,
+    OPPONENT_AXIS,
+    OPPONENT_PROJECTION_DENOMINATOR,
+    RGB_CHANNEL_PEAK_CAP,
+    RGB_CHANNEL_RMS_CAP,
     SEARCH_ATOM_OFFSETS,
     SEARCH_DIRECTIONS,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
@@ -74,6 +78,8 @@ class G1RFinalRGBObservability:
     ssim: float
     luma_rms: float
     luma_peak: float
+    rgb_channel_rms_max: float
+    rgb_channel_peak: float
     content_score_drift: float
     correct_domain_scores: Mapping[str, float]
     wrong_domain_scores: Mapping[str, float]
@@ -85,6 +91,8 @@ class G1RFinalRGBObservability:
             and self.ssim > FINAL_RGB_SSIM_MIN
             and self.luma_rms <= LUMA_RMS_CAP
             and self.luma_peak <= LUMA_PEAK_CAP
+            and self.rgb_channel_rms_max <= RGB_CHANNEL_RMS_CAP
+            and self.rgb_channel_peak <= RGB_CHANNEL_PEAK_CAP
             and self.content_score_drift < CONTENT_SCORE_DRIFT_MAX
             and set(self.correct_domain_scores) == {"search", "fit", "validate"}
             and set(self.wrong_domain_scores) == {"search", "fit", "validate"}
@@ -209,37 +217,58 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
     return np.asarray(rgb, dtype=np.float64) @ _REC709
 
 
-def _g1r_luma_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
-    """Return the single fixed luma-space update shared by both writer placements."""
+def _opponent_plane(rgb: np.ndarray) -> np.ndarray:
+    """Fixed key-independent REC709-orthogonal extraction projection."""
+    return (np.asarray(rgb, dtype=np.float64) @ np.asarray(OPPONENT_AXIS, dtype=np.float64)) / OPPONENT_PROJECTION_DENOMINATOR
+
+
+def _g1r_scalar_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
+    """Return the single fixed scalar anchor shared by both writer placements."""
     anchor = g1r_anchor_fields(shape, detection_key).combined
     target = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP
     scale = min(target * math.sqrt(anchor.size), LUMA_PEAK_CAP / max(1e-12, float(np.max(np.abs(anchor)))))
     delta = scale * anchor
     rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))
     if rms > LUMA_RMS_CAP + 1e-12 or peak > LUMA_PEAK_CAP + 1e-12:
-        raise RuntimeError("V4-G1R writer exceeded the frozen luma budget")
+        raise RuntimeError("V4-G1R scalar anchor exceeded the frozen budget")
+    return delta
+
+
+def _opponent_rgb_delta(scalar_delta: np.ndarray) -> np.ndarray:
+    """Map one scalar anchor into RGB while preserving its opponent projection."""
+    delta = np.asarray(scalar_delta, dtype=np.float64)[..., None] * (np.asarray(OPPONENT_AXIS, dtype=np.float64) / 3.0)
+    channel_rms = np.sqrt(np.mean(delta * delta, axis=(0, 1)))
+    if float(np.max(channel_rms)) > RGB_CHANNEL_RMS_CAP + 1e-12 or float(np.max(np.abs(delta))) > RGB_CHANNEL_PEAK_CAP + 1e-12:
+        raise RuntimeError("V4-G1R opponent writer exceeded the frozen RGB budget")
+    if not np.allclose(_opponent_plane(delta), scalar_delta, atol=1e-12, rtol=1e-12):
+        raise RuntimeError("V4-G1R opponent writer/extractor identity differs")
     return delta
 
 
 def write_g1r_rgb(rgb: np.ndarray, detection_key: str | bytes | bytearray | memoryview) -> tuple[np.ndarray, Mapping[str, float]]:
     """Synthetic-only ordinary-RGB writer using the same frozen total budget."""
     image = _require_rgb(rgb)
-    delta_luma = _g1r_luma_delta(image.shape[:2], detection_key)
-    marked = np.clip(image + delta_luma[..., None], 0.0, 1.0)
-    delta = _luma(marked) - _luma(image)
-    rms, peak = float(np.sqrt(np.mean(delta * delta))), float(np.max(np.abs(delta)))
-    if rms > LUMA_RMS_CAP + 1e-12 or peak > LUMA_PEAK_CAP + 1e-12:
+    scalar_delta = _g1r_scalar_delta(image.shape[:2], detection_key)
+    marked = np.clip(image + _opponent_rgb_delta(scalar_delta), 0.0, 1.0)
+    delta_rgb = marked - image
+    delta_luma = _luma(marked) - _luma(image)
+    delta_opponent = _opponent_plane(marked) - _opponent_plane(image)
+    luma_rms, luma_peak = float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma)))
+    channel_rms = np.sqrt(np.mean(delta_rgb * delta_rgb, axis=(0, 1)))
+    rgb_rms_max, rgb_peak = float(np.max(channel_rms)), float(np.max(np.abs(delta_rgb)))
+    opponent_rms = float(np.sqrt(np.mean(delta_opponent * delta_opponent)))
+    if luma_rms > LUMA_RMS_CAP + 1e-12 or luma_peak > LUMA_PEAK_CAP + 1e-12 or rgb_rms_max > RGB_CHANNEL_RMS_CAP + 1e-12 or rgb_peak > RGB_CHANNEL_PEAK_CAP + 1e-12:
         raise RuntimeError("V4-G1R RGB writer exceeded the frozen luma budget")
-    return marked, {"luma_rms": rms, "luma_peak": peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP}
+    return marked, {"opponent_rms": opponent_rms, "luma_rms": luma_rms, "luma_peak": luma_peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP, "rgb_channel_rms_max": rgb_rms_max, "rgb_channel_rms_cap": RGB_CHANNEL_RMS_CAP, "rgb_channel_peak": rgb_peak, "rgb_channel_peak_cap": RGB_CHANNEL_PEAK_CAP}
 
 
-def _field_score(luma: np.ndarray, field: np.ndarray) -> float:
-    luma = np.asarray(luma, dtype=np.float64)
-    if luma.ndim != 2 or luma.shape != field.shape or not np.isfinite(luma).all():
-        raise ValueError("V4-G1R field score requires finite aligned luma residual")
-    luma = luma - float(np.mean(luma))
-    denominator = float(np.linalg.norm(luma) * np.linalg.norm(field))
-    return -1.0 if denominator <= 1e-12 else float(np.sum(luma * field) / denominator)
+def _field_score(plane: np.ndarray, field: np.ndarray) -> float:
+    plane = np.asarray(plane, dtype=np.float64)
+    if plane.ndim != 2 or plane.shape != field.shape or not np.isfinite(plane).all():
+        raise ValueError("V4-G1R field score requires a finite aligned carrier residual")
+    plane = plane - float(np.mean(plane))
+    denominator = float(np.linalg.norm(plane) * np.linalg.norm(field))
+    return -1.0 if denominator <= 1e-12 else float(np.sum(plane * field) / denominator)
 
 
 def measure_g1r_final_rgb(
@@ -257,7 +286,9 @@ def measure_g1r_final_rgb(
     normalized_wrong = normalize_detection_key(wrong_key)
     if normalized == normalized_wrong:
         raise ValueError("V4-G1R correct and wrong keys collide")
+    delta_rgb = marked - clean
     delta_luma = _luma(marked) - _luma(clean)
+    delta_opponent = _opponent_plane(marked) - _opponent_plane(clean)
     mse = float(np.mean((marked - clean) ** 2))
     psnr = 300.0 if mse == 0.0 else 10.0 * math.log10(1.0 / mse)
     mx, my = float(clean.mean()), float(marked.mean())
@@ -267,23 +298,25 @@ def measure_g1r_final_rgb(
     correct_fields = g1r_anchor_fields(clean.shape[:2], normalized)
     wrong_fields = g1r_anchor_fields(clean.shape[:2], normalized_wrong)
     names = ("search", "fit", "validate")
-    correct_scores = {name: _field_score(delta_luma, getattr(correct_fields, name)) for name in names}
-    wrong_scores = {name: _field_score(delta_luma, getattr(wrong_fields, name)) for name in names}
+    correct_scores = {name: _field_score(delta_opponent, getattr(correct_fields, name)) for name in names}
+    wrong_scores = {name: _field_score(delta_opponent, getattr(wrong_fields, name)) for name in names}
     drift = abs(float(content_detector(clean, normalized)) - float(content_detector(marked, normalized)))
-    values = (psnr, ssim, float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma))), drift, *correct_scores.values(), *wrong_scores.values())
+    channel_rms = np.sqrt(np.mean(delta_rgb * delta_rgb, axis=(0, 1)))
+    values = (psnr, ssim, float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma))), float(np.max(channel_rms)), float(np.max(np.abs(delta_rgb))), drift, *correct_scores.values(), *wrong_scores.values())
     if any(not math.isfinite(value) for value in values):
         raise ValueError("V4-G1R final RGB observation is non-finite")
-    return G1RFinalRGBObservability(values[0], values[1], values[2], values[3], values[4], correct_scores, wrong_scores)
+    return G1RFinalRGBObservability(values[0], values[1], values[2], values[3], values[4], values[5], values[6], correct_scores, wrong_scores)
 
 
 def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> torch.Tensor:
     """Apply one fixed update to the real VAE decoder output before RGB postprocess."""
     if not isinstance(decoded, torch.Tensor) or decoded.ndim != 4 or decoded.shape[0] != 1 or decoded.shape[1] != 3 or not decoded.dtype.is_floating_point or not bool(torch.isfinite(decoded).all()):
         raise ValueError("V4-G1R decoder output must be finite floating 1x3xHxW")
-    delta_luma = _g1r_luma_delta((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
+    scalar_delta = _g1r_scalar_delta((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
     # Diffusers maps the decoder's nominal [-1,1] sample to [0,1], so a 2x
     # decoder-space update is exactly the frozen final-RGB luma update pre-clip.
-    delta = torch.as_tensor(2.0 * delta_luma, device=decoded.device, dtype=decoded.dtype)[None, None]
+    rgb_delta = _opponent_rgb_delta(scalar_delta)
+    delta = torch.as_tensor(2.0 * rgb_delta, device=decoded.device, dtype=decoded.dtype).permute(2, 0, 1)[None]
     return decoded + delta
 
 
@@ -306,7 +339,7 @@ def _normalized_score(left: np.ndarray, right: np.ndarray, valid: np.ndarray) ->
 
 def _translation_surface(rs_rgb: np.ndarray, valid: np.ndarray, references: tuple[np.ndarray, ...]) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, ...]]:
     """Joint macro normalized cross-power on reference-derived near-exact bins."""
-    plane = _luma(rs_rgb)
+    plane = _opponent_plane(rs_rgb)
     window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
     weight = valid.astype(np.float64) * window
     if float(weight.sum()) <= 1e-12:
@@ -468,7 +501,7 @@ def _keyed_holdout_correlation(plane: np.ndarray, reference: np.ndarray, valid: 
 
 def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, reference: np.ndarray, tile_ids: tuple[int, ...], *, correlation_min: float, margin_min: float, window_divisor: int = 16, allow_offset: bool = True, prethreshold: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     rectified, valid = _valid_warp(image, canonical_to_attacked)
-    plane, height, width = _luma(rectified), image.shape[0], image.shape[1]
+    plane, height, width = _opponent_plane(rectified), image.shape[0], image.shape[1]
     radius, search_radius = max(4, min(height, width) // window_divisor), max(2, min(height, width) // 48)
     matches: list[dict[str, object]] = []
     for tile_id in tile_ids:
@@ -543,8 +576,9 @@ def _holdout_metrics(image: np.ndarray, canonical_to_attacked: np.ndarray, valid
     rectified, valid = _valid_warp(image, canonical_to_attacked)
     window = np.outer(np.hanning(image.shape[0]), np.hanning(image.shape[1]))
     weight = valid.astype(np.float64) * window
-    holdout_psr = float(normalized_phase_correlation((_luma(rectified) - float(np.mean(_luma(rectified)[valid]))) * weight, reference * weight)["PSR"])
-    holdout_correlation = _keyed_holdout_correlation(_luma(rectified), reference, valid)
+    opponent = _opponent_plane(rectified)
+    holdout_psr = float(normalized_phase_correlation((opponent - float(np.mean(opponent[valid]))) * weight, reference * weight)["PSR"])
+    holdout_correlation = _keyed_holdout_correlation(opponent, reference, valid)
     secondary_matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"], window_divisor=HOLDOUT_PATCH_WINDOW_DIVISORS[1])
     secondary_estimate, secondary_inliers, _, _ = _robust_similarity_fit(secondary_matches, inlier_threshold=FIT_GATES["reprojection"], minimum_inliers=6)
     rotation_spread = log_scale_spread = corner_consistency = math.inf
