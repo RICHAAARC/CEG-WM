@@ -32,7 +32,15 @@ def _vae_device_dtype(vae: Any) -> tuple[torch.device, torch.dtype]:
         raise TypeError("frozen VAE must expose parameters for device and dtype") from error
     if not parameter.dtype.is_floating_point:
         raise TypeError("frozen VAE parameters must use a floating dtype")
-    return parameter.device, parameter.dtype
+    no_hook = object()
+    hook = getattr(vae, "_hf_hook", no_hook)
+    if hook is no_hook:
+        return parameter.device, parameter.dtype
+    try:
+        execution_device = torch.device(getattr(hook, "execution_device"))
+    except (AttributeError, RuntimeError, TypeError) as error:
+        raise TypeError("frozen VAE _hf_hook must expose a valid execution_device") from error
+    return execution_device, parameter.dtype
 
 
 def _vae_config_number(config: Any, name: str, *, positive: bool) -> float:

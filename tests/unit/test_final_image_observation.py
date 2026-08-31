@@ -67,10 +67,35 @@ def test_final_image_is_processed_and_vae_reencoded_with_input_dependence() -> N
 
     assert len(processor.images) == 2
     assert len(vae.inputs) == 2
+    assert all(item.device == vae.anchor.device for item in vae.inputs)
     assert dark_observation.shape == (1, 4, 8, 8)
     assert not torch.equal(dark_observation, bright_observation)
     mode = torch.cat([vae.inputs[1], vae.inputs[1].mean(dim=1, keepdim=True)], dim=1)
     assert torch.equal(bright_observation, (mode - 0.25) * 0.5)
+
+
+@pytest.mark.unit
+def test_final_image_uses_accelerate_execution_device_when_hook_differs_from_parameter_device() -> None:
+    processor = _TrackingProcessor()
+    vae = _TrackingVAE()
+    vae.anchor = torch.nn.Parameter(torch.empty((), device="meta"), requires_grad=False)
+    vae._hf_hook = SimpleNamespace(execution_device="cpu")
+
+    observation = encode_final_rgb_image(Image.new("RGB", (8, 8)), processor, vae)
+
+    assert vae.anchor.device.type == "meta"
+    assert vae.inputs[0].device.type == "cpu"
+    assert observation.device.type == "cpu"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("execution_device", ["not-a-device", object()])
+def test_invalid_accelerate_execution_device_fails_closed(execution_device: object) -> None:
+    vae = _TrackingVAE()
+    vae._hf_hook = SimpleNamespace(execution_device=execution_device)
+
+    with pytest.raises(TypeError, match="valid execution_device"):
+        encode_final_rgb_image(Image.new("RGB", (8, 8)), _TrackingProcessor(), vae)
 
 
 @pytest.mark.unit
