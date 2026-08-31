@@ -60,3 +60,35 @@ replacement and reported per method/condition.
 
 Wrong-key remains an optional diagnostic only. It is excluded from threshold
 calibration, confirmation, and the main-table FPR.
+
+## Final baseline robustness-table contract
+
+The machine-readable final artifact uses this ordered long-table contract:
+`baseline_id`, `source_exact`, `source_artifact_digest`, `adapter_exact`,
+`adapter_artifact_digest`, `threshold_identity`, `threshold_artifact_digest`,
+`attack_family`, `attack_condition`, `planned_positive_units`,
+`observed_positive_units`, `failed_positive_units`, `planned_negative_units`,
+`observed_negative_units`, `failed_negative_units`, `true_positive`,
+`false_negative`, `false_positive`, `true_negative`, `tpr`, `tpr_ci95_lower`,
+`tpr_ci95_upper`, `fpr`, `fpr_ci95_lower`, `fpr_ci95_upper`,
+`clean_confirmation_false_positives`, `clean_confirmation_negatives`,
+`clean_confirmation_failure_count`, `clean_confirmation_ucb95`,
+`clean_confirmation_gate_passed`, `status`.
+
+The paper primary table has one `baseline_id` row and six condition columns in
+the frozen order: clean, JPEG Q50, 50% bicubic restore, 80% center-crop restore,
+Gaussian blur sigma 1.0 px, and rotation
+`rotation_10_bicubic_reflect_center_crop_v1`. Each condition cell reports TPR,
+its exact two-sided 95% Clopper-Pearson interval, unwatermarked-negative FPR,
+its exact two-sided 95% Clopper-Pearson interval, positive/negative failure
+counts, and their fixed planned denominators. These descriptive intervals do
+not replace the clean-confirmation one-sided UCB gate.
+
+The clean-confirmation presentation reports `FP/3000`, its exact one-sided 95%
+Clopper-Pearson UCB, and gate pass/fail; only `UCB <= 0.001` passes. If any
+planned positive or negative observation is missing or failed, all related
+rate/CI fields are null and `status=incomplete`; counts, failures, and the fixed
+denominators remain. Failures are never converted to TN, deleted, or removed
+from a denominator. Wrong-key is an optional supplementary diagnostic and never
+enters this contract or the primary table. Quality and runtime may remain in a
+supplementary artifact and are not baseline primary-table fields.

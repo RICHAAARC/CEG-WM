@@ -5,7 +5,17 @@ import json
 
 import pytest
 
-from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, adapter_plan, baseline_by_id, build_baseline_table_row, validate_observation
+from cegwm.baselines import (
+    FINAL_BASELINE_LONG_TABLE_FIELDS,
+    FINAL_BASELINE_PRIMARY_CONDITION_ORDER,
+    FORMAL_ATTACK_CONDITIONS,
+    PRIMARY_BASELINES,
+    BaselineObservation,
+    adapter_plan,
+    baseline_by_id,
+    build_baseline_table_row,
+    validate_observation,
+)
 from cegwm.baselines.registry import BaselineSpec
 
 
@@ -46,6 +56,23 @@ def test_registry_contains_only_the_authorized_four_methods() -> None:
     assert baseline_by_id("t2smark").sd35_path == "official_run_sd35_native_path"
     with pytest.raises(ValueError, match="out-of-scope"):
         baseline_by_id("image_domain_method")
+
+
+@pytest.mark.unit
+def test_final_baseline_long_table_contract_and_condition_order_are_frozen() -> None:
+    assert FINAL_BASELINE_LONG_TABLE_FIELDS == (
+        "baseline_id", "source_exact", "source_artifact_digest", "adapter_exact", "adapter_artifact_digest",
+        "threshold_identity", "threshold_artifact_digest", "attack_family", "attack_condition",
+        "planned_positive_units", "observed_positive_units", "failed_positive_units", "planned_negative_units",
+        "observed_negative_units", "failed_negative_units", "true_positive", "false_negative",
+        "false_positive", "true_negative", "tpr", "tpr_ci95_lower", "tpr_ci95_upper", "fpr",
+        "fpr_ci95_lower", "fpr_ci95_upper", "clean_confirmation_false_positives",
+        "clean_confirmation_negatives", "clean_confirmation_failure_count", "clean_confirmation_ucb95",
+        "clean_confirmation_gate_passed", "status",
+    )
+    assert FINAL_BASELINE_PRIMARY_CONDITION_ORDER == tuple(
+        condition.condition for condition in FORMAL_ATTACK_CONDITIONS
+    )
 
 
 @pytest.mark.unit

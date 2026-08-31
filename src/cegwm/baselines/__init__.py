@@ -7,7 +7,12 @@ execute an external method.
 from cegwm.baselines.registry import PRIMARY_BASELINES, baseline_by_id
 from cegwm.baselines.records import BaselineObservation, validate_observation
 from cegwm.baselines.adapters import AdapterPlan, adapter_plan
-from cegwm.baselines.table import BaselineTableRow, build_baseline_table_row
+from cegwm.baselines.table import (
+    FINAL_BASELINE_LONG_TABLE_FIELDS,
+    FINAL_BASELINE_PRIMARY_CONDITION_ORDER,
+    BaselineTableRow,
+    build_baseline_table_row,
+)
 from cegwm.baselines.protocol import (
     CLEAN_CONFIRMATION_NEGATIVES,
     EVALUATION_PHYSICAL_UNITS,
@@ -26,6 +31,8 @@ __all__ = [
     "PRIMARY_BASELINES",
     "AdapterPlan",
     "BaselineTableRow",
+    "FINAL_BASELINE_LONG_TABLE_FIELDS",
+    "FINAL_BASELINE_PRIMARY_CONDITION_ORDER",
     "ROTATION_ATTACK_ID",
     "RotationAttackResult",
     "CLEAN_CONFIRMATION_NEGATIVES",

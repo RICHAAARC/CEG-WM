@@ -13,6 +13,51 @@ from cegwm.baselines.records import BaselineObservation, validate_observation
 from cegwm.baselines.registry import baseline_by_id
 
 
+FINAL_BASELINE_LONG_TABLE_FIELDS = (
+    "baseline_id",
+    "source_exact",
+    "source_artifact_digest",
+    "adapter_exact",
+    "adapter_artifact_digest",
+    "threshold_identity",
+    "threshold_artifact_digest",
+    "attack_family",
+    "attack_condition",
+    "planned_positive_units",
+    "observed_positive_units",
+    "failed_positive_units",
+    "planned_negative_units",
+    "observed_negative_units",
+    "failed_negative_units",
+    "true_positive",
+    "false_negative",
+    "false_positive",
+    "true_negative",
+    "tpr",
+    "tpr_ci95_lower",
+    "tpr_ci95_upper",
+    "fpr",
+    "fpr_ci95_lower",
+    "fpr_ci95_upper",
+    "clean_confirmation_false_positives",
+    "clean_confirmation_negatives",
+    "clean_confirmation_failure_count",
+    "clean_confirmation_ucb95",
+    "clean_confirmation_gate_passed",
+    "status",
+)
+
+
+FINAL_BASELINE_PRIMARY_CONDITION_ORDER = (
+    "clean_no_attack",
+    "jpeg_q50",
+    "resize_50_bicubic_restore",
+    "center_crop_80_restore",
+    "gaussian_blur_sigma_1px",
+    "rotation_10_bicubic_reflect_center_crop_v1",
+)
+
+
 PRIMARY_ATTACK_FAMILIES = (
     "clean",
     "compression",
