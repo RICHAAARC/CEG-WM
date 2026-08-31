@@ -13,6 +13,7 @@ from PIL import Image
 from cegwm.method import geometry_v4_g1r as method
 from cegwm.protocol.geometry_v4_g1r import (
     CONFIG_SHA256,
+    DECODER_DTYPE_GUARD_EPS_MULTIPLIER,
     DEVELOPMENT_ARTIFACT_FILES,
     DEVELOPMENT_NOTEBOOK_ID,
     ENERGY_SHARES,
@@ -166,6 +167,33 @@ def test_rgb_and_decoder_output_writers_keep_frozen_budget_and_single_hook() -> 
     with pytest.raises(RuntimeError, match="marked generation failure"):
         run_g1r_sd35_pair(failing_pipeline, "an ordinary test scene", KEY, height=256, width=256, generator=torch.Generator().manual_seed(6201))
     assert len(failing_pipeline.vae.decoder._forward_hooks) == 0
+
+
+@pytest.mark.unit
+def test_decoder_post_cast_update_stays_inside_caps_and_preserves_uniform_domain_shares() -> None:
+    assert DECODER_DTYPE_GUARD_EPS_MULTIPLIER == 2.0
+    dtypes = (torch.float32, torch.float16, torch.bfloat16)
+    for size in (32, 64, 128, 512):
+        fields = method.g1r_anchor_fields((size, size), KEY)
+        domains = (fields.search, fields.fit, fields.validate)
+        for dtype in dtypes:
+            decoded = torch.full((1, 3, size, size), .37, dtype=dtype)
+            updated = method.write_g1r_decoder_output(decoded, KEY)
+            actual = (updated.to(torch.float64) - decoded.to(torch.float64)) / 2.0
+            rms = torch.sqrt(torch.mean(actual * actual, dim=(0, 2, 3)))
+            assert float(torch.max(rms)) <= RGB_CHANNEL_RMS_CAP
+            assert float(torch.max(torch.abs(actual))) <= RGB_CHANNEL_PEAK_CAP
+            assert torch.equal(actual[:, 0], actual[:, 1]) and torch.equal(actual[:, 1], actual[:, 2])
+            post_cast_plane = actual[0, 0].numpy()
+            post_cast_projections = np.asarray([float(np.sum(post_cast_plane * field)) for field in domains])
+            post_cast_shares = post_cast_projections * post_cast_projections / np.sum(post_cast_projections * post_cast_projections)
+            share_tolerance = max(1e-6, float(torch.finfo(dtype).eps))
+            assert tuple(post_cast_shares.tolist()) == pytest.approx(ENERGY_SHARES, abs=share_tolerance)
+
+            guard = 1.0 - DECODER_DTYPE_GUARD_EPS_MULTIPLIER * float(torch.finfo(dtype).eps)
+            guarded = method._g1r_scalar_delta((size, size), KEY) * guard
+            projections = np.asarray([float(np.sum(guarded * field)) for field in domains])
+            assert tuple((projections * projections / np.sum(projections * projections)).tolist()) == pytest.approx(ENERGY_SHARES, abs=2e-14)
 
 
 @pytest.mark.unit

@@ -24,6 +24,7 @@ from cegwm.method.geometry_v4_proxy import (
 )
 from cegwm.protocol.geometry_v4 import GeometryV4Observation
 from cegwm.protocol.geometry_v4_g1r import (
+    DECODER_DTYPE_GUARD_EPS_MULTIPLIER,
     ENERGY_SHARES,
     CONTENT_SCORE_DRIFT_MAX,
     FINAL_RGB_PSNR_MIN,
@@ -323,8 +324,19 @@ def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> to
     # Diffusers maps the decoder's nominal [-1,1] sample to [0,1], so a 2x
     # decoder-space update is exactly the frozen final-RGB luma update pre-clip.
     rgb_delta = _equal_rgb_delta(scalar_delta)
-    delta = torch.as_tensor(2.0 * rgb_delta, device=decoded.device, dtype=decoded.dtype).permute(2, 0, 1)[None]
-    return decoded + delta
+    dtype_guard = 1.0 - DECODER_DTYPE_GUARD_EPS_MULTIPLIER * float(torch.finfo(decoded.dtype).eps)
+    if not 0.0 < dtype_guard < 1.0:
+        raise RuntimeError("V4-G1R decoder dtype guard is invalid")
+    delta = torch.as_tensor(2.0 * dtype_guard * rgb_delta, device=decoded.device, dtype=decoded.dtype).permute(2, 0, 1)[None]
+    updated = decoded + delta
+    # Accumulate the actual post-addition update in float64. There is one fixed
+    # guard and one fail-closed check: no retry, rescaling search, or adaptation.
+    actual_final_rgb_delta = (updated.to(torch.float64) - decoded.to(torch.float64)) / 2.0
+    channel_rms = torch.sqrt(torch.mean(actual_final_rgb_delta * actual_final_rgb_delta, dim=(0, 2, 3)))
+    peak = torch.max(torch.abs(actual_final_rgb_delta))
+    if not bool(torch.isfinite(channel_rms).all()) or not bool(torch.isfinite(peak)) or float(torch.max(channel_rms).item()) > RGB_CHANNEL_RMS_CAP or float(peak.item()) > RGB_CHANNEL_PEAK_CAP:
+        raise RuntimeError("V4-G1R post-cast decoder update exceeded the frozen RGB budget")
+    return updated
 
 
 def _valid_warp(image: np.ndarray, output_to_input: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

@@ -320,10 +320,13 @@
     "units_per_split": 20
   },
   "runtime": {
+    "decoder_dtype_guard": "one_minus_2_times_torch_finfo_eps",
+    "decoder_dtype_guard_eps_multiplier": 2.0,
     "decoder_output_hook_calls_required": 1,
     "hook_module": "AutoencoderKL.decoder",
     "model_id": "stabilityai/stable-diffusion-3.5-medium",
     "placement": "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess",
+    "post_cast_budget_accumulation": "float64_actual_update_fail_closed",
     "single_fixed_update": true
   },
   "schema_version": "cegwm_geometry_v4_g1r_v1",

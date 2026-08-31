@@ -72,6 +72,14 @@ actual RGB channel must have RMS no greater than the unchanged scalar target
 drift below .05 are unchanged; the writer is never content-adaptive. CPU tests use only a fake
 decoder module; real final-RGB observability requires separate GPU authorization.
 
+Before casting the decoder update, one fixed dtype-only multiplier
+`1 - 2*torch.finfo(decoded.dtype).eps` is applied uniformly to the combined
+field. It cannot change the `.40/.36/.24` domain ratio and does not inspect the
+image, seed, key, or domain. After the single cast and decoder addition, the
+actual final-RGB-equivalent update `(updated-decoded)/2` is accumulated in
+float64; any per-channel RMS or peak above the unchanged caps fails closed.
+There is no retry, data-dependent rescale, or cap relaxation.
+
 ## Blind detector
 
 The detector accepts only current attacked ordinary RGB and normalized key.
