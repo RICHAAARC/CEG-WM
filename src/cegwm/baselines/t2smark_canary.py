@@ -192,7 +192,6 @@ def rebuild_partial(run_dir: Path, config: dict[str, Any]) -> list[dict[str, Any
 
 def _run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool=False) -> None:
     """Resume valid work, retry failed/corrupt work, and publish final only at 12/12."""
-    run_dir.mkdir(parents=True, exist_ok=True); establish_contract(run_dir,config)
     for condition,role in pending_observations(run_dir,config,force):
         attempt={"attempted_at":time.time(),"condition":condition,"role":role,"identity":_identity(config)}
         attempt_path = run_dir / "attempts" / f"{condition}__{role}__{time.time_ns()}_{uuid.uuid4().hex}.json"
@@ -229,7 +228,27 @@ def _run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, s
 def run_canary(run_dir: Path, config: dict[str, Any], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool=False) -> None:
     """Hold the stable RUN_ID lock across the entire recovery/publish transaction."""
     with RunLock(run_dir):
+        establish_contract(run_dir, config)
         _run_canary(run_dir, config, execute, force)
+
+
+def quarantine_final(run_dir: Path) -> None:
+    stamp = time.time_ns(); target = run_dir / "quarantine"; target.mkdir(exist_ok=True)
+    for name in ("final_manifest.json", "canary_result.json", "scores.csv"):
+        path = run_dir / name
+        if path.exists(): os.replace(path, target / f"{name}.{stamp}")
+
+
+def run_transaction(run_dir: Path, config: dict[str, Any], generate: Callable[[], None], execute: Callable[[str, str], tuple[Image.Image, float]], force: bool = False) -> None:
+    """Lock contract, generation, observations, and final publication as one transaction."""
+    with RunLock(run_dir):
+        establish_contract(run_dir, config)
+        rebuilt = force or not valid_generation(run_dir, config)
+        if rebuilt:
+            quarantine_final(run_dir)
+            generate()
+            if not valid_generation(run_dir, config): raise RuntimeError("generation callback did not publish a valid checkpoint")
+        _run_canary(run_dir, config, execute, force or rebuilt)
 
 
 def validate_final_publication(run_dir: Path) -> bool:
