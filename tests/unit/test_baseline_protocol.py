@@ -38,4 +38,4 @@ def test_frozen_scale_and_rotation_blocker() -> None:
     assert scale.source_generation_images == 7_000
     assert scale.attack_derivative_images == 10_000
     assert scale.quality_pair_comparisons == 6_000
-    assert rotation_execution_blocker() is not None
+    assert rotation_execution_blocker() is None

@@ -30,7 +30,7 @@ FORMAL_ATTACK_CONDITIONS = (
     AttackCondition("geometric", "resize_50_bicubic_restore", (("scale", "0.50"), ("restore", "bicubic"))),
     AttackCondition("geometric", "center_crop_80_restore", (("retained_area", "0.80"), ("restore", "resize"))),
     AttackCondition("photometric", "gaussian_blur_sigma_1px", (("sigma_px", "1.0"),)),
-    AttackCondition("geometric", "rotation_10deg", (("degrees", "10"), ("fill_crop_policy", "pending_user_freeze"))),
+    AttackCondition("geometric", "rotation_10_bicubic_reflect_center_crop_v1", (("degrees", "10"), ("fill_crop_policy", "reflect_center_crop_v1"))),
 )
 
 
@@ -59,7 +59,7 @@ def per_method_scale() -> PerMethodScale:
 
 
 def rotation_execution_blocker() -> str | None:
-    """Expose the one unresolved attack semantic before execution."""
+    """Return a blocker only if the frozen rotation contract is incomplete."""
 
     if dict(FORMAL_ATTACK_CONDITIONS[-1].parameters)["fill_crop_policy"] == "pending_user_freeze":
         return "rotation fill/crop policy requires user freeze before attack execution"

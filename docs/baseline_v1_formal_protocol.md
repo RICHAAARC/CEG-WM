@@ -34,9 +34,14 @@ and unwatermarked-negative images: clean; JPEG quality 50; resize to 50% then
 bicubic restore; center crop retaining 80% area then restore; Gaussian blur
 sigma 1.0 px; rotation 10 degrees.
 
-Rotation fill/crop remains the one execution blocker: it is recorded as
-`pending_user_freeze`, and an execution must fail closed until the user chooses
-the policy. No implicit library default is allowed.
+Rotation uses attack ID `rotation_10_bicubic_reflect_center_crop_v1`: ordinary
+uint8 sRGB H×W×3 input (`H,W>=3`), +10.0 degrees in Pillow's visual
+counter-clockwise convention, pixel-center center `(W-1)/2,(H-1)/2`, bicubic
+margin 2, NumPy `reflect` RGB padding (edge not repeated), Pillow bicubic rotate
+on the padded canvas, and an exact original-size center crop. The valid-support
+mask is padded constant-zero and rotated nearest-neighbor; reflected RGB outside
+original support is therefore mask=0. Runtime records bind all formulas, actual
+padding/crop, library versions, RGB/mask digests, and implementation exact/digest.
 
 ## Counts and failures
 
