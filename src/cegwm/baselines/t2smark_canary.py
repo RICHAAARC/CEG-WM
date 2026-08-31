@@ -174,7 +174,8 @@ def main() -> None:
       "parameters":{"height":512,"width":512,"guidance_scale":4.0,"num_inference_steps":40,
                     "num_inversion_steps":10,"key_length":16,"message_length":256,"tau":.674}}
     root=Path(args.run_dir); establish_contract(root,config)
-    if not valid_generation(root,config) or args.force_rerun_all:
+    generation_rebuilt = not valid_generation(root,config) or args.force_rerun_all
+    if generation_rebuilt:
         from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
         pipe=InversionDiffusion3Pipeline.from_pretrained(config["model_id"],revision=config["model_revision"],
             torch_dtype=torch.float16,token=os.environ["HF_TOKEN"]).to("cuda")
@@ -194,7 +195,7 @@ def main() -> None:
     def execute(condition: str, role: str) -> tuple[Image.Image,float]:
         image=_attack(Image.open(root/("clean.png" if role=="clean_negative" else "watermarked.png")),condition)
         return image,score_t2smark_rgb(np.asarray(image,dtype=np.uint8),pipe,master,10)
-    run_canary(root,config,execute,args.force_rerun_all)
+    run_canary(root,config,execute,args.force_rerun_all or generation_rebuilt)
 
 
 if __name__ == "__main__": main()

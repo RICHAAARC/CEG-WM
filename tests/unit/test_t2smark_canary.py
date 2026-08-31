@@ -42,3 +42,10 @@ def test_stale_final_is_quarantined_when_repair_fails(tmp_path: Path) -> None:
     run_canary(tmp_path, config(), lambda c, r: (_ for _ in ()).throw(RuntimeError("repair failed")))
     assert not (tmp_path / "canary_result.json").exists()
     assert list(tmp_path.glob("canary_result.stale.*.json"))
+
+
+def test_force_recomputes_all_observations_after_generation_rebuild(tmp_path: Path) -> None:
+    calls = []
+    run_canary(tmp_path, config(), lambda c, r: (Image.new("RGB", (3, 3)), 1.0))
+    run_canary(tmp_path, config(), lambda c, r: (calls.append((c, r)) or Image.new("RGB", (3, 3)), 1.0), force=True)
+    assert len(calls) == 12
