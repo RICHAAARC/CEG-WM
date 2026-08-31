@@ -151,8 +151,8 @@ def inject_initial_z_t_x_template_torch(latents: Any, template: Sequence[XTempla
         if (conjugate_y, conjugate_x) != (y, x):
             spectrum[:, conjugate_y, conjugate_x] = spectrum[:, conjugate_y, conjugate_x] + weight
     spatial = torch.fft.ifft2(spectrum)
-    if float(spatial.imag.abs().max().item()) > 1e-10:
-        raise ValueError("torch Hermitian inverse has non-real residual")
+    if float(spatial.imag.abs().max().item()) > _torch_hermitian_residual_tolerance(spatial, torch):
+        raise ValueError("torch Hermitian inverse has non-real residual beyond dtype-aware numerical tolerance")
     result = latents.clone()
     result[:, M0_TEMPLATE_CHANNEL] = spatial.real.to(dtype=latents.dtype)
     return result
@@ -270,6 +270,17 @@ def _frequency_bin(value: float, size: int) -> int:
 def _normalize_degrees(value: float) -> float:
     normalized = (value + 180.0) % 360.0 - 180.0
     return 180.0 if normalized == -180.0 else normalized
+
+
+def _torch_hermitian_residual_tolerance(spatial: Any, torch: Any) -> float:
+    """Bound complex FFT roundoff from its real dtype, scale, and dimensions."""
+
+    height, width = (int(spatial.shape[-2]), int(spatial.shape[-1]))
+    # `.float()` feeds float32/complex64 FFTs, so budget one dtype epsilon for
+    # each radix stage on both spatial axes and scale it by the output amplitude.
+    fft_rounds = math.ceil(math.log2(height)) + math.ceil(math.log2(width))
+    real_scale = max(1.0, float(spatial.real.abs().max().item()))
+    return float(torch.finfo(spatial.real.dtype).eps * (1 + fft_rounds) * real_scale)
 
 
 def _dft2(plane: Sequence[Sequence[float]]) -> list[list[complex]]:

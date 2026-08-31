@@ -164,3 +164,43 @@ def test_torch_template_injection_rejects_bad_entries_and_nonfinite_weights_when
         method.inject_initial_z_t_x_template_torch(
             latents, (method.XTemplatePoint(0.2, 0.2, float("nan")),),
         )
+
+
+@pytest.mark.unit
+def test_torch_template_injection_accepts_seeded_random_float32_cpu_when_available() -> None:
+    torch = pytest.importorskip("torch")
+    torch.manual_seed(6033)
+    latents = torch.randn((1, 4, 64, 64), dtype=torch.float32)
+
+    injected = method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
+
+    assert injected.dtype is torch.float32 and injected.device.type == "cpu"
+    assert torch.isfinite(injected).all()
+    assert torch.equal(injected[:, :3], latents[:, :3])
+    assert not torch.equal(injected[:, 3], latents[:, 3])
+
+
+@pytest.mark.unit
+def test_torch_cuda_float16_is_an_availability_skip_only() -> None:
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA float16 is unavailable")
+    assert torch.float16 is not None
+
+
+@pytest.mark.unit
+def test_torch_template_injection_rejects_residual_clearly_above_dtype_tolerance_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    torch = pytest.importorskip("torch")
+    original_ifft2 = torch.fft.ifft2
+
+    def nonreal_ifft2(*args: object, **kwargs: object) -> object:
+        spatial = original_ifft2(*args, **kwargs)
+        residual = method._torch_hermitian_residual_tolerance(spatial, torch) + 1.0
+        return torch.complex(spatial.real, torch.full_like(spatial.real, residual))
+
+    monkeypatch.setattr(torch.fft, "ifft2", nonreal_ifft2)
+    latents = torch.zeros((1, 4, 64, 64), dtype=torch.float32)
+    with pytest.raises(ValueError, match="non-real residual"):
+        method.inject_initial_z_t_x_template_torch(latents, method.build_hermitian_x_template())
