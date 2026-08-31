@@ -134,12 +134,11 @@ def _domain_support_masks(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarra
 
 
 def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid: int, active_modulus: int, *, support: np.ndarray | None = None) -> np.ndarray:
-    """Fixed scale-normalized signed Gaussian chips; no image-dependent inputs."""
+    """Fixed keyed jittered balanced-bipolar PRN microcode; no image inputs."""
     height, width = shape
     field = np.zeros((height, width), dtype=np.float64)
     cell_height, cell_width = height / grid, width / grid
     radius = max(1, int(round(min(cell_height, cell_width) * SPARSE_CHIP_RADIUS_FRACTION)))
-    sigma = max(0.7, radius * 0.65)
     for cell_y in range(grid):
         for cell_x in range(grid):
             cell = f":{cell_y}:{cell_x}".encode("ascii")
@@ -153,8 +152,10 @@ def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid
             x0, x1 = max(0, int(math.floor(center_x)) - radius), min(width, int(math.floor(center_x)) + radius + 1)
             y0, y1 = max(0, int(math.floor(center_y)) - radius), min(height, int(math.floor(center_y)) + radius + 1)
             yy, xx = np.mgrid[y0:y1, x0:x1]
-            chip = np.exp(-((xx - center_x) ** 2 + (yy - center_y) ** 2) / (2.0 * sigma * sigma))
-            field[y0:y1, x0:x1] += sign * chip
+            # A keyed checkerboard has exact balanced signs and lower displacement sidelobes than a Gaussian blob.
+            code = np.where(((xx - int(round(center_x))) + (yy - int(round(center_y)))) % 2 == 0, 1.0, -1.0)
+            phase_flip = 1.0 if _seed(key, label + b":phase" + cell) & 1 else -1.0
+            field[y0:y1, x0:x1] += sign * phase_flip * code * (((xx-center_x)**2+(yy-center_y)**2) <= radius*radius)
     fixed_support = np.ones(shape, dtype=bool) if support is None else np.asarray(support, dtype=bool)
     return _unit_on_support(field, fixed_support)
 

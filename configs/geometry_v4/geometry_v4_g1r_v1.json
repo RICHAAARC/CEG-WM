@@ -336,7 +336,7 @@
     "domain_support_grid": 8,
     "domain_support_partition": "fixed_canonical_checkerboard_search_vs_local",
     "exact_disjoint_support": true,
-    "generation": "deterministic_keyed_signed_gaussian_prn_atlas",
+    "generation": "deterministic_keyed_balanced_bipolar_prn_microcode_atlas",
     "image_adaptive": false,
     "local_active_modulus": 2,
     "local_grid": 8,

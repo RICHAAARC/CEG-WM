@@ -12,7 +12,7 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "97b8e4bee02438119e82762062e6b5673277f847928dce981c582492626d6c42"
+CONFIG_SHA256 = "6cbfd250483b8ac83305753837eb0349d0cb4c3f55913f5631535fd8af9c1991"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
 WRITER_ID = "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"
@@ -99,7 +99,7 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     if anchor.get("carrier_axis") != "fixed_equal_rgb_rec709_luma_v1" or anchor.get("carrier_projection") != "rec709_luma" or anchor.get("rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or anchor.get("rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP:
         raise ValueError("V4-G1R sparse luma carrier differs")
     sparse = value.get("sparse_fiducial", {})
-    if tuple(sparse.get("search_scale_grids", ())) != SPARSE_SEARCH_GRIDS or sparse.get("search_component_groups") != SPARSE_SEARCH_GROUPS or sparse.get("search_active_modulus") != SPARSE_SEARCH_ACTIVE_MODULUS or sparse.get("local_grid") != SPARSE_LOCAL_GRID or sparse.get("local_active_modulus") != SPARSE_LOCAL_ACTIVE_MODULUS or sparse.get("chip_radius_fraction_of_cell") != SPARSE_CHIP_RADIUS_FRACTION or sparse.get("reference_support_fraction") != SPARSE_SUPPORT_FRACTION or sparse.get("generation") != "deterministic_keyed_signed_gaussian_prn_atlas" or sparse.get("whitening") != "fixed_cubic_detrend_then_narrow_band" or sparse.get("image_adaptive") is not False:
+    if tuple(sparse.get("search_scale_grids", ())) != SPARSE_SEARCH_GRIDS or sparse.get("search_component_groups") != SPARSE_SEARCH_GROUPS or sparse.get("search_active_modulus") != SPARSE_SEARCH_ACTIVE_MODULUS or sparse.get("local_grid") != SPARSE_LOCAL_GRID or sparse.get("local_active_modulus") != SPARSE_LOCAL_ACTIVE_MODULUS or sparse.get("chip_radius_fraction_of_cell") != SPARSE_CHIP_RADIUS_FRACTION or sparse.get("reference_support_fraction") != SPARSE_SUPPORT_FRACTION or sparse.get("generation") != "deterministic_keyed_balanced_bipolar_prn_microcode_atlas" or sparse.get("whitening") != "fixed_cubic_detrend_then_narrow_band" or sparse.get("image_adaptive") is not False:
         raise ValueError("V4-G1R sparse fiducial contract differs")
     if sparse.get("domain_support_partition") != "fixed_canonical_checkerboard_search_vs_local" or sparse.get("domain_support_grid") != SPARSE_DOMAIN_SUPPORT_GRID or sparse.get("exact_disjoint_support") is not True or sparse.get("combined_normalization") != "none_exact_orthogonal_energy_identity":
         raise ValueError("V4-G1R sparse domain support differs")

@@ -91,7 +91,7 @@ forbidden. Every fixed coarse and fine rotation/scale hypothesis is ranked by
 the keyed search reference's normalized complex cross-power phase-correlation
 under the same valid mask and Hann window. Magnitude-only FFT evidence is not a
 candidate control quantity. The search field is a deterministic keyed sparse
-PRN atlas with signed Gaussian chips on fixed 8, 12, and 16 grids, four
+PRN atlas with keyed balanced bipolar microcode on fixed 8, 12, and 16 grids, four
 independent groups per scale, fixed one-half cell duty, and scale-normalized
 chip radius .20 of a cell. Coarse search uses all eight grid-8/grid-12 groups
 and a fixed trimmed component consensus; fine search jointly uses all twelve
@@ -114,7 +114,7 @@ Public H always maps attacked to canonical. Any translation or holdout PSR used
 by a `RELIABLE` decision must be at least 8.
 
 Fit and validation tile identities, coordinates, and checkerboard split remain
-unchanged. Each tile uses its own fixed keyed signed-Gaussian PRN atlas on an
+unchanged. Each tile uses its own fixed keyed balanced-bipolar PRN atlas on an
 8x8 local grid with one-half cell duty. Local whitening is fixed cubic detrend
 plus the same narrow band. Matched correlation reads only support whose
 canonical keyed reference magnitude is at least .18 of its maximum; that mask
