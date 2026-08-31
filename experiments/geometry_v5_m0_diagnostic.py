@@ -1,4 +1,4 @@
-"""Small, nonformal Geometry-V5 M0 Colab diagnostic (four cases only)."""
+"""Small Geometry-V5 M0 failure-isolation diagnostic (four cases only)."""
 
 from __future__ import annotations
 
@@ -14,9 +14,11 @@ from typing import Any, Callable, Mapping
 from cegwm.protocol.geometry_v5_m0 import GeometryV5M0RawRecord, load_geometry_v5_m0_contract
 
 
-_DIAGNOSTIC_ID = "geometry_v5_m0_sd21_small_canary_v1"
-_METHOD_SOURCE_EXACT = "7252e0f712db8d857be9b9bfb019e1776cf03978"
+_DIAGNOSTIC_ID = "geometry_v5_m0_sd21_failure_isolation_v1"
+_METHOD_SOURCE_EXACT = "ac1cbe2ae733a93ec94b0022b1e63a298e2fbea9"
+_FROZEN_BASELINE_ARTIFACT_EXACT = "d17d30b4bca7cf6e29bebf08aa384d773e8550c3"
 _CASE_IDS = ("identity", "rotation_+10", "scale_1.1", "translation_x_+0.08")
+_ISOLATION_CASE_IDS = ("rotation_+10", "scale_1.1")
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class _Bindings:
     attack: Callable[[Any, Mapping[str, Any]], Any]
     detect: Callable[[Any, Any], GeometryV5M0RawRecord]
     method_preflight: Callable[[Path], tuple[list[dict[str, Any]], bool]] | None = None
+    isolate: Callable[[Any, Any, Mapping[str, Any], Mapping[str, Any], tuple[tuple[float, float, float], ...]], Mapping[str, Any]] | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,7 +59,15 @@ def _concrete_bindings() -> _Bindings:
     """Bind the three existing concrete runtime functions after CLI entry."""
     torch = __import__("torch")
     from PIL import Image
-    from cegwm.runtime.geometry_v5_m0_sd21 import SD21M0Identity, generate_bound_sd21, load_bound_sd21_pipeline, recover_and_estimate_bound_sd21
+    from cegwm.runtime.geometry_v5_m0_sd21 import (
+        SD21M0Identity,
+        diagnostic_rs_candidate_landscape,
+        diagnostic_translation_surface_controls,
+        generate_bound_sd21,
+        invert_bound_sd21_attacked_rgb,
+        load_bound_sd21_pipeline,
+        recover_and_estimate_bound_sd21,
+    )
 
     identity = SD21M0Identity()
 
@@ -73,7 +84,66 @@ def _concrete_bindings() -> _Bindings:
     def detect(pipeline: Any, attacked_rgb: Any) -> GeometryV5M0RawRecord:
         return recover_and_estimate_bound_sd21(pipeline, attacked_rgb, identity)
 
-    return _Bindings(load_bound_sd21_pipeline, initial_z_t, generate, attack, detect)
+    def isolate(
+        pipeline: Any,
+        attacked_rgb: Any,
+        case: Mapping[str, Any],
+        frozen_raw: Mapping[str, Any],
+        truth: tuple[tuple[float, float, float], ...],
+    ) -> Mapping[str, Any]:
+        recovered_z_t = invert_bound_sd21_attacked_rgb(pipeline, attacked_rgb, identity)
+        if case["attack_id"] == "rotation_+10":
+            truth_rotation = math.degrees(math.atan2(truth[1][0], truth[0][0]))
+            truth_scale = math.hypot(truth[0][0], truth[1][0])
+            expected_forward = -truth_rotation
+            return {
+                "status": "ISOLATION_AVAILABLE",
+                "kind": "rs_candidate_landscape",
+                "landscape": diagnostic_rs_candidate_landscape(
+                    recovered_z_t,
+                    {
+                        "expected_forward_from_parsed_truth_H": {
+                            "forward_rotation_degrees": expected_forward,
+                            "scale": truth_scale,
+                        },
+                        "mirror_of_expected_forward": {
+                            "forward_rotation_degrees": -expected_forward,
+                            "scale": truth_scale,
+                        },
+                    },
+                ),
+            }
+        if case["attack_id"] == "scale_1.1":
+            raw_rotation = frozen_raw.get("rotation_degrees")
+            raw_scale = frozen_raw.get("scale")
+            if raw_rotation is None or raw_scale is None:
+                raise ValueError("frozen raw R/S control is unavailable")
+            truth_rotation = math.degrees(math.atan2(truth[1][0], truth[0][0]))
+            truth_scale = math.hypot(truth[0][0], truth[1][0])
+            surfaces = diagnostic_translation_surface_controls(
+                recovered_z_t,
+                {
+                    "frozen_raw_detected_rs": {
+                        "rotation_degrees": float(raw_rotation),
+                        "scale": float(raw_scale),
+                    },
+                    "parsed_inverse_truth_rs": {
+                        "rotation_degrees": truth_rotation,
+                        "scale": truth_scale,
+                    },
+                },
+            )
+            return {
+                "status": "ISOLATION_AVAILABLE",
+                "kind": "translation_surface_controls",
+                "surfaces": [
+                    {**surface, "diagnostic_only_errors": _translation_control_errors(surface, truth)}
+                    for surface in surfaces["controls"]
+                ],
+            }
+        raise ValueError("isolation case is not selected")
+
+    return _Bindings(load_bound_sd21_pipeline, initial_z_t, generate, attack, detect, isolate=isolate)
 
 
 def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, event_sink: Callable[[str], None] | None = None) -> tuple[dict[str, Any], bool]:
@@ -117,7 +187,7 @@ def run_diagnostic(repo_root: Path, output_json: Path, bindings: _Bindings, even
             raw = bindings.detect(pipeline, attacked_rgb)
             if not isinstance(raw, GeometryV5M0RawRecord):
                 raise TypeError("detector must return GeometryV5M0RawRecord")
-            records.append(_record_after_raw_freeze(case, raw, event_sink))
+            records.append(_record_after_raw_freeze(case, raw, event_sink, bindings.isolate, pipeline, attacked_rgb))
         except Exception as error:
             records.append(_failed_case(case["attack_id"], "detector", error, event_sink))
     return _write_result(output_json, unit, identity, records, preflight)
@@ -239,6 +309,7 @@ def _preflight_blocked_case(attack_id: str) -> dict[str, Any]:
 
     return {
         "attack_id": attack_id, "raw": None, "truth_errors": _failed_truth_errors(),
+        "isolation_diagnostics": {"status": "NOT_RUN"},
         "failure_stage": "method_preflight", "error_class": "MethodPreflightFailed",
     }
 
@@ -274,15 +345,41 @@ def _truth_h(case: Mapping[str, Any]) -> tuple[tuple[float, float, float], ...]:
     return ((b00, b01, -(b00 * tx + b01 * ty)), (b10, b11, -(b10 * tx + b11 * ty)), (0.0, 0.0, 1.0))
 
 
-def _record_after_raw_freeze(case: Mapping[str, Any], raw: GeometryV5M0RawRecord, event_sink: Callable[[str], None] | None) -> dict[str, Any]:
+def _record_after_raw_freeze(
+    case: Mapping[str, Any],
+    raw: GeometryV5M0RawRecord,
+    event_sink: Callable[[str], None] | None,
+    isolate: Callable[[Any, Any, Mapping[str, Any], Mapping[str, Any], tuple[tuple[float, float, float], ...]], Mapping[str, Any]] | None = None,
+    pipeline: Any = None,
+    attacked_rgb: Any = None,
+) -> dict[str, Any]:
     raw_bytes = _canonical_json(_raw_payload(raw))
     frozen_raw = json.loads(raw_bytes)
     if event_sink is not None:
         event_sink("raw_frozen")
-    truth_errors = _diagnostic_truth_errors(raw, _truth_h(case))
+    truth = _truth_h(case)
+    truth_errors = _diagnostic_truth_errors(raw, truth)
     if event_sink is not None:
         event_sink("truth_evaluated")
-    return {"attack_id": case["attack_id"], "raw": frozen_raw, "truth_errors": truth_errors, "failure_stage": None, "error_class": None}
+    isolation_diagnostics: Mapping[str, Any] = {"status": "NOT_SELECTED"}
+    if case["attack_id"] in _ISOLATION_CASE_IDS:
+        if event_sink is not None:
+            event_sink("isolation_started")
+        try:
+            if isolate is None:
+                raise RuntimeError("selected isolation binding is unavailable")
+            isolated = isolate(pipeline, attacked_rgb, case, json.loads(raw_bytes), truth)
+            if not isinstance(isolated, Mapping) or isolated.get("status") != "ISOLATION_AVAILABLE":
+                raise ValueError("selected isolation result is unavailable")
+            isolation_diagnostics = dict(isolated)
+        except Exception as error:
+            isolation_diagnostics = {"status": "ISOLATION_FAILED", "error_class": type(error).__name__}
+    if _canonical_json(frozen_raw) != raw_bytes:
+        raise RuntimeError("frozen raw bytes changed during failure isolation")
+    return {
+        "attack_id": case["attack_id"], "raw": frozen_raw, "truth_errors": truth_errors,
+        "isolation_diagnostics": isolation_diagnostics, "failure_stage": None, "error_class": None,
+    }
 
 
 def _failed_case(attack_id: str, stage: str, error: Exception, event_sink: Callable[[str], None] | None) -> dict[str, Any]:
@@ -290,7 +387,10 @@ def _failed_case(attack_id: str, stage: str, error: Exception, event_sink: Calla
     raw_bytes = _canonical_json(_raw_payload(raw))
     if event_sink is not None:
         event_sink("raw_frozen")
-    return {"attack_id": attack_id, "raw": json.loads(raw_bytes), "truth_errors": _failed_truth_errors(), "failure_stage": stage, "error_class": type(error).__name__}
+    return {
+        "attack_id": attack_id, "raw": json.loads(raw_bytes), "truth_errors": _failed_truth_errors(),
+        "isolation_diagnostics": {"status": "NOT_RUN"}, "failure_stage": stage, "error_class": type(error).__name__,
+    }
 
 
 def _raw_payload(raw: GeometryV5M0RawRecord) -> dict[str, Any]:
@@ -324,12 +424,47 @@ def _corner_rms(estimated: tuple[tuple[float, float, float], ...], truth: tuple[
     return math.sqrt(squared / 4.0)
 
 
+def _translation_control_errors(
+    surface: Mapping[str, Any], truth: tuple[tuple[float, float, float], ...],
+) -> dict[str, Any]:
+    rotation = math.radians(float(surface["rotation_degrees"]))
+    scale, tx, ty = float(surface["scale"]), float(surface["best_tx"]), float(surface["best_ty"])
+    cosine, sine = scale * math.cos(rotation), scale * math.sin(rotation)
+    estimate = ((cosine, -sine, tx), (sine, cosine, ty), (0.0, 0.0, 1.0))
+    return {
+        "diagnostic_only_not_a_gate": True,
+        "tx_abs": abs(tx - truth[0][2]),
+        "ty_abs": abs(ty - truth[1][2]),
+        "corner_rms": _corner_rms(estimate, truth),
+    }
+
+
 def _write_result(output_json: Path, unit: Any, identity: Any, cases: list[dict[str, Any]], preflight: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
-    result = {"diagnostic_id": _DIAGNOSTIC_ID, "method_source_exact": _METHOD_SOURCE_EXACT, "model": {"id": identity.model_family, "revision": identity.model_revision}, "seed": unit.seed, "unit_id": unit.unit_id, "method_preflight": preflight, "cases": cases, "diagnostic_denominator": 4, "science_denominator": 0, "claim": "nonformal_colab_method_diagnostic_only"}
+    result = {
+        "diagnostic_id": _DIAGNOSTIC_ID,
+        "method_source_exact": _METHOD_SOURCE_EXACT,
+        "frozen_reference_evidence": {
+            "artifact_exact": _FROZEN_BASELINE_ARTIFACT_EXACT,
+            "method_preflight_available": 4,
+            "raw_estimate_available": 4,
+            "within_existing_m0_tolerances": 2,
+            "diagnostic_denominator": 4,
+            "science_denominator": 0,
+        },
+        "model": {"id": identity.model_family, "revision": identity.model_revision},
+        "seed": unit.seed, "unit_id": unit.unit_id, "method_preflight": preflight, "cases": cases,
+        "diagnostic_denominator": 4, "science_denominator": 0,
+        "claim": "nonformal_colab_failure_isolation_only",
+    }
     if len(cases) != 4:
         raise RuntimeError("diagnostic retention differs")
     _exclusive_json(output_json, result)
-    return result, all(case["raw"] is not None and case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in cases)
+    raw_complete = all(case["raw"] is not None and case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in cases)
+    isolation_complete = all(
+        case["isolation_diagnostics"]["status"] == "ISOLATION_AVAILABLE"
+        for case in cases if case["attack_id"] in _ISOLATION_CASE_IDS
+    )
+    return result, raw_complete and isolation_complete
 
 
 def _canonical_json(value: Any) -> bytes:

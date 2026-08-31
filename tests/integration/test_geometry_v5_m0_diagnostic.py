@@ -31,7 +31,16 @@ def _passing_raw(case: dict[str, object]) -> GeometryV5M0RawRecord:
     )
 
 
-def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, fail_generation: bool = False, fail_case: str | None = None, generation_output: object | None = None, fail_preflight: bool = False) -> diagnostic._Bindings:
+def _fake_bindings(
+    calls: dict[str, list[object]],
+    *,
+    fail_load: bool = False,
+    fail_generation: bool = False,
+    fail_case: str | None = None,
+    fail_isolation: str | None = None,
+    generation_output: object | None = None,
+    fail_preflight: bool = False,
+) -> diagnostic._Bindings:
     contract = load_geometry_v5_m0_contract(_ROOT)
     cases = [case for case in contract.config["development"]["attacks"] if case["attack_id"] in {"identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"}]
 
@@ -69,8 +78,32 @@ def _fake_bindings(calls: dict[str, list[object]], *, fail_load: bool = False, f
             return ([{"stage": "known_latent_rst", "case_id": "scale_1.1", "status": "METHOD_PREFLIGHT_FAILED", "raw_estimates": None, "diagnostics": {"error_class": "ValueError"}}], False)
         return ([{"stage": "direct_initial_z_t_identity", "case_id": "identity", "status": "METHOD_PREFLIGHT_PASSED", "raw_estimates": {"rotation_degrees": 0.0, "scale": 1.0, "tx": 0.0, "ty": 0.0, "H_hat": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))}, "diagnostics": {"science_denominator": 0}}], True)
 
+    def isolate(
+        _pipeline: object,
+        attacked_rgb: int,
+        case: dict[str, object],
+        frozen_raw: dict[str, object],
+        truth: tuple[tuple[float, float, float], ...],
+    ) -> dict[str, object]:
+        calls["isolate"].append(case["attack_id"])
+        assert attacked_rgb == cases.index(case) and truth == diagnostic._truth_h(case)
+        assert frozen_raw["status"] == "ESTIMATE_AVAILABLE"
+        frozen_raw["status"] = "FAILED"
+        if case["attack_id"] == fail_isolation:
+            raise RuntimeError("secret isolation")
+        if case["attack_id"] == "rotation_+10":
+            return {
+                "status": "ISOLATION_AVAILABLE", "kind": "rs_candidate_landscape",
+                "landscape": {"probe_candidates": [{"name": "expected_forward_from_parsed_truth_H"}, {"name": "mirror_of_expected_forward"}]},
+            }
+        return {
+            "status": "ISOLATION_AVAILABLE", "kind": "translation_surface_controls",
+            "surfaces": [{"name": "frozen_raw_detected_rs"}, {"name": "parsed_inverse_truth_rs"}],
+        }
+
     calls.setdefault("attack_image", [])
-    return diagnostic._Bindings(load, initial, generate, attack, detect, preflight)
+    calls.setdefault("isolate", [])
+    return diagnostic._Bindings(load, initial, generate, attack, detect, preflight, isolate)
 
 
 @pytest.mark.integration
@@ -82,10 +115,40 @@ def test_fake_diagnostic_runs_one_generation_four_independent_cases_and_freezes_
     assert complete and calls["load"] == ["load"] and calls["initial"] == calls["generate"] == [7501]
     assert calls["preflight"] == ["preflight"]
     assert calls["attack"] == ["identity", "rotation_+10", "scale_1.1", "translation_x_+0.08"] and len(calls["attack_image"]) == len(calls["detect"]) == 4
-    assert all(events[index:index + 2] == ["raw_frozen", "truth_evaluated"] for index in range(0, 8, 2))
-    assert result["diagnostic_denominator"] == 4 and result["science_denominator"] == 0 and result["claim"] == "nonformal_colab_method_diagnostic_only"
+    assert calls["isolate"] == ["rotation_+10", "scale_1.1"]
+    assert events == [
+        "raw_frozen", "truth_evaluated",
+        "raw_frozen", "truth_evaluated", "isolation_started",
+        "raw_frozen", "truth_evaluated", "isolation_started",
+        "raw_frozen", "truth_evaluated",
+    ]
+    assert all(case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in result["cases"])
+    assert [case["isolation_diagnostics"]["status"] for case in result["cases"]] == ["NOT_SELECTED", "ISOLATION_AVAILABLE", "ISOLATION_AVAILABLE", "NOT_SELECTED"]
+    assert result["diagnostic_denominator"] == 4 and result["science_denominator"] == 0 and result["claim"] == "nonformal_colab_failure_isolation_only"
+    assert result["frozen_reference_evidence"] == {
+        "artifact_exact": "d17d30b4bca7cf6e29bebf08aa384d773e8550c3",
+        "method_preflight_available": 4, "raw_estimate_available": 4,
+        "within_existing_m0_tolerances": 2, "diagnostic_denominator": 4, "science_denominator": 0,
+    }
     text = output.read_text(encoding="utf-8")
     assert text == diagnostic._canonical_json(json.loads(text)).decode("utf-8") and "secret" not in text
+    with pytest.raises(FileExistsError):
+        diagnostic.run_diagnostic(_ROOT, output, _fake_bindings(calls))
+
+
+@pytest.mark.integration
+def test_isolation_failure_is_create_only_and_preserves_all_frozen_raw(tmp_path: Path) -> None:
+    calls: dict[str, list[object]] = {name: [] for name in ("load", "initial", "generate", "attack", "detect", "isolate")}
+    output = tmp_path / "isolation-failed.json"
+    result, complete = diagnostic.run_diagnostic(
+        _ROOT, output, _fake_bindings(calls, fail_isolation="scale_1.1"),
+    )
+    assert not complete and len(result["cases"]) == 4
+    assert all(case["raw"]["status"] == "ESTIMATE_AVAILABLE" for case in result["cases"])
+    scale = next(case for case in result["cases"] if case["attack_id"] == "scale_1.1")
+    assert scale["failure_stage"] is None and scale["error_class"] is None
+    assert scale["isolation_diagnostics"] == {"status": "ISOLATION_FAILED", "error_class": "RuntimeError"}
+    assert "secret" not in output.read_text(encoding="utf-8")
     with pytest.raises(FileExistsError):
         diagnostic.run_diagnostic(_ROOT, output, _fake_bindings(calls))
 
@@ -140,8 +203,15 @@ def test_diagnostic_module_is_lazy_concrete_and_has_no_formal_gate() -> None:
     tree = ast.parse(source)
     imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     assert not {"torch", "diffusers", "PIL"} & imported
-    assert all(name in source for name in ("load_bound_sd21_pipeline", "generate_bound_sd21", "recover_and_estimate_bound_sd21"))
+    assert all(name in source for name in ("load_bound_sd21_pipeline", "generate_bound_sd21", "recover_and_estimate_bound_sd21", "invert_bound_sd21_attacked_rgb"))
     assert "aggregate" not in source and "GeometryV5Observation" not in source and "RELIABLE" not in source
     assert "diagnostic_only_not_a_gate" in source and "fake" not in diagnostic._DIAGNOSTIC_ID
-    assert diagnostic._METHOD_SOURCE_EXACT == "7252e0f712db8d857be9b9bfb019e1776cf03978"
+    assert diagnostic._DIAGNOSTIC_ID == "geometry_v5_m0_sd21_failure_isolation_v1"
+    assert diagnostic._METHOD_SOURCE_EXACT == "ac1cbe2ae733a93ec94b0022b1e63a298e2fbea9"
     assert "method_preflight" in source and "_preflight_blocked_case" in source
+    concrete = ast.parse(source)
+    concrete_bindings = next(node for node in concrete.body if isinstance(node, ast.FunctionDef) and node.name == "_concrete_bindings")
+    isolate = next(node for node in concrete_bindings.body if isinstance(node, ast.FunctionDef) and node.name == "isolate")
+    isolate_calls = {node.func.id for node in ast.walk(isolate) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "generate_bound_sd21" not in isolate_calls
+    assert "invert_bound_sd21_attacked_rgb" in isolate_calls
