@@ -20,6 +20,8 @@ cannot contain placeholder scores or decisions.  Future observed records must bi
 registered method direction, a `baseline_id:calibration:` provenance identity,
 a validated source/adapter registry state, lowercase 40-character source and
 adapter Git exacts, and named SHA-256 source/adapter/threshold artifact digests.
+Those six identities are frozen in the method registry and must match each
+observed record exactly; all current registry values are unresolved.
 
 No record here supplies geometry (`H_hat` or corners), alters Geometry-V4, or
 constitutes a model execution, threshold calibration, attack roster, denominator,

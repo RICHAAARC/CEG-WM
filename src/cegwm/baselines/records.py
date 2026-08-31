@@ -61,6 +61,16 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
             raise ValueError("observed records require a continuous score and decision")
         if baseline.source_status != "validated" or baseline.adapter_status != "validated":
             raise ValueError("observed records require validated source and adapter registry entries")
+        registry_identities = (
+            baseline.source_exact,
+            baseline.adapter_exact,
+            baseline.source_artifact_digest,
+            baseline.adapter_artifact_digest,
+            baseline.threshold_provenance,
+            baseline.threshold_artifact_digest,
+        )
+        if any(value is None for value in registry_identities):
+            raise ValueError("observed records require registry-bound source, adapter, and threshold identities")
         if baseline.score_direction is None:
             raise ValueError("method detector score direction is unresolved")
         if observation.score_direction != baseline.score_direction:
@@ -72,6 +82,12 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
             raise ValueError("source_exact must be a lowercase 40-character git exact")
         if not re.fullmatch(r"[0-9a-f]{40}", observation.adapter_exact):
             raise ValueError("adapter_exact must be a lowercase 40-character git exact")
+        if observation.source_exact != baseline.source_exact:
+            raise ValueError("source_exact must match the registry")
+        if observation.adapter_exact != baseline.adapter_exact:
+            raise ValueError("adapter_exact must match the registry")
+        if observation.threshold_provenance != baseline.threshold_provenance:
+            raise ValueError("threshold provenance must match the registry")
     elif observation.status in {"failed", "not_available"}:
         if any(value is not None for value in (observation.continuous_score, observation.score_direction,
                                                 observation.threshold_provenance, observation.decision)):
@@ -85,4 +101,10 @@ def validate_observation(observation: BaselineObservation) -> BaselineObservatio
         raise ValueError("artifact digests must be named sha256 values")
     if observation.status == "observed" and not {"source", "adapter", "threshold"}.issubset(observation.artifact_digests):
         raise ValueError("observed records require source, adapter, and threshold artifact digests")
+    if observation.status == "observed" and (
+        observation.artifact_digests["source"] != baseline.source_artifact_digest
+        or observation.artifact_digests["adapter"] != baseline.adapter_artifact_digest
+        or observation.artifact_digests["threshold"] != baseline.threshold_artifact_digest
+    ):
+        raise ValueError("observed artifact digests must match the registry")
     return observation

@@ -18,6 +18,12 @@ class BaselineSpec:
     adapter_status: str = "not_available"
     result_status: str = "not_available"
     paper_claim_support: bool = False
+    source_exact: str | None = None
+    adapter_exact: str | None = None
+    source_artifact_digest: str | None = None
+    adapter_artifact_digest: str | None = None
+    threshold_provenance: str | None = None
+    threshold_artifact_digest: str | None = None
 
 
 PRIMARY_BASELINES: tuple[BaselineSpec, ...] = (

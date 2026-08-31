@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from cegwm.baselines import PRIMARY_BASELINES, BaselineObservation, baseline_by_id, validate_observation
+from cegwm.baselines.registry import BaselineSpec
 
 
 def _record(**changes: object) -> BaselineObservation:
@@ -64,6 +65,30 @@ def test_unresolved_methods_cannot_emit_observed_or_placeholder_evidence() -> No
             decision=True,
             status="observed",
         ).as_dict()
+
+
+@pytest.mark.unit
+def test_observed_records_require_exact_registry_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = BaselineSpec(
+        "tree_ring", "Tree-Ring", "https://example.invalid/tree", "method_faithful_sd35_adaptation",
+        score_direction="higher_is_watermarked", source_status="validated", adapter_status="validated",
+        source_exact="0" * 40, adapter_exact="1" * 40,
+        source_artifact_digest="sha256:" + "0" * 64,
+        adapter_artifact_digest="sha256:" + "1" * 64,
+        threshold_provenance="tree_ring:calibration:approved",
+        threshold_artifact_digest="sha256:" + "2" * 64,
+    )
+    monkeypatch.setattr("cegwm.baselines.records.baseline_by_id", lambda _: spec)
+    observed = _record(
+        source_exact=spec.source_exact, adapter_exact=spec.adapter_exact,
+        continuous_score=0.25, score_direction=spec.score_direction,
+        threshold_provenance=spec.threshold_provenance, decision=True, status="observed",
+        artifact_digests={"source": spec.source_artifact_digest, "adapter": spec.adapter_artifact_digest,
+                          "threshold": spec.threshold_artifact_digest},
+    )
+    assert observed.as_dict()["status"] == "observed"
+    with pytest.raises(ValueError, match="source_exact must match"):
+        replace(observed, source_exact="f" * 40).as_dict()
     with pytest.raises(ValueError, match="validated source and adapter registry"):
         _record(
             source_exact="0" * 40,
