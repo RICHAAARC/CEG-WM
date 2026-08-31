@@ -31,6 +31,13 @@ class RotationScaleEstimate:
     scale: float
 
 
+@dataclass(frozen=True, slots=True)
+class RecoveredZTRotationScaleEstimate:
+    rotation_degrees: float
+    scale: float
+    score: float
+
+
 def build_hermitian_x_template(
     *, channel: int = M0_TEMPLATE_CHANNEL, scale: int = M0_TEMPLATE_SCALE,
     radial_lengths: Sequence[float] = M0_RADIAL_LENGTHS,
@@ -63,16 +70,59 @@ def inject_initial_z_t_x_template(
     if len(latent) != 4:
         raise ValueError("M0 initial z_T must have four channels")
     height, width = len(latent[0]), len(latent[0][0])
-    updated = [[list(row) for row in plane] for plane in latent]
+    spectrum = _dft2(latent[M0_TEMPLATE_CHANNEL])
     for point in template:
         if not isinstance(point, XTemplatePoint):
             raise TypeError("template entries must be XTemplatePoint")
-        y = int(round((point.frequency_y + 0.5) * (height - 1)))
-        x = int(round((point.frequency_x + 0.5) * (width - 1)))
-        if not 0 <= x < width or not 0 <= y < height:
-            raise ValueError("template point lies outside normalized spectrum")
-        updated[M0_TEMPLATE_CHANNEL][y][x] += _finite(point.weight, "template weight")
-    return tuple(tuple(tuple(row) for row in plane) for plane in updated)
+        y, x = _frequency_bin(point.frequency_y, height), _frequency_bin(point.frequency_x, width)
+        conjugate_y, conjugate_x = (-y) % height, (-x) % width
+        weight = _finite(point.weight, "template weight")
+        spectrum[y][x] += weight
+        spectrum[conjugate_y][conjugate_x] += weight
+    spatial = _idft2(spectrum)
+    imaginary_residual = max(abs(value.imag) for row in spatial for value in row)
+    if imaginary_residual > 1e-10:
+        raise ValueError("Hermitian inverse transform has non-real residual")
+    updated = list(latent)
+    updated[M0_TEMPLATE_CHANNEL] = tuple(tuple(value.real for value in row) for row in spatial)
+    return tuple(updated)
+
+
+def estimate_rotation_scale_from_recovered_z_t(
+    recovered_z_t: Sequence[Sequence[Sequence[float]]],
+    candidate_grid: Sequence[Sequence[float]],
+) -> RecoveredZTRotationScaleEstimate:
+    """Search explicit R/S candidates from channel-3 recovered-`z_T` magnitude only.
+
+    Candidate selection is deterministic and blind: no original latent, prompt,
+    clean RGB, transform truth, or attack parameters are accepted by this API.
+    """
+
+    latent = _latent(recovered_z_t)
+    if len(latent) != 4:
+        raise ValueError("recovered z_T must have four channels")
+    plane = latent[M0_TEMPLATE_CHANNEL]
+    height, width = len(plane), len(plane[0])
+    spectrum = _dft2(plane)
+    candidates = tuple(tuple(_finite(item, "R/S candidate") for item in candidate) for candidate in candidate_grid)
+    if not candidates or any(len(candidate) != 2 or candidate[1] <= 0.0 for candidate in candidates):
+        raise ValueError("R/S candidate grid must contain finite rotation/positive-scale pairs")
+    template = build_hermitian_x_template()
+    scored: list[tuple[float, float, float]] = []
+    for rotation_degrees, scale in candidates:
+        angle = math.radians(rotation_degrees)
+        cosine, sine = math.cos(angle), math.sin(angle)
+        score = 0.0
+        for point in template:
+            observed_x = scale * (cosine * point.frequency_x - sine * point.frequency_y)
+            observed_y = scale * (sine * point.frequency_x + cosine * point.frequency_y)
+            y, x = _frequency_bin(observed_y, height), _frequency_bin(observed_x, width)
+            score += abs(spectrum[y][x])
+        scored.append((score, rotation_degrees, scale))
+    score, rotation_degrees, scale = max(scored, key=lambda item: (item[0], -abs(item[1]), -item[2]))
+    if not math.isfinite(score) or score <= 0.0:
+        raise ValueError("recovered z_T has no usable X-template spectral evidence")
+    return RecoveredZTRotationScaleEstimate(rotation_degrees, scale, score)
 
 
 def estimate_rotation_scale_from_peak_pairs(
@@ -175,6 +225,13 @@ def _finite(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
         raise ValueError(f"{name} must be finite non-bool real")
     return float(value)
+
+
+def _frequency_bin(value: float, size: int) -> int:
+    frequency = _finite(value, "frequency")
+    if not -0.5 <= frequency <= 0.5:
+        raise ValueError("frequency lies outside normalized Fourier support")
+    return int(round(frequency * size)) % size
 
 
 def _dft2(plane: Sequence[Sequence[float]]) -> list[list[complex]]:

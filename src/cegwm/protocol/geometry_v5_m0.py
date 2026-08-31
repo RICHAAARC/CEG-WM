@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 
+
 M0_CONFIG_PATH = "configs/geometry_v5/geometry_v5_m0_sd21_v1.json"
 M0_MANIFEST_PATH = "configs/geometry_v5/geometry_v5_m0_development_v1.jsonl"
 M0_CONFIG_SHA256 = "44180b2da75a161ec2be3768db4a893eca4e7e7445a3f448cd70e64f088338b6"
@@ -86,6 +87,9 @@ class GeometryV5M0RawRecord:
         if scale <= 0.0:
             raise ValueError("scale must be positive")
         matrix = _attacked_to_canonical_matrix(self.H_hat)
+        expected = _assemble_attacked_to_canonical_similarity(rotation, scale, tx, ty)
+        if not _matrices_close(matrix, expected):
+            raise ValueError("H_hat must match the record attacked_to_canonical R/S/T")
         object.__setattr__(self, "rotation_degrees", rotation)
         object.__setattr__(self, "scale", scale)
         object.__setattr__(self, "tx", tx)
@@ -195,8 +199,31 @@ def _attacked_to_canonical_matrix(value: Any) -> tuple[tuple[float, float, float
         raise ValueError("H_hat must be 3x3")
     rows = tuple(tuple(_finite(item, "H_hat") for item in row) for row in value)
     if any(len(row) != 3 for row in rows) or rows[2] != (0.0, 0.0, 1.0):
-        raise ValueError("H_hat must be normalized attacked_to_canonical affine similarity")
+        raise ValueError("H_hat must be normalized attacked_to_canonical similarity")
+    a, negative_b, _ = rows[0]
+    b, matching_a, _ = rows[1]
+    if not _close(a, matching_a) or not _close(negative_b, -b) or a * a + b * b <= 0.0:
+        raise ValueError("H_hat must be an orientation-preserving positive-scale similarity")
     return rows
+
+
+def _matrices_close(
+    received: tuple[tuple[float, float, float], ...],
+    expected: tuple[tuple[float, float, float], ...],
+) -> bool:
+    return all(_close(left, right) for left_row, right_row in zip(received, expected, strict=True) for left, right in zip(left_row, right_row, strict=True))
+
+
+def _close(left: float, right: float) -> bool:
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=1e-12)
+
+
+def _assemble_attacked_to_canonical_similarity(
+    rotation_degrees: float, scale: float, tx: float, ty: float
+) -> tuple[tuple[float, float, float], ...]:
+    angle = math.radians(rotation_degrees)
+    a, b = scale * math.cos(angle), scale * math.sin(angle)
+    return ((a, -b, tx), (b, a, ty), (0.0, 0.0, 1.0))
 
 
 def _mapping(parent: Mapping[str, Any], key: str) -> Mapping[str, Any]:

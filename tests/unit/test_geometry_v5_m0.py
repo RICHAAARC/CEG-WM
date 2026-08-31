@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -36,9 +37,15 @@ def test_m0_byte_bindings_sources_roster_and_engineering_ceiling_are_frozen() ->
 def test_m0_template_initial_z_t_injection_and_similarity_direction_are_pure_math_only() -> None:
     template = method.build_hermitian_x_template()
     assert len(template) == 16
-    latent = tuple(tuple(tuple(0.0 for _ in range(4)) for _ in range(4)) for _ in range(4))
+    latent = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
     injected = method.inject_initial_z_t_x_template(latent, template)
     assert len(injected) == 4 and any(value != 0.0 for row in injected[3] for value in row)
+    spectrum = method._dft2(injected[3])
+    point = template[0]
+    y, x = method._frequency_bin(point.frequency_y, 8), method._frequency_bin(point.frequency_x, 8)
+    assert abs(spectrum[y][x]) > 0.0
+    assert spectrum[y][x] == pytest.approx(spectrum[(-y) % 8][(-x) % 8].conjugate())
+    assert all(isinstance(value, float) for row in injected[3] for value in row)
     estimate = method.estimate_rotation_scale_from_peak_pairs(
         ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)), ((0.0, 0.0), (2.0, 0.0), (0.0, 2.0))
     )
@@ -46,6 +53,27 @@ def test_m0_template_initial_z_t_injection_and_similarity_direction_are_pure_mat
     assert estimate.scale == pytest.approx(2.0)
     H = method.assemble_attacked_to_canonical_similarity(0.0, 2.0, -0.5, -0.5)
     assert H == ((2.0, -0.0, -0.5), (0.0, 2.0, -0.5), (0.0, 0.0, 1.0))
+
+
+@pytest.mark.unit
+def test_recovered_z_t_rotation_scale_search_is_blind_and_fails_closed_on_bad_data() -> None:
+    size = 16
+    plane = [[0.0 for _ in range(size)] for _ in range(size)]
+    for point in method.build_hermitian_x_template():
+        y = method._frequency_bin(0.5 * point.frequency_y, size)
+        x = method._frequency_bin(0.5 * point.frequency_x, size)
+        for row in range(size):
+            for column in range(size):
+                plane[row][column] += math.cos(2.0 * math.pi * ((y * row / size) + (x * column / size)))
+    recovered = [tuple(tuple(0.0 for _ in range(size)) for _ in range(size)) for _ in range(4)]
+    recovered[3] = tuple(tuple(row) for row in plane)
+    estimate = method.estimate_rotation_scale_from_recovered_z_t(recovered, ((0.0, 1.0), (0.0, 0.5)))
+    assert estimate.rotation_degrees == 0.0 and estimate.scale == 0.5
+    flat = tuple(tuple(tuple(0.0 for _ in range(8)) for _ in range(8)) for _ in range(4))
+    with pytest.raises(ValueError, match="usable"):
+        method.estimate_rotation_scale_from_recovered_z_t(flat, ((0.0, 1.0),))
+    with pytest.raises(ValueError, match="candidate grid"):
+        method.estimate_rotation_scale_from_recovered_z_t(recovered, ((True, 1.0),))
 
 
 @pytest.mark.unit
@@ -61,6 +89,17 @@ def test_m0_raw_output_has_no_reliable_rectification_or_fabricated_failure() -> 
     assert available.status is protocol.M0RawStatus.ESTIMATE_AVAILABLE
     scope = protocol.load_geometry_v5_m0_contract(_ROOT).config["scope"]
     assert scope["may_emit_RELIABLE"] is False and scope["may_rectify"] is False and scope["may_vote_content"] is False
+
+
+@pytest.mark.unit
+def test_m0_raw_H_is_exact_nontrivial_attacked_to_canonical_similarity_from_its_rst() -> None:
+    H = method.assemble_attacked_to_canonical_similarity(20.0, 1.2, -0.1, 0.05)
+    record = protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, H, {})
+    assert record.H_hat == H
+    with pytest.raises(ValueError, match="positive-scale similarity"):
+        protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, ((1.2, 0.2, -0.1), (0.0, 1.2, 0.05), (0.0, 0.0, 1.0)), {})
+    with pytest.raises(ValueError, match="match"):
+        protocol.GeometryV5M0RawRecord("ESTIMATE_AVAILABLE", 20.0, 1.2, -0.1, 0.05, method.assemble_attacked_to_canonical_similarity(-20.0, 1.0 / 1.2, 0.1, -0.05), {})
 
 
 @pytest.mark.unit
