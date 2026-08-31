@@ -37,15 +37,16 @@ from cegwm.protocol.geometry_v4_g1r import (
     HOLDOUT_PATCH_WINDOW_DIVISORS,
     LUMA_PEAK_CAP,
     LUMA_RMS_CAP,
-    LOCAL_FREQUENCY_PAIRS,
-    OPPONENT_AXIS,
-    OPPONENT_PROJECTION_DENOMINATOR,
     RGB_CHANNEL_PEAK_CAP,
     RGB_CHANNEL_RMS_CAP,
-    SEARCH_ATOM_OFFSETS,
-    SEARCH_DIRECTIONS,
     SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION,
-    SEARCH_MACRO_CYCLES,
+    SPARSE_CHIP_RADIUS_FRACTION,
+    SPARSE_LOCAL_ACTIVE_MODULUS,
+    SPARSE_LOCAL_GRID,
+    SPARSE_SEARCH_ACTIVE_MODULUS,
+    SPARSE_SEARCH_GRIDS,
+    SPARSE_SEARCH_GROUPS,
+    SPARSE_SUPPORT_FRACTION,
     SEARCH_TOP_K,
     TRANSLATION_NMS_RADIUS_PIXELS,
     TRANSLATION_PEAKS_PER_RS,
@@ -113,24 +114,29 @@ def _unit(field: np.ndarray) -> np.ndarray:
     return value / norm
 
 
-@lru_cache(maxsize=64)
-def _fixed_local_search_basis(height: int, width: int, tile_id: int) -> np.ndarray:
-    row, column = divmod(tile_id, 4)
-    y0, y1 = row * height // 4, (row + 1) * height // 4
-    x0, x1 = column * width // 4, (column + 1) * width // 4
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    xn, yn = xx / width, yy / height
-    columns = [np.ones((y1 - y0) * (x1 - x0), dtype=np.float64)]
-    for cycles in SEARCH_MACRO_CYCLES:
-        for angle_degrees in SEARCH_DIRECTIONS:
-            for radial_offset, angular_offset in SEARCH_ATOM_OFFSETS:
-                atom_cycles = cycles + radial_offset
-                angle = math.radians(angle_degrees + angular_offset)
-                argument = 2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle))
-                columns.extend((np.cos(argument).reshape(-1), np.sin(argument).reshape(-1)))
-    basis = np.linalg.qr(np.stack(columns, axis=1), mode="reduced")[0]
-    basis.setflags(write=False)
-    return basis
+def _sparse_prn_component(shape: tuple[int, int], key: bytes, label: bytes, grid: int, active_modulus: int) -> np.ndarray:
+    """Fixed scale-normalized signed Gaussian chips; no image-dependent inputs."""
+    height, width = shape
+    field = np.zeros((height, width), dtype=np.float64)
+    cell_height, cell_width = height / grid, width / grid
+    radius = max(1, int(round(min(cell_height, cell_width) * SPARSE_CHIP_RADIUS_FRACTION)))
+    sigma = max(0.7, radius * 0.65)
+    for cell_y in range(grid):
+        for cell_x in range(grid):
+            cell = f":{cell_y}:{cell_x}".encode("ascii")
+            if _seed(key, label + b":active" + cell) % active_modulus:
+                continue
+            sign = 1.0 if _seed(key, label + b":sign" + cell) & 1 else -1.0
+            jitter_x = ((_seed(key, label + b":jx" + cell) % 1024) / 1023.0 - 0.5) * 0.30
+            jitter_y = ((_seed(key, label + b":jy" + cell) % 1024) / 1023.0 - 0.5) * 0.30
+            center_x = (cell_x + 0.5 + jitter_x) * cell_width
+            center_y = (cell_y + 0.5 + jitter_y) * cell_height
+            x0, x1 = max(0, int(math.floor(center_x)) - radius), min(width, int(math.floor(center_x)) + radius + 1)
+            y0, y1 = max(0, int(math.floor(center_y)) - radius), min(height, int(math.floor(center_y)) + radius + 1)
+            yy, xx = np.mgrid[y0:y1, x0:x1]
+            chip = np.exp(-((xx - center_x) ** 2 + (yy - center_y) ** 2) / (2.0 * sigma * sigma))
+            field[y0:y1, x0:x1] += sign * chip
+    return _unit(field)
 
 
 def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> G1RAnchorFields:
@@ -139,20 +145,8 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
         raise ValueError("V4-G1R anchor requires at least 32 pixels per side")
     if set(domain_keys) != {"search", "fit", "validate"} or any(not isinstance(value, bytes) or not value for value in domain_keys.values()):
         raise TypeError("V4-G1R requires three non-empty domain keys")
-    yy, xx = np.mgrid[:height, :width]
-    xn, yn = xx / width, yy / height
-    search = np.zeros((height, width), dtype=np.float64)
-    for cycles in SEARCH_MACRO_CYCLES:
-        for angle_degrees in SEARCH_DIRECTIONS:
-            for atom_id, (radial_offset, angular_offset) in enumerate(SEARCH_ATOM_OFFSETS):
-                label = f"search:{cycles:g}:{angle_degrees:g}:atom:{atom_id}".encode("ascii")
-                phase = _seed(domain_keys["search"], label) / 2**64 * 2.0 * math.pi
-                sign = 1.0 if _seed(domain_keys["search"], b"sign:" + label) & 1 else -1.0
-                atom_cycles = cycles + radial_offset
-                angle = math.radians(angle_degrees + angular_offset)
-                argument = 2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle))
-                search += sign * np.cos(argument + phase)
-    search = _unit(search)
+    search_components = _search_macro_fields(shape, domain_keys["search"])
+    search = _unit(np.sum(search_components, axis=0))
 
     def partition(name: str, tile_ids: tuple[int, ...]) -> np.ndarray:
         answer = np.zeros_like(search)
@@ -160,45 +154,24 @@ def _domain_fields(shape: tuple[int, int], domain_keys: Mapping[str, bytes]) -> 
             row, column = divmod(tile_id, 4)
             y0, y1 = row * height // 4, (row + 1) * height // 4
             x0, x1 = column * width // 4, (column + 1) * width // 4
-            local_y, local_x = np.mgrid[: y1 - y0, : x1 - x0]
-            local_x = (local_x + 0.5) / max(1, x1 - x0)
-            local_y = (local_y + 0.5) / max(1, y1 - y0)
             label = f"{name}:tile:{tile_id}".encode("ascii")
-            tile = np.zeros_like(local_x)
-            for component, (frequency_x, frequency_y) in enumerate(LOCAL_FREQUENCY_PAIRS):
-                component_label = label + f":{component}".encode("ascii")
-                phase = _seed(domain_keys[name], component_label) / 2**64 * 2.0 * math.pi
-                sign = 1.0 if _seed(domain_keys[name], b"sign:" + component_label) & 1 else -1.0
-                tile += sign * np.cos(2 * math.pi * (frequency_x * local_x + frequency_y * local_y) + phase)
-            tile -= float(np.mean(tile))
-            orthogonal_basis = _fixed_local_search_basis(height, width, tile_id)
-            tile = (tile.reshape(-1) - orthogonal_basis @ (orthogonal_basis.T @ tile.reshape(-1))).reshape(tile.shape)
+            tile = _sparse_prn_component((y1 - y0, x1 - x0), domain_keys[name], label, SPARSE_LOCAL_GRID, SPARSE_LOCAL_ACTIVE_MODULUS)
             answer[y0:y1, x0:x1] = tile
         return _unit(answer)
 
     fit = partition("fit", FIT_TILE_IDS)
     validate = partition("validate", VALIDATE_TILE_IDS)
-    combined = math.sqrt(ENERGY_SHARES[0]) * search + math.sqrt(ENERGY_SHARES[1]) * fit + math.sqrt(ENERGY_SHARES[2]) * validate
+    combined = _unit(math.sqrt(ENERGY_SHARES[0]) * search + math.sqrt(ENERGY_SHARES[1]) * fit + math.sqrt(ENERGY_SHARES[2]) * validate)
     return G1RAnchorFields(combined, search, fit, validate)
 
 
 def _search_macro_fields(shape: tuple[int, int], search_key: bytes) -> tuple[np.ndarray, ...]:
-    """Return the fixed 3-scale x 4-direction constellation components."""
-    height, width = shape
-    yy, xx = np.mgrid[:height, :width]
-    xn, yn = xx / width, yy / height
+    """Return the fixed 3-scale x 4-group sparse search atlas components."""
     fields: list[np.ndarray] = []
-    for cycles in SEARCH_MACRO_CYCLES:
-        for angle_degrees in SEARCH_DIRECTIONS:
-            macro = np.zeros((height, width), dtype=np.float64)
-            for atom_id, (radial_offset, angular_offset) in enumerate(SEARCH_ATOM_OFFSETS):
-                label = f"search:{cycles:g}:{angle_degrees:g}:atom:{atom_id}".encode("ascii")
-                phase = _seed(search_key, label) / 2**64 * 2.0 * math.pi
-                sign = 1.0 if _seed(search_key, b"sign:" + label) & 1 else -1.0
-                atom_cycles = cycles + radial_offset
-                angle = math.radians(angle_degrees + angular_offset)
-                macro += sign * np.cos(2.0 * math.pi * atom_cycles * (xn * math.cos(angle) + yn * math.sin(angle)) + phase)
-            fields.append(_unit(macro))
+    for grid in SPARSE_SEARCH_GRIDS:
+        for group in range(SPARSE_SEARCH_GROUPS):
+            label = f"search:sparse:grid:{grid}:group:{group}".encode("ascii")
+            fields.append(_sparse_prn_component(shape, search_key, label, grid, SPARSE_SEARCH_ACTIVE_MODULUS))
     return tuple(fields)
 
 
@@ -217,9 +190,9 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
     return np.asarray(rgb, dtype=np.float64) @ _REC709
 
 
-def _opponent_plane(rgb: np.ndarray) -> np.ndarray:
-    """Fixed key-independent REC709-orthogonal extraction projection."""
-    return (np.asarray(rgb, dtype=np.float64) @ np.asarray(OPPONENT_AXIS, dtype=np.float64)) / OPPONENT_PROJECTION_DENOMINATOR
+def _carrier_plane(rgb: np.ndarray) -> np.ndarray:
+    """Fixed key-independent REC709 luma extraction projection."""
+    return _luma(rgb)
 
 
 def _g1r_scalar_delta(shape: tuple[int, int], detection_key: object) -> np.ndarray:
@@ -234,14 +207,14 @@ def _g1r_scalar_delta(shape: tuple[int, int], detection_key: object) -> np.ndarr
     return delta
 
 
-def _opponent_rgb_delta(scalar_delta: np.ndarray) -> np.ndarray:
-    """Map one scalar anchor into RGB while preserving its opponent projection."""
-    delta = np.asarray(scalar_delta, dtype=np.float64)[..., None] * (np.asarray(OPPONENT_AXIS, dtype=np.float64) / 3.0)
+def _equal_rgb_delta(scalar_delta: np.ndarray) -> np.ndarray:
+    """Map one scalar anchor equally into RGB so REC709 luma is identical."""
+    delta = np.repeat(np.asarray(scalar_delta, dtype=np.float64)[..., None], 3, axis=2)
     channel_rms = np.sqrt(np.mean(delta * delta, axis=(0, 1)))
     if float(np.max(channel_rms)) > RGB_CHANNEL_RMS_CAP + 1e-12 or float(np.max(np.abs(delta))) > RGB_CHANNEL_PEAK_CAP + 1e-12:
-        raise RuntimeError("V4-G1R opponent writer exceeded the frozen RGB budget")
-    if not np.allclose(_opponent_plane(delta), scalar_delta, atol=1e-12, rtol=1e-12):
-        raise RuntimeError("V4-G1R opponent writer/extractor identity differs")
+        raise RuntimeError("V4-G1R sparse luma writer exceeded the frozen RGB budget")
+    if not np.allclose(_carrier_plane(delta), scalar_delta, atol=1e-12, rtol=1e-12):
+        raise RuntimeError("V4-G1R sparse writer/extractor identity differs")
     return delta
 
 
@@ -249,17 +222,17 @@ def write_g1r_rgb(rgb: np.ndarray, detection_key: str | bytes | bytearray | memo
     """Synthetic-only ordinary-RGB writer using the same frozen total budget."""
     image = _require_rgb(rgb)
     scalar_delta = _g1r_scalar_delta(image.shape[:2], detection_key)
-    marked = np.clip(image + _opponent_rgb_delta(scalar_delta), 0.0, 1.0)
+    marked = np.clip(image + _equal_rgb_delta(scalar_delta), 0.0, 1.0)
     delta_rgb = marked - image
     delta_luma = _luma(marked) - _luma(image)
-    delta_opponent = _opponent_plane(marked) - _opponent_plane(image)
+    delta_carrier = _carrier_plane(marked) - _carrier_plane(image)
     luma_rms, luma_peak = float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma)))
     channel_rms = np.sqrt(np.mean(delta_rgb * delta_rgb, axis=(0, 1)))
     rgb_rms_max, rgb_peak = float(np.max(channel_rms)), float(np.max(np.abs(delta_rgb)))
-    opponent_rms = float(np.sqrt(np.mean(delta_opponent * delta_opponent)))
+    carrier_rms = float(np.sqrt(np.mean(delta_carrier * delta_carrier)))
     if luma_rms > LUMA_RMS_CAP + 1e-12 or luma_peak > LUMA_PEAK_CAP + 1e-12 or rgb_rms_max > RGB_CHANNEL_RMS_CAP + 1e-12 or rgb_peak > RGB_CHANNEL_PEAK_CAP + 1e-12:
         raise RuntimeError("V4-G1R RGB writer exceeded the frozen luma budget")
-    return marked, {"opponent_rms": opponent_rms, "luma_rms": luma_rms, "luma_peak": luma_peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP, "rgb_channel_rms_max": rgb_rms_max, "rgb_channel_rms_cap": RGB_CHANNEL_RMS_CAP, "rgb_channel_peak": rgb_peak, "rgb_channel_peak_cap": RGB_CHANNEL_PEAK_CAP}
+    return marked, {"carrier_rms": carrier_rms, "luma_rms": luma_rms, "luma_peak": luma_peak, "luma_rms_cap": LUMA_RMS_CAP, "luma_peak_cap": LUMA_PEAK_CAP, "rgb_channel_rms_max": rgb_rms_max, "rgb_channel_rms_cap": RGB_CHANNEL_RMS_CAP, "rgb_channel_peak": rgb_peak, "rgb_channel_peak_cap": RGB_CHANNEL_PEAK_CAP}
 
 
 def _field_score(plane: np.ndarray, field: np.ndarray) -> float:
@@ -288,7 +261,7 @@ def measure_g1r_final_rgb(
         raise ValueError("V4-G1R correct and wrong keys collide")
     delta_rgb = marked - clean
     delta_luma = _luma(marked) - _luma(clean)
-    delta_opponent = _opponent_plane(marked) - _opponent_plane(clean)
+    delta_carrier = _carrier_plane(marked) - _carrier_plane(clean)
     mse = float(np.mean((marked - clean) ** 2))
     psnr = 300.0 if mse == 0.0 else 10.0 * math.log10(1.0 / mse)
     mx, my = float(clean.mean()), float(marked.mean())
@@ -298,8 +271,8 @@ def measure_g1r_final_rgb(
     correct_fields = g1r_anchor_fields(clean.shape[:2], normalized)
     wrong_fields = g1r_anchor_fields(clean.shape[:2], normalized_wrong)
     names = ("search", "fit", "validate")
-    correct_scores = {name: _field_score(delta_opponent, getattr(correct_fields, name)) for name in names}
-    wrong_scores = {name: _field_score(delta_opponent, getattr(wrong_fields, name)) for name in names}
+    correct_scores = {name: _field_score(delta_carrier, getattr(correct_fields, name)) for name in names}
+    wrong_scores = {name: _field_score(delta_carrier, getattr(wrong_fields, name)) for name in names}
     drift = abs(float(content_detector(clean, normalized)) - float(content_detector(marked, normalized)))
     channel_rms = np.sqrt(np.mean(delta_rgb * delta_rgb, axis=(0, 1)))
     values = (psnr, ssim, float(np.sqrt(np.mean(delta_luma * delta_luma))), float(np.max(np.abs(delta_luma))), float(np.max(channel_rms)), float(np.max(np.abs(delta_rgb))), drift, *correct_scores.values(), *wrong_scores.values())
@@ -315,7 +288,7 @@ def write_g1r_decoder_output(decoded: torch.Tensor, detection_key: object) -> to
     scalar_delta = _g1r_scalar_delta((int(decoded.shape[-2]), int(decoded.shape[-1])), detection_key)
     # Diffusers maps the decoder's nominal [-1,1] sample to [0,1], so a 2x
     # decoder-space update is exactly the frozen final-RGB luma update pre-clip.
-    rgb_delta = _opponent_rgb_delta(scalar_delta)
+    rgb_delta = _equal_rgb_delta(scalar_delta)
     delta = torch.as_tensor(2.0 * rgb_delta, device=decoded.device, dtype=decoded.dtype).permute(2, 0, 1)[None]
     return decoded + delta
 
@@ -339,7 +312,7 @@ def _normalized_score(left: np.ndarray, right: np.ndarray, valid: np.ndarray) ->
 
 def _translation_surface(rs_rgb: np.ndarray, valid: np.ndarray, references: tuple[np.ndarray, ...]) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[np.ndarray, ...]]:
     """Joint macro normalized cross-power on reference-derived near-exact bins."""
-    plane = _opponent_plane(rs_rgb)
+    plane = _carrier_plane(rs_rgb)
     window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
     weight = valid.astype(np.float64) * window
     if float(weight.sum()) <= 1e-12:
@@ -481,6 +454,19 @@ def _narrow_patch(patch: np.ndarray) -> np.ndarray:
     return np.fft.ifft2(np.fft.fft2(value) * mask).real
 
 
+def _support_matched_score(observed: np.ndarray, reference: np.ndarray, valid: np.ndarray) -> float:
+    """Key/reference-derived support-aware normalized matched correlation."""
+    keyed = np.asarray(reference, dtype=np.float64)
+    support = np.abs(keyed) >= SPARSE_SUPPORT_FRACTION * max(1e-12, float(np.max(np.abs(keyed))))
+    mask = np.asarray(valid, dtype=bool) & support
+    if observed.shape != keyed.shape or mask.shape != keyed.shape or int(mask.sum()) < 16:
+        return -1.0
+    left, right = np.asarray(observed, dtype=np.float64)[mask], keyed[mask]
+    left, right = left - float(np.mean(left)), right - float(np.mean(right))
+    denominator = float(np.sqrt(np.sum(left * left) * np.sum(right * right)))
+    return -1.0 if denominator <= 1e-12 else float(np.sum(left * right) / denominator)
+
+
 def _keyed_holdout_correlation(plane: np.ndarray, reference: np.ndarray, valid: np.ndarray) -> float:
     """Correlation on the fixed strong-frequency support of the keyed holdout."""
     window = np.outer(np.hanning(plane.shape[0]), np.hanning(plane.shape[1]))
@@ -501,7 +487,7 @@ def _keyed_holdout_correlation(plane: np.ndarray, reference: np.ndarray, valid: 
 
 def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, reference: np.ndarray, tile_ids: tuple[int, ...], *, correlation_min: float, margin_min: float, window_divisor: int = 16, allow_offset: bool = True, prethreshold: list[dict[str, object]] | None = None) -> list[dict[str, object]]:
     rectified, valid = _valid_warp(image, canonical_to_attacked)
-    plane, height, width = _opponent_plane(rectified), image.shape[0], image.shape[1]
+    plane, height, width = _carrier_plane(rectified), image.shape[0], image.shape[1]
     radius, search_radius = max(4, min(height, width) // window_divisor), max(2, min(height, width) // 48)
     matches: list[dict[str, object]] = []
     for tile_id in tile_ids:
@@ -519,7 +505,7 @@ def _tile_matches(image: np.ndarray, canonical_to_attacked: np.ndarray, referenc
             for ox in range(-search_radius, search_radius + 1):
                 observed, mask = _patch(plane, px + ox, py + oy, radius), _patch(valid, px + ox, py + oy, radius)
                 if observed is not None and mask is not None:
-                    score = _normalized_score(_narrow_patch(observed), template, mask)
+                    score = _support_matched_score(_narrow_patch(observed), template, mask)
                     candidates.append((score, ox, oy))
         if not candidates:
             if prethreshold is not None:
@@ -576,9 +562,9 @@ def _holdout_metrics(image: np.ndarray, canonical_to_attacked: np.ndarray, valid
     rectified, valid = _valid_warp(image, canonical_to_attacked)
     window = np.outer(np.hanning(image.shape[0]), np.hanning(image.shape[1]))
     weight = valid.astype(np.float64) * window
-    opponent = _opponent_plane(rectified)
-    holdout_psr = float(normalized_phase_correlation((opponent - float(np.mean(opponent[valid]))) * weight, reference * weight)["PSR"])
-    holdout_correlation = _keyed_holdout_correlation(opponent, reference, valid)
+    carrier = _carrier_plane(rectified)
+    holdout_psr = float(normalized_phase_correlation((carrier - float(np.mean(carrier[valid]))) * weight, reference * weight)["PSR"])
+    holdout_correlation = _keyed_holdout_correlation(carrier, reference, valid)
     secondary_matches = _tile_matches(image, canonical_to_attacked, reference, VALIDATE_TILE_IDS, correlation_min=HOLDOUT_GATES["correlation"], margin_min=HOLDOUT_GATES["margin"], window_divisor=HOLDOUT_PATCH_WINDOW_DIVISORS[1])
     secondary_estimate, secondary_inliers, _, _ = _robust_similarity_fit(secondary_matches, inlier_threshold=FIT_GATES["reprojection"], minimum_inliers=6)
     rotation_spread = log_scale_spread = corner_consistency = math.inf

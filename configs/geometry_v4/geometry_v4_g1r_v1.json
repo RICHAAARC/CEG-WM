@@ -1,10 +1,8 @@
 {
   "anchor": {
     "canonical_tiles": "4x4_fixed",
-    "carrier_axis": "fixed_rec709_orthogonal_opponent_q_v1",
-    "carrier_axis_normalization": "mean_q_squared_equals_1",
-    "carrier_axis_raw_formula": "[1,-((0.2126+0.0722)/0.7152),1]",
-    "carrier_projection": "rgb_dot_q_over_q_dot_q_div_3",
+    "carrier_axis": "fixed_equal_rgb_rec709_luma_v1",
+    "carrier_projection": "rec709_luma",
     "energy_shares": {
       "fit_local": 0.36,
       "search_global": 0.4,
@@ -98,8 +96,8 @@
     "condition_number_max": 10000.0,
     "inlier_ratio_min": 0.5,
     "local_preprocessing": "fixed_cubic_polynomial_detrend_then_narrow_band",
-    "local_code": "fixed_keyed_24_atom_spread_spectrum",
-    "local_frequency_pairs": [
+    "legacy_local_code_status": "METHOD_UNRESOLVED",
+    "legacy_unresolved_local_frequency_pairs": [
       [
         2,
         3
@@ -197,6 +195,7 @@
         -6
       ]
     ],
+    "local_code": "fixed_keyed_sparse_prn_atlas",
     "macro_regions_min": 3,
     "masked_normalized_correlation_min": 0.42,
     "match_margin_min": 0.025,
@@ -204,7 +203,8 @@
     "patch_window_divisor": 20,
     "reprojection_rms_diagonal_max": 0.02,
     "spatial_coverage_min": 0.75,
-    "support_min": 6
+    "support_min": 6,
+    "support_source": "key_and_canonical_reference_only"
   },
   "frozen_g1_evidence": {
     "artifact_sha256": "946eb98e2cc2d6ce867056ffc3f77764ec9ba63d386c364c911ec18aa5f333f5",
@@ -220,6 +220,24 @@
     "wrong_reliable_harmless": 0,
     "wrong_reliable_unsafe": 18,
     "wrong_unreliable": 2
+  },
+  "g1r_failure_evidence": {
+    "diffuse_luma": {
+      "correct_safe_reliable": 0,
+      "final_observability_unique_sources_passed": 2,
+      "records_sha256": "df2f9957d73b0eac9172fba2ec5f5be76168c750bc436905041455292cdab20f",
+      "source_exact": "a3877d6491308057547caf5993ec9bb1629e791c",
+      "status": "METHOD_UNRESOLVED",
+      "units": 20
+    },
+    "opponent": {
+      "correct_safe_reliable": 0,
+      "final_observability_unique_sources_passed": 1,
+      "records_sha256": "006384488cc20646a26493185e94e0ab4c1a272c403c2b58d599853c2516a88c",
+      "source_exact": "40261d26580e439d76ff93d344ac806a8e4744fc",
+      "status": "METHOD_UNRESOLVED",
+      "units": 20
+    }
   },
   "gpu_exit": {
     "all_arms_unsafe_max": 0,
@@ -249,7 +267,7 @@
     "protocol_id": "cegwm-geometry-v4-g1r-v1",
     "stage": "V4-G1R",
     "status": "G1_METHOD_PARTIAL_NOT_PASSED",
-    "writer_id": "geometry_v4_g1r_vae_decoder_output_opponent_writer_v3"
+    "writer_id": "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"
   },
   "key_domains": {
     "fit": "CEG-WM/geometry-v4/g1r/fit/v1",
@@ -309,8 +327,24 @@
     "single_fixed_update": true
   },
   "schema_version": "cegwm_geometry_v4_g1r_v1",
+  "sparse_fiducial": {
+    "chip_radius_fraction_of_cell": 0.2,
+    "generation": "deterministic_keyed_signed_gaussian_prn_atlas",
+    "image_adaptive": false,
+    "local_active_modulus": 2,
+    "local_grid": 8,
+    "reference_support_fraction": 0.18,
+    "search_active_modulus": 2,
+    "search_component_groups": 4,
+    "search_scale_grids": [
+      8,
+      12,
+      16
+    ],
+    "whitening": "fixed_cubic_detrend_then_narrow_band"
+  },
   "search": {
-    "atom_offsets": [
+    "legacy_unresolved_atom_offsets": [
       [
         -2.0,
         -4.0
@@ -328,7 +362,7 @@
         4.0
       ]
     ],
-    "atoms_per_macro": 4,
+    "legacy_unresolved_atoms_per_macro": 4,
     "candidate_rank": [
       "phase_consistency",
       "normalized_narrow_band_correlation",
@@ -356,18 +390,19 @@
       1.14
     ],
     "coarse_control": "keyed_normalized_complex_cross_power_phase_correlation",
-    "coarse_component_set": "low_and_mid_8_macros",
+    "coarse_component_set": "sparse_grids_8_12_all_8_groups",
     "component_consensus": "trim_one_each_side_then_mean",
-    "directions_degrees": [
+    "legacy_unresolved_directions_degrees": [
       0.0,
       45.0,
       90.0,
       135.0
     ],
-    "fine_component_set": "all_12_macros",
-    "frequency_support": "per_macro_keyed_reference_derived_near_exact",
+    "fine_component_set": "all_12_sparse_grid_groups",
+    "frequency_support": "per_component_keyed_reference_derived_near_exact",
+    "joint_atlas_required": true,
     "keyed_reference_frequency_support_min_fraction": 0.1,
-    "macro_cycles": [
+    "legacy_unresolved_macro_cycles": [
       14.0,
       22.0,
       30.0

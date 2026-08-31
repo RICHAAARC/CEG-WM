@@ -16,8 +16,16 @@ All 20 units completed with zero unsafe arm, but correct safe `RELIABLE` was
 valid truth-H fit or holdout; fit support was fixed by source at 0, 0, 0, and
 2 across each source's five attacks. Paired residual scores separated the
 correct domains from wrong keys, while blind evidence remained host-dominated.
-This motivates only the fixed carrier/extraction-plane change below; the
-artifact is not rerun, discarded, or treated as a positive result.
+The opponent-carrier development artifact at source
+`40261d26580e439d76ff93d344ac806a8e4744fc` is likewise retained with records
+SHA-256 `006384488cc20646a26493185e94e0ab4c1a272c403c2b58d599853c2516a88c`.
+It completed 20/20 units with zero unsafe/failure, but final observability was
+1/4 and correct safe `RELIABLE` was 0/20. Truth-H fit and holdout passed 0/20;
+18/20 truth-H fits had support zero and all 20 best translations at truth R/S
+missed by more than .02. Both the diffuse-luma and opponent implementation
+families are therefore `METHOD_UNRESOLVED`; neither artifact is rerun,
+discarded, or treated as a positive result. The bounded change below targets
+carrier sparsity and reference support, not color-axis or rank tuning.
 
 Using only the predeclared normalized-diagonal .02 safety tolerance, the frozen
 outputs reclassify as correct: 19 `RELIABLE` (0 safe, 19 unsafe) and 1
@@ -48,22 +56,19 @@ spatially disjoint local partitions are constructed independently: each field
 reads only its own derived domain key, so changing one key cannot change either
 of the other two fields. Tile identity and coordinates never depend on RGB.
 
-The versioned v3 G1R opponent writer is one forward hook on the real `AutoencoderKL.decoder`
+The versioned v4 sparse-luma writer is one forward hook on the real `AutoencoderKL.decoder`
 output, immediately before ordinary RGB postprocess. The clean arm has no hook;
 the marked arm registers it only for its final decode, requires exactly one
 invocation, and removes it in a `finally` block. There is no latent-adjoint
 writer, final-RGB feedback, search, retry, fallback, or budget increase. The
-fixed scalar update targets .25 of the luma RMS cap. It is carried only on the
-fixed, key-independent REC709-orthogonal axis
-`q = normalize_mean_square([1,-((.2126+.0722)/.7152),1])`; extraction is always
-`(RGB dot q)/(q dot q/3)`. The writer uses `q/3`, so the extracted plane receives
-exactly the scalar anchor while REC709 luma receives zero before clipping. No
-image, key, content detector, or residual can choose or adapt this axis.
+fixed scalar update targets .25 of the luma RMS cap and is added equally to all
+three RGB channels, so the fixed REC709-luma extractor receives exactly that
+same scalar atlas. No image, key, content detector, or residual can choose or
+adapt a color axis.
 
 The original luma RMS 2/255 and peak 8/255 limits remain. In addition, every
 actual RGB channel must have RMS no greater than the unchanged scalar target
-`.25 * 2/255`, and no channel peak may exceed 8/255. Thus luma orthogonality
-cannot hide increased RGB energy. PSNR above 40, SSIM above .98, and content
+`.25 * 2/255`, and no channel peak may exceed 8/255. PSNR above 40, SSIM above .98, and content
 drift below .05 are unchanged; the writer is never content-adaptive. CPU tests use only a fake
 decoder module; real final-RGB observability requires separate GPU authorization.
 
@@ -71,17 +76,19 @@ decoder module; real final-RGB observability requires separate GPU authorization
 
 The detector accepts only current attacked ordinary RGB and normalized key.
 Search translation, local fit, and holdout correlation/PSR all read the same
-fixed opponent projection used by the writer; none reads luma or chooses a
-channel from the attacked image.
+fixed REC709-luma projection used by the writer; none chooses a channel from
+the attacked image.
 Truth, original or clean RGB, writer residuals, latents, and attack names are
 forbidden. Every fixed coarse and fine rotation/scale hypothesis is ranked by
 the keyed search reference's normalized complex cross-power phase-correlation
 under the same valid mask and Hann window. Magnitude-only FFT evidence is not a
-candidate control quantity. The search field retains its 3-scale by 4-direction
-macro identity, with four fixed keyed phase atoms in each macro and
-unit-normalized total search energy. Coarse search uses the low/mid eight macros
+candidate control quantity. The search field is a deterministic keyed sparse
+PRN atlas with signed Gaussian chips on fixed 8, 12, and 16 grids, four
+independent groups per scale, fixed one-half cell duty, and scale-normalized
+chip radius .20 of a cell. Coarse search uses all eight grid-8/grid-12 groups
 and a fixed trimmed component consensus; fine search jointly uses all twelve
-macros. Each macro's normalized cross-power is restricted to its keyed
+grid groups. No single low-energy component can substitute for the joint
+atlas. Each component's normalized cross-power is restricted to its keyed
 reference-derived near-exact support. For each hypothesis, three deterministic translated
 peaks are selected inside the frozen physical bounds with two-pixel NMS; each
 peak has its own PSR, phase consistency, and normalized narrow-band correlation.
@@ -99,10 +106,13 @@ Public H always maps attacked to canonical. Any translation or holdout PSR used
 by a `RELIABLE` decision must be at least 8.
 
 Fit and validation tile identities, coordinates, and checkerboard split remain
-unchanged. Each tile uses the same fixed 24-atom keyed spread-spectrum code;
-its moderate/high local frequency pairs are frozen in the contract for
-interpolation survival and remain orthogonalized against the global search
-basis. Total energy shares remain .40/.36/.24.
+unchanged. Each tile uses its own fixed keyed signed-Gaussian PRN atlas on an
+8x8 local grid with one-half cell duty. Local whitening is fixed cubic detrend
+plus the same narrow band. Matched correlation reads only support whose
+canonical keyed reference magnitude is at least .18 of its maximum; that mask
+comes solely from key and canonical coordinates and is warped by the candidate
+H, never selected from RGB. Every tile still supplies at most one match. Total
+energy shares remain .40/.36/.24.
 
 Fit uses the fixed divisor-20 local window so translated edge tiles remain
 eligible without changing their canonical identity or any gate. Holdout uses
@@ -138,7 +148,7 @@ retaining correct-key, wrong-key, and unwatermarked-negative blind arms for all
 20 units. Confirmation is rejected by this CLI. Its create-only artifact
 directory contains full records, summary, and manifest JSON files, each with
 an independent SHA-256 sidecar. Source observability measures all three G1R
-domain scores only on the fixed opponent projection of the paired final-RGB
+domain scores only on the fixed REC709-luma projection of the paired final-RGB
 residual `(marked-clean)`; this paired
 writer evaluator is forbidden from the blind detector. It requires every
 correct domain score to beat its corresponding wrong-key score, PSNR above 40,

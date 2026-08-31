@@ -12,10 +12,10 @@ from cegwm.protocol.geometry_v4 import derive_geometry_v4_key
 from cegwm.shared.keys import normalize_detection_key
 
 CONFIG_NAME = "geometry_v4_g1r_v1.json"
-CONFIG_SHA256 = "47bad09bf03da1017fc9b43e208cb2e9f68c3bac361c9b3c3cb325387c612f56"
+CONFIG_SHA256 = "203f97d8610233b09a4df2e1eaf29063bc9cd17863f90b1185a91d39985542ab"
 PROTOCOL_ID = "cegwm-geometry-v4-g1r-v1"
 METHOD_ID = "geometry_v4_keyed_multiscale_sync_anchor_v1"
-WRITER_ID = "geometry_v4_g1r_vae_decoder_output_opponent_writer_v3"
+WRITER_ID = "geometry_v4_g1r_vae_decoder_output_sparse_luma_writer_v4"
 STAGE = "V4-G1R"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 PLACEMENT = "final_VAE_decoder_output_forward_hook_once_before_RGB_postprocess"
@@ -24,13 +24,15 @@ LUMA_RMS_CAP = 2.0 / 255.0
 LUMA_PEAK_CAP = 8.0 / 255.0
 ENERGY_SHARES = (0.40, 0.36, 0.24)
 WRITER_TARGET_RMS_FRACTION = 0.25
-REC709 = (0.2126, 0.7152, 0.0722)
-_OPPONENT_RAW = (1.0, -(REC709[0] + REC709[2]) / REC709[1], 1.0)
-_OPPONENT_NORMALIZER = math.sqrt(sum(value * value for value in _OPPONENT_RAW) / 3.0)
-OPPONENT_AXIS = tuple(value / _OPPONENT_NORMALIZER for value in _OPPONENT_RAW)
-OPPONENT_PROJECTION_DENOMINATOR = sum(value * value for value in OPPONENT_AXIS) / 3.0
 RGB_CHANNEL_RMS_CAP = WRITER_TARGET_RMS_FRACTION * LUMA_RMS_CAP
 RGB_CHANNEL_PEAK_CAP = LUMA_PEAK_CAP
+SPARSE_SEARCH_GRIDS = (8, 12, 16)
+SPARSE_SEARCH_GROUPS = 4
+SPARSE_SEARCH_ACTIVE_MODULUS = 2
+SPARSE_LOCAL_GRID = 8
+SPARSE_LOCAL_ACTIVE_MODULUS = 2
+SPARSE_CHIP_RADIUS_FRACTION = 0.20
+SPARSE_SUPPORT_FRACTION = 0.18
 FIT_TILE_IDS = (0, 2, 5, 7, 8, 10, 13, 15)
 VALIDATE_TILE_IDS = (1, 3, 4, 6, 9, 11, 12, 14)
 ATTACKS = ("identity", "rotation_5", "scale_0.9", "translation_0.08_0", "crop_0.9")
@@ -41,15 +43,6 @@ SEARCH_TOP_K = 5
 TRANSLATION_PEAKS_PER_RS = 3
 TRANSLATION_NMS_RADIUS_PIXELS = 2
 SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION = 0.10
-SEARCH_MACRO_CYCLES = (14.0, 22.0, 30.0)
-SEARCH_DIRECTIONS = (0.0, 45.0, 90.0, 135.0)
-SEARCH_ATOM_OFFSETS = ((-2.0, -4.0), (-0.75, -1.5), (0.75, 1.5), (2.0, 4.0))
-LOCAL_FREQUENCY_PAIRS = (
-    (2, 3), (3, 2), (2, -3), (3, -2), (3, 5), (5, 3),
-    (3, -5), (5, -3), (4, 5), (5, 4), (4, -5), (5, -4),
-    (4, 7), (7, 4), (4, -7), (7, -4), (5, 7), (7, 5),
-    (5, -7), (7, -5), (6, 8), (8, 6), (6, -8), (8, -6),
-)
 TRANSLATION_PSR_MIN = 8.0
 LOCAL_PREPROCESSING = "fixed_cubic_polynomial_detrend_then_narrow_band"
 FIT_PATCH_WINDOW_DIVISOR = 20
@@ -101,8 +94,11 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
         raise ValueError("V4-G1R anchor partition differs")
     if anchor.get("luma_rms_cap") != LUMA_RMS_CAP or anchor.get("luma_peak_cap") != LUMA_PEAK_CAP or anchor.get("writer_target_rms_fraction") != WRITER_TARGET_RMS_FRACTION:
         raise ValueError("V4-G1R budget differs")
-    if anchor.get("carrier_axis") != "fixed_rec709_orthogonal_opponent_q_v1" or anchor.get("carrier_axis_raw_formula") != "[1,-((0.2126+0.0722)/0.7152),1]" or anchor.get("carrier_axis_normalization") != "mean_q_squared_equals_1" or anchor.get("carrier_projection") != "rgb_dot_q_over_q_dot_q_div_3" or anchor.get("rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or anchor.get("rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP:
-        raise ValueError("V4-G1R opponent carrier differs")
+    if anchor.get("carrier_axis") != "fixed_equal_rgb_rec709_luma_v1" or anchor.get("carrier_projection") != "rec709_luma" or anchor.get("rgb_channel_rms_max") != RGB_CHANNEL_RMS_CAP or anchor.get("rgb_channel_peak_max") != RGB_CHANNEL_PEAK_CAP:
+        raise ValueError("V4-G1R sparse luma carrier differs")
+    sparse = value.get("sparse_fiducial", {})
+    if tuple(sparse.get("search_scale_grids", ())) != SPARSE_SEARCH_GRIDS or sparse.get("search_component_groups") != SPARSE_SEARCH_GROUPS or sparse.get("search_active_modulus") != SPARSE_SEARCH_ACTIVE_MODULUS or sparse.get("local_grid") != SPARSE_LOCAL_GRID or sparse.get("local_active_modulus") != SPARSE_LOCAL_ACTIVE_MODULUS or sparse.get("chip_radius_fraction_of_cell") != SPARSE_CHIP_RADIUS_FRACTION or sparse.get("reference_support_fraction") != SPARSE_SUPPORT_FRACTION or sparse.get("generation") != "deterministic_keyed_signed_gaussian_prn_atlas" or sparse.get("whitening") != "fixed_cubic_detrend_then_narrow_band" or sparse.get("image_adaptive") is not False:
+        raise ValueError("V4-G1R sparse fiducial contract differs")
     if tuple(rosters.get("attacks", ())) != ATTACKS or tuple(rosters.get("development", {}).get("seeds", ())) != DEVELOPMENT_SEEDS or tuple(rosters.get("confirmation", {}).get("seeds", ())) != CONFIRMATION_SEEDS or tuple(rosters.get("forbidden_legacy_seeds", ())) != LEGACY_SEEDS or rosters.get("units_per_split") != 20:
         raise ValueError("V4-G1R roster differs")
     if set(FIT_TILE_IDS) & set(VALIDATE_TILE_IDS) or set(FIT_TILE_IDS) | set(VALIDATE_TILE_IDS) != set(range(16)):
@@ -110,14 +106,14 @@ def load_contract(repo_root: str | Path) -> Mapping[str, Any]:
     search = value.get("search", {})
     if search.get("top_k") != SEARCH_TOP_K or search.get("translation_peaks_per_rs") != TRANSLATION_PEAKS_PER_RS or search.get("translation_nms_radius_pixels") != TRANSLATION_NMS_RADIUS_PIXELS or search.get("coarse_control") != "keyed_normalized_complex_cross_power_phase_correlation" or search.get("keyed_reference_frequency_support_min_fraction") != SEARCH_KEYED_FREQUENCY_SUPPORT_MIN_FRACTION or search.get("phase_consistency") != "candidate_peak_over_surface_rms" or search.get("translation_psr_min_for_reliable") != TRANSLATION_PSR_MIN or value.get("blind_boundary", {}).get("h_direction") != "attacked_to_canonical" or value.get("blind_boundary", {}).get("geometry_can_form_positive") is not False:
         raise ValueError("V4-G1R blind boundary differs")
-    if tuple(search.get("macro_cycles", ())) != SEARCH_MACRO_CYCLES or tuple(search.get("directions_degrees", ())) != SEARCH_DIRECTIONS or tuple(tuple(item) for item in search.get("atom_offsets", ())) != SEARCH_ATOM_OFFSETS or search.get("atoms_per_macro") != len(SEARCH_ATOM_OFFSETS) or search.get("coarse_component_set") != "low_and_mid_8_macros" or search.get("fine_component_set") != "all_12_macros" or search.get("component_consensus") != "trim_one_each_side_then_mean" or search.get("frequency_support") != "per_macro_keyed_reference_derived_near_exact":
+    if search.get("coarse_component_set") != "sparse_grids_8_12_all_8_groups" or search.get("fine_component_set") != "all_12_sparse_grid_groups" or search.get("component_consensus") != "trim_one_each_side_then_mean" or search.get("frequency_support") != "per_component_keyed_reference_derived_near_exact" or search.get("joint_atlas_required") is not True:
         raise ValueError("V4-G1R search constellation differs")
     fit, holdout = value.get("fit", {}), value.get("holdout", {})
     if fit.get("local_preprocessing") != LOCAL_PREPROCESSING or (fit.get("support_min"), fit.get("spatial_coverage_min"), fit.get("macro_regions_min"), fit.get("condition_number_max"), fit.get("reprojection_rms_diagonal_max"), fit.get("masked_normalized_correlation_min"), fit.get("match_margin_min")) != (FIT_GATES["support"], FIT_GATES["coverage"], FIT_GATES["macro_regions"], FIT_GATES["condition"], FIT_GATES["reprojection"], FIT_GATES["correlation"], FIT_GATES["margin"]):
         raise ValueError("V4-G1R local preprocessing differs")
     if fit.get("patch_window_divisor") != FIT_PATCH_WINDOW_DIVISOR:
         raise ValueError("V4-G1R fit patch differs")
-    if tuple(tuple(item) for item in fit.get("local_frequency_pairs", ())) != LOCAL_FREQUENCY_PAIRS or fit.get("local_code") != "fixed_keyed_24_atom_spread_spectrum":
+    if fit.get("local_code") != "fixed_keyed_sparse_prn_atlas" or fit.get("support_source") != "key_and_canonical_reference_only":
         raise ValueError("V4-G1R local code differs")
     if (holdout.get("spatial_coverage_min"), holdout.get("macro_regions_min"), holdout.get("masked_normalized_correlation_min"), holdout.get("match_margin_min"), holdout.get("psr_min"), holdout.get("cross_scale_rotation_spread_degrees_max"), holdout.get("cross_scale_log_scale_spread_max")) != (HOLDOUT_GATES["coverage"], HOLDOUT_GATES["macro_regions"], HOLDOUT_GATES["correlation"], HOLDOUT_GATES["margin"], HOLDOUT_GATES["psr"], HOLDOUT_GATES["rotation_spread"], HOLDOUT_GATES["log_scale_spread"]):
         raise ValueError("V4-G1R holdout gates differ")
