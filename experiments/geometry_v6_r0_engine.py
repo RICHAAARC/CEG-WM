@@ -8,7 +8,6 @@ import importlib.metadata
 import json
 import math
 import os
-import re
 import subprocess
 import traceback
 from pathlib import Path
@@ -51,19 +50,6 @@ _RUNTIME_ENVIRONMENT_FIELDS = frozenset({
     "diffusers_version", "transformers_version", "model_id", "pipeline_class",
     "vae_class", "vae_parameter_dtype", "vae_scaling_factor", "vae_shift_factor",
 })
-_COMMON_SECRET_PATTERN = re.compile(
-    r'''(?ix)
-    \bbearer[ \t]+[A-Za-z0-9._~+/=-]{1,512}
-    |
-    \b["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password)["']?
-    [ \t]*[:=][ \t]*
-    (?:["'][^"'\r\n]{0,512}["']|[^\s,;}\]\r\n]{1,512})
-    |
-    \b["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|key|secret|password)["']?
-    [ \t\r\n]{0,64}:[ \t\r\n]{0,64}
-    ["'][^"'\r\n]{0,512}["']
-    '''
-)
 
 
 def _exact(repo_root: Path, expected: str) -> str:
@@ -100,13 +86,13 @@ def _load_assets(token: str) -> tuple[Any, ContentEmbedAssets]:
 
 
 def _sanitize_diagnostic(value: str, secrets: tuple[str, ...]) -> str:
-    """Remove explicit credentials and conventional credential-shaped fragments."""
+    """Remove the exact sensitive values used by this R0 diagnostic."""
 
     sanitized = value
     for secret in secrets:
         if secret:
             sanitized = sanitized.replace(secret, "[REDACTED]")
-    return _COMMON_SECRET_PATTERN.sub("[REDACTED]", sanitized)
+    return sanitized
 
 
 def _failure_diagnostic(error: Exception, content_key: str, token: str, prompt: str) -> dict[str, str]:

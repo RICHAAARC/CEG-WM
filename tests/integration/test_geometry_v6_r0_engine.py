@@ -63,21 +63,12 @@ def test_public_pilot_pairs_present_arms_only_with_their_absent_baselines():
     assert '_pilot_present_vs_absent(combined_record, geometry_only_record)' not in source
 
 
-def test_failure_diagnostic_is_bounded_and_redacts_prompt_and_common_secret_forms():
+def test_failure_diagnostic_is_bounded_and_redacts_exact_r0_sensitive_values():
     content_key = 'content-key-0001'
     token = 'hf_token-0002'
     prompt = 'A private prompt that must never enter an operational artifact'
-    api_key = 'api-key-0003'
-    access_token = 'access-token-0004'
-    auth_token = 'auth-token-0005'
-    json_token = 'json-token-0006'
-    single_quoted_token = 'single-quoted-token-0007'
     try:
-        raise RuntimeError(
-            f'{prompt} {content_key} {token} Bearer bearer-token '
-            f'api_key={api_key} access_token={access_token} auth-token={auth_token} '
-            f'{{"token": "{json_token}"}} \'token\': \'{single_quoted_token}\'\nunrelated_context=retained ' + ('message ' * 100)
-        )
+        raise RuntimeError(f'{prompt} {content_key} {token} ' + ('message ' * 100))
     except RuntimeError as error:
         diagnostic = engine._failure_diagnostic(error, content_key, token, prompt)
     serialized = json.dumps(diagnostic)
@@ -85,36 +76,10 @@ def test_failure_diagnostic_is_bounded_and_redacts_prompt_and_common_secret_form
     assert diagnostic['failure_stage'] == engine.FAILURE_STAGE
     assert len(diagnostic['sanitized_message']) <= engine.FAILURE_MESSAGE_LIMIT
     assert len(diagnostic['sanitized_traceback_tail']) <= engine.FAILURE_TRACEBACK_TAIL_LIMIT
-    for secret in (prompt, content_key, token, 'bearer-token', api_key, access_token, auth_token, json_token, single_quoted_token):
+    for secret in (prompt, content_key, token):
         assert secret not in diagnostic['sanitized_message']
         assert secret not in diagnostic['sanitized_traceback_tail']
         assert secret not in serialized
-    assert 'unrelated_context=retained' in diagnostic['sanitized_message']
-    assert 'unrelated_context=retained' in diagnostic['sanitized_traceback_tail']
-    assert '[REDACTED]' in serialized
-
-
-def test_failure_diagnostic_redacts_bounded_pretty_json_credentials_without_consuming_context():
-    pretty_access_token = 'PRETTYJSONACCESSSECRET'
-    pretty_token = 'PRETTYJSONTOKENSECRET'
-    exception_message = (
-        '{\n  "access_token"\n  :\n  "' + pretty_access_token + '"\n}\n'
-        'context=retained\n'
-        '{\n  "token"\n  :\n  "' + pretty_token + '"\n}\n'
-        'following_context=retained'
-    )
-    try:
-        raise RuntimeError(exception_message)
-    except RuntimeError as error:
-        diagnostic = engine._failure_diagnostic(error, 'content-key', 'hf-token', 'private prompt')
-    serialized = json.dumps(diagnostic)
-    for secret in (pretty_access_token, pretty_token):
-        assert secret not in diagnostic['sanitized_message']
-        assert secret not in diagnostic['sanitized_traceback_tail']
-        assert secret not in serialized
-    for context in ('context=retained', 'following_context=retained'):
-        assert context in diagnostic['sanitized_message']
-        assert context in diagnostic['sanitized_traceback_tail']
     assert '[REDACTED]' in serialized
 
 
