@@ -113,11 +113,20 @@ class SyncSealTorchScript:
             raise TypeError("SyncSeal embed must return exactly preds_w and imgs_w")
         predicted_residual = output["preds_w"]
         embedded = output["imgs_w"]
-        for name, tensor in (("preds_w", predicted_residual), ("imgs_w", embedded)):
-            if not isinstance(tensor, torch.Tensor) or tensor.shape != current.shape:
-                raise ValueError(f"SyncSeal {name} must match public RGB tensor shape")
-            if not tensor.dtype.is_floating_point or not bool(torch.isfinite(tensor).all()):
-                raise ValueError(f"SyncSeal {name} must be finite floating point")
+        if not isinstance(embedded, torch.Tensor) or embedded.shape != current.shape:
+            raise ValueError("SyncSeal imgs_w must have shape 1x3x512x512")
+        if not embedded.dtype.is_floating_point or not bool(torch.isfinite(embedded).all()):
+            raise ValueError("SyncSeal imgs_w must be finite floating point")
+        expected_residual_shape = (1, 1, PUBLIC_IMAGE_HEIGHT, PUBLIC_IMAGE_WIDTH)
+        if (
+            not isinstance(predicted_residual, torch.Tensor)
+            or predicted_residual.shape != expected_residual_shape
+        ):
+            raise ValueError("SyncSeal preds_w must have shape 1x1x512x512")
+        if not predicted_residual.dtype.is_floating_point or not bool(
+            torch.isfinite(predicted_residual).all()
+        ):
+            raise ValueError("SyncSeal preds_w must be finite floating point")
         scaled = torch.clamp(current + strength * (embedded.to(current) - current), 0.0, 1.0)
         return _to_rgb(scaled)
 

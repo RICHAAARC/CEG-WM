@@ -18,8 +18,16 @@ from cegwm.geometry_v7.syncseal import (
 class _TorchScriptContractFixture:
     """Shape/call tracer only; it is not a SyncSeal implementation."""
 
-    def __init__(self, *, malformed: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        malformed: bool = False,
+        preds_w_shape: tuple[int, ...] = (1, 1, 512, 512),
+        nonfinite_preds_w: bool = False,
+    ) -> None:
         self.malformed = malformed
+        self.preds_w_shape = preds_w_shape
+        self.nonfinite_preds_w = nonfinite_preds_w
         self.embed_calls = 0
         self.detect_calls = 0
 
@@ -31,8 +39,18 @@ class _TorchScriptContractFixture:
 
     def embed(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
         self.embed_calls += 1
-        residual = torch.full_like(image, 1.0 / 255.0)
-        return {"preds_w": residual, "imgs_w": torch.clamp(image + residual, 0.0, 1.0)}
+        official_residual = torch.full(
+            (1, 1, 512, 512), 1.0 / 255.0, dtype=image.dtype, device=image.device
+        )
+        residual = torch.full(
+            self.preds_w_shape, 1.0 / 255.0, dtype=image.dtype, device=image.device
+        )
+        if self.nonfinite_preds_w:
+            residual.reshape(-1)[0] = torch.nan
+        return {
+            "preds_w": residual,
+            "imgs_w": torch.clamp(image + official_residual, 0.0, 1.0),
+        }
 
     def detect(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
         self.detect_calls += 1
@@ -53,6 +71,25 @@ def test_official_embed_adapter_scales_only_the_final_rgb_residual() -> None:
     # Half of a one-code-value residual rounds back to the original byte.
     assert output.getpixel((0, 0)) == (100, 100, 100)
     assert source.getpixel((0, 0)) == (100, 100, 100)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("shape", "nonfinite", "message"),
+    (
+        ((2, 1, 512, 512), False, "1x1x512x512"),
+        ((1, 1, 511, 512), False, "1x1x512x512"),
+        ((1, 1, 512, 512), True, "finite floating point"),
+    ),
+)
+def test_embed_rejects_wrong_batch_wrong_spatial_and_nonfinite_preds_w(
+    shape: tuple[int, ...], nonfinite: bool, message: str
+) -> None:
+    adapter = SyncSealTorchScript(
+        _TorchScriptContractFixture(preds_w_shape=shape, nonfinite_preds_w=nonfinite)
+    )
+    with pytest.raises(ValueError, match=message):
+        adapter.embed_final_rgb(Image.new("RGB", (512, 512)), 1.0)
 
 
 @pytest.mark.unit
