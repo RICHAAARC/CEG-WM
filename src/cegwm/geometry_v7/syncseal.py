@@ -25,6 +25,7 @@ from cegwm.runtime.observation import require_ordinary_rgb_image
 SYNCSEAL_TORCHSCRIPT_URL = (
     "https://dl.fbaipublicfiles.com/wmar/syncseal/paper/syncmodel.jit.pt"
 )
+SYNCSEAL_OFFICIAL_BASE_ALPHA = 0.20
 
 
 def download_official_syncseal_torchscript(
@@ -94,18 +95,20 @@ class SyncSealTorchScript:
         model = torch.jit.load(str(Path(checkpoint)), map_location=torch.device(device))
         return cls(model, device)
 
-    def embed_final_rgb(self, image: Any, residual_strength: float) -> Image.Image:
+    def embed_final_rgb(self, image: Any, residual_strength_multiplier: float) -> Image.Image:
         """Apply SyncSeal only after the content chain has produced final RGB.
 
-        Strength ``a`` is frozen as ``clamp(I + a * (SyncSeal(I)-I), 0, 1)``.
-        The official ``a=1`` result is used exactly before final uint8 storage.
+        Official ``imgs_w`` already contains base alpha 0.20.  Multiplier ``m``
+        is exactly ``clamp(I + m * (imgs_w-I), 0, 1)``; alpha is not reapplied.
         """
 
-        if isinstance(residual_strength, bool) or not isinstance(residual_strength, (int, float)):
-            raise TypeError("SyncSeal residual strength must be real")
-        strength = float(residual_strength)
-        if not math.isfinite(strength) or strength < 0.0:
-            raise ValueError("SyncSeal residual strength must be finite and nonnegative")
+        if isinstance(residual_strength_multiplier, bool) or not isinstance(
+            residual_strength_multiplier, (int, float)
+        ):
+            raise TypeError("SyncSeal residual strength multiplier must be real")
+        multiplier = float(residual_strength_multiplier)
+        if not math.isfinite(multiplier) or multiplier < 0.0:
+            raise ValueError("SyncSeal residual strength multiplier must be finite and nonnegative")
         current = _to_tensor(image, self.device)
         with torch.no_grad():
             output = self.model.embed(current)
@@ -127,7 +130,7 @@ class SyncSealTorchScript:
             torch.isfinite(predicted_residual).all()
         ):
             raise ValueError("SyncSeal preds_w must be finite floating point")
-        scaled = torch.clamp(current + strength * (embedded.to(current) - current), 0.0, 1.0)
+        scaled = torch.clamp(current + multiplier * (embedded.to(current) - current), 0.0, 1.0)
         return _to_rgb(scaled)
 
     def detect_geometry(self, image: Any) -> GeometryEstimate:
@@ -163,6 +166,7 @@ class SyncSealTorchScript:
 
 
 __all__ = [
+    "SYNCSEAL_OFFICIAL_BASE_ALPHA",
     "SYNCSEAL_TORCHSCRIPT_URL",
     "SyncSealTorchScript",
     "download_official_syncseal_torchscript",

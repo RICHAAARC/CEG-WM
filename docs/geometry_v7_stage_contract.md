@@ -30,13 +30,23 @@ Each predeclared unit has exactly four paired arms:
 - `C`: complete unchanged content watermark, no SyncSeal;
 - `CG`: SyncSeal applied once to final C RGB.
 
-For residual strength `a`, the adapter freezes `clamp(I + a*(SyncSeal(I)-I),0,1)` and stores final uint8 RGB. Development may run only a predeclared ordered strength sequence. The frozen selection rule is the first sequence entry satisfying every frozen gate; after selection, test units use that strength without reselection, retry, fallback, or successful-subset filtering.
+The official model has `base_syncseal_alpha = 0.20`, and official `embed().imgs_w` already includes it. R0 varies only the ordered residual multipliers `(0.25, 0.50, 0.75, 1.00)` via `clamp(I + multiplier*(I_official-I),0,1)` before final uint8 storage; alpha is recorded but never multiplied a second time.
+
+Development uses the first four units of the fixed ordered reference roster. It runs multipliers in the frozen order and selects the first one for which every gate below passes. Test uses the fixed ordered eight-unit evaluation roster and runs that selected multiplier exactly once, under the same gates, without reselection, retry, fallback, denominator change, or successful-subset filtering.
 
 The real call chain accepts prebound callables for the unchanged content detector/key/preprocessing/tau, official SyncSeal embedding/detection, and PSNR/SSIM/LPIPS. It has no shipped proxy implementation of SyncSeal or the content chain. Every arm is attempted once. Stage exceptions, malformed results, and detector `ERROR` records remain attached to their arm; absent CG does not remove C or shrink a denominator.
 
-Per unit the record keeps all-arm raw LF/HF/weighted-joint content scores and frozen decisions, CG-C raw score deltas and flip, G content false-positive state, G-U and CG-C PSNR/SSIM/LPIPS, and each arm's SyncSeal raw logit, corners, H, legality, and basic observability. Denominators are fixed at two negative arms, two positive arms, and four failure-eligible arms.
+Per unit the record keeps all-arm raw LF/HF/weighted-joint content scores, content margin, and frozen decisions; CG-C raw LF/HF/weighted-joint/margin deltas and decision flip; G content false-positive state; G-U and CG-C PSNR/SSIM/LPIPS; and each arm's SyncSeal raw logit, corners, H, legality, and coordinate diagnostics. Denominators are fixed at two negative arms, two positive arms, and four failure-eligible arms.
 
-All R0 numeric gates live only in `R0NumericGates`. The ordered residual strengths, minimum PSNR, minimum SSIM, maximum LPIPS, maximum CG-C flip rate, maximum G content false-positive rate, and minimum SyncSeal basic-observability rate are currently pending confirmation. Missing values fail closed and cannot be interpreted as pass.
+All R0 numeric gates live only in `R0NumericGates`:
+
+- G-U and CG-C are separate pair families. Each family uses its entire fixed roster denominator and must independently satisfy arithmetic `mean PSNR >= 40.0`, `mean SSIM >= 0.98`, and `mean LPIPS <= 0.05`. Per-image values and family min/max are record-only. A missing, invalid, non-finite, or failed pair makes that family fail; no successful-subset mean exists.
+- `max_cg_c_decision_flip_rate = 0.0` compares only C to CG, and `max_g_content_false_positive_rate = 0.0`. Passing means only that no event was observed in the fixed four- or eight-unit roster. Raw score and margin deltas have no additional change gate.
+- `min_identity_coordinate_valid_rate = 1.0` counts only G and CG, on a fixed denominator of twice the roster size. Valid means finite, legal, nondegenerate H whose maximum L-infinity displacement of the four canonical corners plus center under H is at most `2/255` normalized units. This one-off engineering tolerance equals one official 256-grid pixel step and only absorbs pixel-center/official-round implementation error. U/C diagnostics do not enter this gate.
+
+R0 is identity-only. Passing supports only final-RGB carrier compatibility and validity of the identity coordinate interface; it does not show that the pilot is observable/readable or that synchronization or geometric recovery works. Nonidentity synchronization utilization remains for R1A truth-error and identity-baseline-improvement evaluation.
+
+If every frozen multiplier fails on the fixed development roster, the only conclusion is: no carrier-compatibility window was found on the preregistered strength grid and fixed R0 roster, so Geometry-V7 stops by contract. It is not a general impossibility claim.
 
 ## Predeclared later-stage contracts (no executor in this change)
 

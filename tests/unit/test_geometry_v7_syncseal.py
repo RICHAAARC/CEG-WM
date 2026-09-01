@@ -9,6 +9,7 @@ import torch
 
 from cegwm.geometry_v7.contracts import GeometryStatus
 from cegwm.geometry_v7.syncseal import (
+    SYNCSEAL_OFFICIAL_BASE_ALPHA,
     SYNCSEAL_TORCHSCRIPT_URL,
     SyncSealTorchScript,
     download_official_syncseal_torchscript,
@@ -71,6 +72,11 @@ def test_official_embed_adapter_scales_only_the_final_rgb_residual() -> None:
     # Half of a one-code-value residual rounds back to the original byte.
     assert output.getpixel((0, 0)) == (100, 100, 100)
     assert source.getpixel((0, 0)) == (100, 100, 100)
+    assert SYNCSEAL_OFFICIAL_BASE_ALPHA == 0.20
+    full = adapter.embed_final_rgb(source, 1.0)
+    assert fixture.embed_calls == 2
+    # imgs_w already contains base alpha 0.20; the adapter must not multiply it again.
+    assert full.getpixel((0, 0)) == (101, 101, 101)
 
 
 @pytest.mark.unit
