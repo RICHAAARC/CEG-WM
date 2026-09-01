@@ -195,18 +195,53 @@ def estimate_geometry(
     if not math.isfinite(logit):
         return GeometryEstimate.error_record("uncalibrated SyncSeal logit must be finite")
     try:
-        corners_tensor = _corners_tensor(
-            observed_corners_in_canonical_normalized
+        corners_tensor = _corners_tensor(observed_corners_in_canonical_normalized)
+        corners = tuple(
+            tuple(float(value) for value in row)
+            for row in corners_tensor.tolist()
         )
-        corners = tuple(tuple(float(value) for value in row) for row in corners_tensor.tolist())
-        raw = None
-        if raw_syncseal_corners is not None:
+    except ValueError as error:
+        return GeometryEstimate(
+            GeometryStatus.ERROR,
+            logit,
+            None,
+            None,
+            None,
+            False,
+            False,
+            str(error),
+        )
+    raw = None
+    if raw_syncseal_corners is not None:
+        try:
             raw_tensor = _corners_tensor(raw_syncseal_corners)
-            raw = tuple(tuple(float(value) for value in row) for row in raw_tensor.tolist())
+            raw = tuple(
+                tuple(float(value) for value in row)
+                for row in raw_tensor.tolist()
+            )
+        except ValueError as error:
+            return GeometryEstimate(
+                GeometryStatus.ERROR,
+                logit,
+                None,
+                corners,
+                None,
+                False,
+                False,
+                str(error),
+            )
+    try:
         homography = homography_observed_to_canonical(corners)
     except ValueError as error:
         return GeometryEstimate(
-            GeometryStatus.UNSUPPORTED, logit, None, None, None, False, False, str(error)
+            GeometryStatus.UNSUPPORTED,
+            logit,
+            raw,
+            corners,
+            None,
+            False,
+            False,
+            str(error),
         )
     # P0/R0 has no approved reliability calibration.  A legal raw estimate is
     # therefore observable but deliberately cannot be labelled RELIABLE.

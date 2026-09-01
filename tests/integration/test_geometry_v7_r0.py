@@ -324,6 +324,35 @@ def _aggregate_record(
 
 
 @pytest.mark.integration
+def test_r0_payload_retains_finite_unsupported_syncseal_correspondences() -> None:
+    raw = (
+        (-1.0, -1.0),
+        (127.0 / 128.0, 127.0 / 128.0),
+        (127.0 / 128.0, -1.0),
+        (-1.0, 127.0 / 128.0),
+    )
+    converted = (
+        (-1.0, -1.0),
+        (1.0, 1.0),
+        (1.0, -1.0),
+        (-1.0, 1.0),
+    )
+    unsupported = estimate_geometry(
+        0.0,
+        converted,
+        raw_syncseal_corners=raw,
+    )
+    record = _aggregate_record("payload-unit", 0.25)
+    arms = list(record.arms)
+    arms[1] = replace(arms[1], geometry=unsupported)
+    payload = r0_record_payload(replace(record, arms=tuple(arms)))
+    geometry = payload["arms"][1]["geometry"]
+    assert geometry["raw_syncseal_corners"] == raw
+    assert geometry["observed_corners_in_canonical_normalized"] == converted
+    assert geometry["homography_observed_to_canonical"] is None
+
+
+@pytest.mark.integration
 def test_atomic_content_pair_producer_failure_remains_in_all_fixed_denominators() -> None:
     record = r0_producer_failure_record(
         unit_id="content-adaptive-v2-0001",

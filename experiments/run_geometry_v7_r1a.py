@@ -376,7 +376,16 @@ def _result_payload(
         for record in raw_records
         if record["errors"]
     ]
-    if setup_error is not None:
+    operational_failure = setup_error is not None or any(
+        any(
+            str(error).startswith(
+                ("syncseal_runtime_setup:", "geometry_detect:")
+            )
+            for error in record.errors
+        )
+        for record in flattened
+    )
+    if operational_failure:
         status = OPERATIONAL_FAILURE_STATUS
     else:
         status = evaluation.status
@@ -410,11 +419,12 @@ def _result_payload(
         "condition_aggregates": [
             _jsonable(aggregate) for aggregate in evaluation.aggregates
         ],
+        "fixed_denominator_evaluation_status": evaluation.status,
         "all_sanity_passed": evaluation.all_sanity_passed,
         "all_core_passed": evaluation.all_core_passed,
         "blocking_method_canary_passed": (
             evaluation.blocking_method_canary_passed
-            if setup_error is None
+            if not operational_failure
             else None
         ),
         "raw_records": raw_records,

@@ -12,14 +12,46 @@ from PIL import Image
 import pytest
 
 from experiments import run_geometry_v7_r1a as runner
+from cegwm.geometry_v7.contracts import (
+    CANONICAL_CORNERS_NORMALIZED,
+    GeometryEstimate,
+    estimate_geometry,
+)
 from cegwm.geometry_v7.r1a import (
     R1A_ALL_CONDITIONS,
+    R1A_BLOCKING_METHOD_CANARY_FAILED,
+    evaluate_r1a_observation,
     evaluate_r1a,
 )
 from cegwm.protocol.content_chain import load_content_chain_contract
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _rendered_fixture() -> tuple[runner.RenderedAttack, ...]:
+    return tuple(
+        runner.RenderedAttack(
+            f"evaluation-{unit_index:02d}",
+            spec.condition_id,
+            Image.new("RGB", (512, 512)),
+            f"attacked/{spec.condition_id}/evaluation-{unit_index:02d}.png",
+            "0" * 64,
+        )
+        for spec in R1A_ALL_CONDITIONS
+        for unit_index in range(8)
+    )
+
+
+def _input_fixture() -> tuple[runner.R0CGInput, ...]:
+    return tuple(
+        runner.R0CGInput(
+            f"evaluation-{index:02d}",
+            Path(f"/unused/evaluation-{index:02d}.png"),
+            f"images/evaluation-{index:02d}.png",
+        )
+        for index in range(8)
+    )
 
 
 def _write_fake_r0_artifact(root: Path) -> tuple[str, ...]:
@@ -100,17 +132,7 @@ def test_r0_input_loader_rejects_identity_or_status_drift(
 
 @pytest.mark.integration
 def test_syncseal_setup_failure_projects_all_104_fixed_records() -> None:
-    rendered = tuple(
-        runner.RenderedAttack(
-            f"evaluation-{unit_index:02d}",
-            spec.condition_id,
-            Image.new("RGB", (512, 512)),
-            f"attacked/{spec.condition_id}/evaluation-{unit_index:02d}.png",
-            "0" * 64,
-        )
-        for spec in R1A_ALL_CONDITIONS
-        for unit_index in range(8)
-    )
+    rendered = _rendered_fixture()
     records = runner._records_after_setup_failure(
         rendered, RuntimeError("model load stopped")
     )
@@ -127,6 +149,106 @@ def test_syncseal_setup_failure_projects_all_104_fixed_records() -> None:
         for item in records
         for record in item.records
     )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("reported", (False, True))
+def test_detector_operational_failure_controls_complete_top_level_payload(
+    tmp_path: Path, reported: bool
+) -> None:
+    rendered = _rendered_fixture()
+
+    def detector(_image):
+        if reported:
+            return GeometryEstimate.error_record("detector reported error")
+        raise RuntimeError("detector threw")
+
+    records = runner._records_after_detection(rendered, detector)
+    roster = tuple(item.unit_id for item in _input_fixture())
+    evaluation = evaluate_r1a(
+        condition_records=records,
+        ordered_roster=roster,
+    )
+    payload = runner._result_payload(
+        exact="1" * 40,
+        artifact_root=tmp_path,
+        inputs=_input_fixture(),
+        rendered=rendered,
+        records=records,
+        evaluation=evaluation,
+        setup_error=None,
+        checkpoint=None,
+    )
+    assert payload["status"] == runner.OPERATIONAL_FAILURE_STATUS
+    assert payload["blocking_method_canary_passed"] is None
+    assert (
+        payload["fixed_denominator_evaluation_status"]
+        == R1A_BLOCKING_METHOD_CANARY_FAILED
+    )
+    assert len(payload["raw_records"]) == len(payload["failures"]) == 104
+    assert len(payload["condition_aggregates"]) == 13
+    assert all(item["denominator"] == 8 for item in payload["condition_aggregates"])
+
+
+@pytest.mark.integration
+def test_finite_legal_gate_failure_remains_method_failure_not_operational(
+    tmp_path: Path,
+) -> None:
+    rendered = _rendered_fixture()
+    records = runner._records_after_detection(
+        rendered,
+        lambda _image: estimate_geometry(0.0, CANONICAL_CORNERS_NORMALIZED),
+    )
+    evaluation = evaluate_r1a(
+        condition_records=records,
+        ordered_roster=tuple(item.unit_id for item in _input_fixture()),
+    )
+    payload = runner._result_payload(
+        exact="1" * 40,
+        artifact_root=tmp_path,
+        inputs=_input_fixture(),
+        rendered=rendered,
+        records=records,
+        evaluation=evaluation,
+        setup_error=None,
+        checkpoint=None,
+    )
+    assert payload["status"] == R1A_BLOCKING_METHOD_CANARY_FAILED
+    assert payload["blocking_method_canary_passed"] is False
+    assert payload["failures"] == []
+
+
+@pytest.mark.integration
+def test_r1a_payload_retains_finite_unsupported_syncseal_points() -> None:
+    raw = (
+        (-1.0, -1.0),
+        (127.0 / 128.0, 127.0 / 128.0),
+        (127.0 / 128.0, -1.0),
+        (-1.0, 127.0 / 128.0),
+    )
+    converted = (
+        (-1.0, -1.0),
+        (1.0, 1.0),
+        (1.0, -1.0),
+        (-1.0, 1.0),
+    )
+    geometry = estimate_geometry(
+        0.0,
+        converted,
+        raw_syncseal_corners=raw,
+    )
+    record = evaluate_r1a_observation(
+        unit_id="payload-unit",
+        spec=R1A_ALL_CONDITIONS[0],
+        attacked_image=Image.new("RGB", (512, 512)),
+        geometry=geometry,
+        errors=("geometry_detect:reported_error",),
+    )
+    payload = runner._geometry_payload(record)
+    assert payload is not None
+    assert payload["raw_syncseal_corners"] == raw
+    assert payload["observed_corners_in_canonical_normalized"] == converted
+    assert payload["homography_observed_to_canonical"] is None
 
 
 @pytest.mark.integration

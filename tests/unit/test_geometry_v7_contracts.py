@@ -70,11 +70,33 @@ def test_raw_output_is_observable_but_never_reliable_without_frozen_gate() -> No
         estimate.homography_current_to_canonical
         == estimate.homography_observed_to_canonical
     )
+    finite_but_nonconvex = (
+        (-1.0, -1.0),
+        (1.0, 1.0),
+        (1.0, -1.0),
+        (-1.0, 1.0),
+    )
+    raw = (
+        (-1.0, -1.0),
+        (127.0 / 128.0, 127.0 / 128.0),
+        (127.0 / 128.0, -1.0),
+        (-1.0, 127.0 / 128.0),
+    )
     unsupported = estimate_geometry(
-        0.75, ((-1.0, -1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, 1.0))
+        0.75,
+        finite_but_nonconvex,
+        raw_syncseal_corners=raw,
     )
     assert unsupported.status is GeometryStatus.UNSUPPORTED
+    assert unsupported.raw_syncseal_corners == raw
+    assert (
+        unsupported.observed_corners_in_canonical_normalized
+        == finite_but_nonconvex
+    )
     assert unsupported.homography_observed_to_canonical is None
+    malformed = estimate_geometry(0.75, ((-1.0, -1.0),))
+    assert malformed.status is GeometryStatus.ERROR
+    assert malformed.observed_corners_in_canonical_normalized is None
     assert {status.value for status in GeometryStatus} == {
         "RELIABLE", "UNRELIABLE", "UNSUPPORTED", "ERROR"
     }
