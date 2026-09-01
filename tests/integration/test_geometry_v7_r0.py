@@ -11,6 +11,7 @@ from cegwm.geometry_v7.contracts import CANONICAL_CORNERS_NORMALIZED, estimate_g
 from cegwm.geometry_v7.r0 import (
     ContentScore,
     ImageQuality,
+    PairedContentDecision,
     R0Arm,
     R0ArmRecord,
     R0MultiplierRecords,
@@ -19,6 +20,7 @@ from cegwm.geometry_v7.r0 import (
     R0UnitRecord,
     evaluate_r0_test,
     r0_record_payload,
+    r0_producer_failure_record,
     run_r0_four_arm_unit,
     select_r0_development_multiplier,
 )
@@ -33,6 +35,17 @@ def _fixed_rosters() -> tuple[tuple[str, ...], tuple[str, ...]]:
     return (
         tuple(unit.unit_id for unit in contract.reference_roster[:4]),
         tuple(unit.unit_id for unit in contract.evaluation_roster),
+    )
+
+
+def _raw_content(lf: float, hf: float, weighted: float) -> ContentScore:
+    return ContentScore(
+        lf,
+        hf,
+        weighted,
+        (lf - 0.1,) * 16,
+        (hf - 0.1,) * 16,
+        (weighted - 0.1,) * 16,
     )
 
 
@@ -54,7 +67,15 @@ def test_four_arm_routing_records_raw_deltas_false_positive_quality_and_denomina
         value = image.getpixel((0, 0))[0]
         score_calls.append(value)
         weighted = value / 50.0
-        return ContentScore(value / 100.0, value / 200.0, weighted, weighted - 0.4, value >= 20)
+        wrong = weighted + 0.1 if value < 20 else weighted - 0.1
+        return ContentScore(
+            value / 100.0,
+            value / 200.0,
+            weighted,
+            (0.0,) * 16,
+            (0.0,) * 16,
+            (wrong,) * 16,
+        )
 
     def geometry_detector(image: Image.Image):
         value = image.getpixel((0, 0))[0]
@@ -84,7 +105,14 @@ def test_four_arm_routing_records_raw_deltas_false_positive_quality_and_denomina
     assert record.base_syncseal_alpha == 0.20
     assert record.residual_strength_multiplier == 0.50
     assert dict(record.cg_minus_c_raw or ()) == pytest.approx(
-        {"lf": 0.01, "hf": 0.005, "weighted_joint": 0.02, "margin": 0.02}
+        {
+            "lf": 0.01,
+            "hf": 0.005,
+            "weighted_joint": 0.02,
+            "gate_a_margin": 0.0,
+            "gate_b_margin": 0.0,
+            "margin": 0.0,
+        }
     )
     assert record.cg_c_content_flip is False
     assert record.g_content_false_positive is False
@@ -111,7 +139,7 @@ def test_failed_cg_stays_in_fixed_denominator_without_retry_or_fallback() -> Non
         content_watermarked_final_rgb=Image.new("RGB", (512, 512), (20, 20, 20)),
         residual_strength_multiplier=1.0,
         sync_embedder=failing_sync,
-        content_scorer=lambda image: ContentScore(0.0, 0.0, 0.0, 0.0, False),
+        content_scorer=lambda image: _raw_content(0.0, 0.0, 0.0),
         geometry_detector=lambda image: estimate_geometry(0.0, CANONICAL_CORNERS_NORMALIZED),
         quality_scorer=lambda left, right: ImageQuality(40.0, 0.99, 0.01),
     )
@@ -152,28 +180,68 @@ def _aggregate_record(
         if valid_identity
         else estimate_geometry(0.0, ((-1.0, -1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, 1.0)))
     )
-    false_score = ContentScore(0.0, 0.0, 0.0, -1.0, False)
-    g_score = replace(false_score, positive=g_false_positive)
-    c_score = ContentScore(0.2, 0.3, 1.0, 0.2, True)
-    cg_score = replace(c_score, positive=not cg_c_flip)
+    false_score = _raw_content(0.0, 0.0, 0.0)
+    g_score = _raw_content(0.0, 0.0, 0.5 if g_false_positive else -1.0)
+    c_score = _raw_content(0.2, 0.3, 1.0)
+    cg_score = _raw_content(0.2, 0.3, -1.0 if cg_c_flip else 1.0)
+    g_decision = PairedContentDecision(
+        R0Arm.U,
+        g_score.gate_a_margin,
+        g_score.weighted_joint - false_score.weighted_joint,
+        min(g_score.gate_a_margin, g_score.weighted_joint - false_score.weighted_joint),
+        g_false_positive,
+    )
+    c_decision = PairedContentDecision(R0Arm.U, 0.1, 1.0, 0.1, True)
+    cg_positive = not cg_c_flip
+    cg_gate_b = cg_score.weighted_joint - g_score.weighted_joint
+    cg_decision = PairedContentDecision(
+        R0Arm.G,
+        cg_score.gate_a_margin,
+        cg_gate_b,
+        min(cg_score.gate_a_margin, cg_gate_b),
+        cg_positive,
+    )
     arms = (
-        R0ArmRecord(R0Arm.U, image, false_score, None, None, ()),
-        R0ArmRecord(R0Arm.G, image, g_score, geometry, g_u_quality, ()),
-        R0ArmRecord(R0Arm.C, image, c_score, None, None, ()),
-        R0ArmRecord(R0Arm.CG, image, cg_score, geometry, cg_c_quality, ()),
+        R0ArmRecord(R0Arm.U, image, false_score, None, None, None, ()),
+        R0ArmRecord(R0Arm.G, image, g_score, g_decision, geometry, g_u_quality, ()),
+        R0ArmRecord(R0Arm.C, image, c_score, c_decision, None, None, ()),
+        R0ArmRecord(R0Arm.CG, image, cg_score, cg_decision, geometry, cg_c_quality, ()),
     )
     return R0UnitRecord(
         unit_id,
         0.20,
         multiplier,
         arms,
-        (("lf", 0.0), ("hf", 0.0), ("weighted_joint", 0.0), ("margin", 0.0)),
+        (
+            ("lf", 0.0),
+            ("hf", 0.0),
+            ("weighted_joint", 0.0),
+            ("gate_a_margin", 0.0),
+            ("gate_b_margin", 0.0),
+            ("margin", 0.0),
+        ),
         cg_c_flip,
         g_false_positive,
         2,
         2,
         4,
         0,
+    )
+
+
+@pytest.mark.integration
+def test_atomic_content_pair_producer_failure_remains_in_all_fixed_denominators() -> None:
+    record = r0_producer_failure_record(
+        unit_id="content-adaptive-v2-0001",
+        residual_strength_multiplier=0.25,
+        error=RuntimeError("real pair stopped"),
+    )
+    assert record.failed_arm_count == record.failure_arm_denominator == 4
+    assert record.g_content_false_positive is None and record.cg_c_content_flip is None
+    assert all(arm.image is None for arm in record.arms)
+    assert all(
+        arm.errors == ("content_pair_producer:RuntimeError:real pair stopped",)
+        for arm in record.arms
     )
 
 

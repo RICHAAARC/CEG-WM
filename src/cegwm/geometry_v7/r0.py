@@ -80,22 +80,62 @@ class R0NumericGates:
 
 @dataclass(frozen=True, slots=True)
 class ContentScore:
+    """Blind final-RGB registered and external-wrong-key raw scores."""
+
     lf: float
     hf: float
     weighted_joint: float
+    wrong_key_lf: tuple[float, ...]
+    wrong_key_hf: tuple[float, ...]
+    wrong_key_weighted_joint: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        registered = (self.lf, self.hf, self.weighted_joint)
+        wrong = (
+            self.wrong_key_lf,
+            self.wrong_key_hf,
+            self.wrong_key_weighted_joint,
+        )
+        if any(len(values) != 16 for values in wrong) or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in (*registered, *(item for values in wrong for item in values))
+        ):
+            raise ValueError(
+                "content registered and exactly 16 wrong-key LF/HF/weighted-joint "
+                "scores must be finite raw values"
+            )
+
+    @property
+    def gate_a_margin(self) -> float:
+        return self.weighted_joint - max(self.wrong_key_weighted_joint)
+
+
+@dataclass(frozen=True, slots=True)
+class PairedContentDecision:
+    """Frozen paired compatibility decision; never a single-image FPR claim."""
+
+    paired_null_arm: R0Arm
+    gate_a_margin: float
+    gate_b_margin: float
     margin: float
     positive: bool
 
     def __post_init__(self) -> None:
+        if self.paired_null_arm not in (R0Arm.U, R0Arm.G):
+            raise ValueError("paired content decision null must be U or G")
         if any(
             isinstance(value, bool)
             or not isinstance(value, (int, float))
             or not math.isfinite(float(value))
-            for value in (self.lf, self.hf, self.weighted_joint, self.margin)
+            for value in (self.gate_a_margin, self.gate_b_margin, self.margin)
         ):
-            raise ValueError("content LF/HF/weighted-joint/margin scores must be finite raw values")
-        if not isinstance(self.positive, bool):
-            raise TypeError("content positive must come from the unchanged frozen decision callable")
+            raise ValueError("paired Gate A/B/margin values must be finite")
+        if self.margin != min(self.gate_a_margin, self.gate_b_margin):
+            raise ValueError("paired content margin must equal min(Gate A, Gate B)")
+        if self.positive is not (self.gate_a_margin > 0.0 and self.gate_b_margin > 0.0):
+            raise ValueError("paired content positive must use strict Gate A and Gate B")
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +159,7 @@ class R0ArmRecord:
     arm: R0Arm
     image: Image.Image | None
     content: ContentScore | None
+    paired_content_decision: PairedContentDecision | None
     geometry: GeometryEstimate | None
     quality_to_unsynchronized_pair: ImageQuality | None
     errors: tuple[str, ...]
@@ -182,6 +223,12 @@ class R0AggregateEvaluation:
     identity_coordinate_valid_rate: float
     carrier_compatibility_passed: bool
 
+    @property
+    def observed_paired_G_false_positive_rate(self) -> float | None:
+        """Compatibility-canary rate only; never a single-image blind FPR."""
+
+        return self.g_content_false_positive_rate
+
 
 @dataclass(frozen=True, slots=True)
 class R0MultiplierRecords:
@@ -212,6 +259,24 @@ def _rgb512(image: Any) -> Image.Image:
 
 def _error(stage: str, error: BaseException) -> str:
     return f"{stage}:{type(error).__name__}:{error}"
+
+
+def _paired_decision(
+    candidate: ContentScore | None,
+    paired_null: ContentScore | None,
+    paired_null_arm: R0Arm,
+) -> PairedContentDecision | None:
+    if not isinstance(candidate, ContentScore) or not isinstance(paired_null, ContentScore):
+        return None
+    gate_a = candidate.gate_a_margin
+    gate_b = candidate.weighted_joint - paired_null.weighted_joint
+    return PairedContentDecision(
+        paired_null_arm,
+        gate_a,
+        gate_b,
+        min(gate_a, gate_b),
+        gate_a > 0.0 and gate_b > 0.0,
+    )
 
 
 def run_r0_four_arm_unit(
@@ -293,26 +358,42 @@ def run_r0_four_arm_unit(
         except Exception as error:
             errors[synced_arm].append(_error("quality_score", error))
 
+    decisions: dict[R0Arm, PairedContentDecision | None] = {
+        R0Arm.U: None,
+        R0Arm.G: _paired_decision(content[R0Arm.G], content[R0Arm.U], R0Arm.U),
+        R0Arm.C: _paired_decision(content[R0Arm.C], content[R0Arm.U], R0Arm.U),
+        R0Arm.CG: _paired_decision(content[R0Arm.CG], content[R0Arm.G], R0Arm.G),
+    }
     c_score = content[R0Arm.C]
     cg_score = content[R0Arm.CG]
+    c_decision = decisions[R0Arm.C]
+    cg_decision = decisions[R0Arm.CG]
     cg_minus_c = None
     cg_c_flip = None
-    if c_score is not None and cg_score is not None:
+    if (
+        c_score is not None
+        and cg_score is not None
+        and c_decision is not None
+        and cg_decision is not None
+    ):
         cg_minus_c = (
             ("lf", cg_score.lf - c_score.lf),
             ("hf", cg_score.hf - c_score.hf),
             ("weighted_joint", cg_score.weighted_joint - c_score.weighted_joint),
-            ("margin", cg_score.margin - c_score.margin),
+            ("gate_a_margin", cg_decision.gate_a_margin - c_decision.gate_a_margin),
+            ("gate_b_margin", cg_decision.gate_b_margin - c_decision.gate_b_margin),
+            ("margin", cg_decision.margin - c_decision.margin),
         )
-        cg_c_flip = cg_score.positive != c_score.positive
-    g_score = content[R0Arm.G]
-    g_false_positive = None if g_score is None else g_score.positive
+        cg_c_flip = cg_decision.positive != c_decision.positive
+    g_decision = decisions[R0Arm.G]
+    g_false_positive = None if g_decision is None else g_decision.positive
 
     arm_records = tuple(
         R0ArmRecord(
             arm,
             images[arm],
             content[arm],
+            decisions[arm],
             geometry[arm],
             quality[arm],
             tuple(errors[arm]),
@@ -334,6 +415,62 @@ def run_r0_four_arm_unit(
     )
 
 
+def r0_pre_arm_failure_record(
+    *,
+    unit_id: str,
+    residual_strength_multiplier: float,
+    failure_stage: str,
+    error: BaseException,
+) -> R0UnitRecord:
+    """Retain one real setup/producer failure in every fixed arm denominator."""
+
+    if not isinstance(unit_id, str) or not unit_id:
+        raise ValueError("R0 pre-arm failure unit_id must be nonempty")
+    if failure_stage not in {
+        "content_runtime_setup",
+        "syncseal_runtime_setup",
+        "quality_runtime_setup",
+        "content_pair_producer",
+    }:
+        raise ValueError("R0 pre-arm failure stage differs from the fixed runner stages")
+    if not isinstance(error, BaseException):
+        raise TypeError("R0 pre-arm failure requires the real exception")
+    multiplier = float(residual_strength_multiplier)
+    if multiplier not in R0NumericGates().residual_strength_multipliers:
+        raise ValueError("R0 pre-arm failure multiplier must be on the frozen grid")
+    failure = _error(failure_stage, error)
+    arms = tuple(R0ArmRecord(arm, None, None, None, None, None, (failure,)) for arm in R0Arm)
+    return R0UnitRecord(
+        unit_id,
+        SYNCSEAL_OFFICIAL_BASE_ALPHA,
+        multiplier,
+        arms,
+        None,
+        None,
+        None,
+        2,
+        2,
+        4,
+        4,
+    )
+
+
+def r0_producer_failure_record(
+    *,
+    unit_id: str,
+    residual_strength_multiplier: float,
+    error: BaseException,
+) -> R0UnitRecord:
+    """Retain one atomic U/C producer failure in every fixed arm denominator."""
+
+    return r0_pre_arm_failure_record(
+        unit_id=unit_id,
+        residual_strength_multiplier=residual_strength_multiplier,
+        failure_stage="content_pair_producer",
+        error=error,
+    )
+
+
 def r0_record_payload(record: R0UnitRecord) -> dict[str, object]:
     """Project one complete in-memory record to a strict JSON-safe payload."""
 
@@ -342,6 +479,7 @@ def r0_record_payload(record: R0UnitRecord) -> dict[str, object]:
     arms: list[dict[str, object]] = []
     for item in record.arms:
         content = item.content
+        decision = item.paired_content_decision
         geometry = item.geometry
         quality = item.quality_to_unsynchronized_pair
         arms.append(
@@ -354,8 +492,19 @@ def r0_record_payload(record: R0UnitRecord) -> dict[str, object]:
                     "lf": content.lf,
                     "hf": content.hf,
                     "weighted_joint": content.weighted_joint,
-                    "margin": content.margin,
-                    "positive": content.positive,
+                    "wrong_key_lf": content.wrong_key_lf,
+                    "wrong_key_hf": content.wrong_key_hf,
+                    "wrong_key_weighted_joint": content.wrong_key_weighted_joint,
+                    "gate_a_margin": content.gate_a_margin,
+                },
+                "paired_content_decision": None
+                if decision is None
+                else {
+                    "paired_null_arm": decision.paired_null_arm.value,
+                    "gate_a_margin": decision.gate_a_margin,
+                    "gate_b_margin": decision.gate_b_margin,
+                    "margin": decision.margin,
+                    "positive": decision.positive,
                 },
                 "geometry": None
                 if geometry is None
@@ -564,11 +713,12 @@ def _evaluate_r0_records(
     g_values: list[bool | None] = []
     for record in fixed_records:
         arms = _arm_map(record)
-        c_content = arms[R0Arm.C].content
-        cg_content = arms[R0Arm.CG].content
+        c_content = arms[R0Arm.C].paired_content_decision
+        cg_content = arms[R0Arm.CG].paired_content_decision
         expected_flip = (
             c_content.positive != cg_content.positive
-            if isinstance(c_content, ContentScore) and isinstance(cg_content, ContentScore)
+            if isinstance(c_content, PairedContentDecision)
+            and isinstance(cg_content, PairedContentDecision)
             else None
         )
         flip_values.append(
@@ -577,9 +727,9 @@ def _evaluate_r0_records(
             and record.cg_c_content_flip == expected_flip
             else None
         )
-        g_content = arms[R0Arm.G].content
+        g_content = arms[R0Arm.G].paired_content_decision
         expected_g_false_positive = (
-            g_content.positive if isinstance(g_content, ContentScore) else None
+            g_content.positive if isinstance(g_content, PairedContentDecision) else None
         )
         g_values.append(
             record.g_content_false_positive
@@ -865,6 +1015,7 @@ __all__ = [
     "ContentScore",
     "DEVELOPMENT_SELECTION_RULE",
     "ImageQuality",
+    "PairedContentDecision",
     "R0Arm",
     "R0ArmRecord",
     "R0AggregateEvaluation",
@@ -876,6 +1027,8 @@ __all__ = [
     "R0UnitRecord",
     "evaluate_r0_test",
     "r0_record_payload",
+    "r0_producer_failure_record",
+    "r0_pre_arm_failure_record",
     "run_r0_four_arm_unit",
     "select_r0_development_multiplier",
 ]
