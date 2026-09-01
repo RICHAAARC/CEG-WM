@@ -20,7 +20,6 @@ from cegwm.geometry_v7.contracts import (
 from cegwm.geometry_v7.r1a import (
     R1A_ALL_CONDITIONS,
     R1A_BLOCKING_METHOD_CANARY_FAILED,
-    evaluate_r1a_observation,
     evaluate_r1a,
 )
 from cegwm.protocol.content_chain import load_content_chain_contract
@@ -219,7 +218,9 @@ def test_finite_legal_gate_failure_remains_method_failure_not_operational(
 
 
 @pytest.mark.integration
-def test_r1a_payload_retains_finite_unsupported_syncseal_points() -> None:
+def test_finite_unsupported_points_remain_method_failure_with_full_payload(
+    tmp_path: Path,
+) -> None:
     raw = (
         (-1.0, -1.0),
         (127.0 / 128.0, 127.0 / 128.0),
@@ -237,18 +238,32 @@ def test_r1a_payload_retains_finite_unsupported_syncseal_points() -> None:
         converted,
         raw_syncseal_corners=raw,
     )
-    record = evaluate_r1a_observation(
-        unit_id="payload-unit",
-        spec=R1A_ALL_CONDITIONS[0],
-        attacked_image=Image.new("RGB", (512, 512)),
-        geometry=geometry,
-        errors=("geometry_detect:reported_error",),
+    rendered = _rendered_fixture()
+    records = runner._records_after_detection(rendered, lambda _image: geometry)
+    evaluation = evaluate_r1a(
+        condition_records=records,
+        ordered_roster=tuple(item.unit_id for item in _input_fixture()),
     )
-    payload = runner._geometry_payload(record)
-    assert payload is not None
-    assert payload["raw_syncseal_corners"] == raw
-    assert payload["observed_corners_in_canonical_normalized"] == converted
-    assert payload["homography_observed_to_canonical"] is None
+    payload = runner._result_payload(
+        exact="1" * 40,
+        artifact_root=tmp_path,
+        inputs=_input_fixture(),
+        rendered=rendered,
+        records=records,
+        evaluation=evaluation,
+        setup_error=None,
+        checkpoint=None,
+    )
+    assert payload["status"] == R1A_BLOCKING_METHOD_CANARY_FAILED
+    assert payload["blocking_method_canary_passed"] is False
+    assert len(payload["raw_records"]) == len(payload["failures"]) == 104
+    assert len(payload["condition_aggregates"]) == 13
+    assert all(item["denominator"] == 8 for item in payload["condition_aggregates"])
+    assert all(item["errors"] == ("geometry_invalid",) for item in payload["raw_records"])
+    retained = payload["raw_records"][0]["geometry"]
+    assert retained["raw_syncseal_corners"] == raw
+    assert retained["observed_corners_in_canonical_normalized"] == converted
+    assert retained["homography_observed_to_canonical"] is None
 
 
 @pytest.mark.integration

@@ -13,6 +13,7 @@ from PIL import Image
 from cegwm.geometry_v7.contracts import (
     CANONICAL_CORNERS_NORMALIZED,
     GeometryEstimate,
+    GeometryStatus,
     Matrix3x3,
 )
 from cegwm.runtime.observation import require_ordinary_rgb_image
@@ -568,7 +569,11 @@ def run_r1a_unit(
             geometry=None,
             errors=(f"geometry_detect:{type(error).__name__}",),
         )
-    errors = () if geometry.error is None else ("geometry_detect:reported_error",)
+    errors = (
+        ("geometry_detect:reported_error",)
+        if geometry.status is GeometryStatus.ERROR
+        else ()
+    )
     return evaluate_r1a_observation(
         unit_id=unit_id,
         spec=spec,

@@ -8,6 +8,7 @@ import pytest
 
 from cegwm.geometry_v7.contracts import (
     CANONICAL_CORNERS_NORMALIZED,
+    GeometryEstimate,
     estimate_geometry,
 )
 from cegwm.geometry_v7.r1a import (
@@ -30,6 +31,7 @@ from cegwm.geometry_v7.r1a import (
     evaluate_r1a_observation,
     r1a_truth_preflight,
     render_r1a_attack,
+    run_r1a_unit,
     truth_correspondences,
 )
 
@@ -196,6 +198,35 @@ def test_detector_callable_receives_only_attacked_rgb() -> None:
 
     assert detect_attacked_rgb(detector, attacked).legal
     assert seen == [attacked]
+
+
+@pytest.mark.integration
+def test_run_unit_distinguishes_unsupported_from_detector_error() -> None:
+    source = Image.new("RGB", (512, 512), "gray")
+    unsupported = estimate_geometry(
+        0.0,
+        (
+            (-1.0, -1.0),
+            (1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, 1.0),
+        ),
+    )
+    unsupported_record = run_r1a_unit(
+        unit_id="unsupported-unit",
+        source_cg_rgb=source,
+        spec=R1A_SANITY_CONDITIONS[0],
+        detector=lambda _image: unsupported,
+    )
+    assert unsupported_record.geometry is unsupported
+    assert unsupported_record.errors == ("geometry_invalid",)
+    error_record = run_r1a_unit(
+        unit_id="error-unit",
+        source_cg_rgb=source,
+        spec=R1A_SANITY_CONDITIONS[0],
+        detector=lambda _image: GeometryEstimate.error_record("reported"),
+    )
+    assert error_record.errors == ("geometry_detect:reported_error",)
 
 
 @pytest.mark.integration

@@ -19,6 +19,7 @@ from typing import Any, Mapping, Sequence
 from PIL import Image
 import torch
 
+from cegwm.geometry_v7.contracts import GeometryStatus
 from cegwm.geometry_v7.r1a import (
     R1A_ALL_CONDITIONS,
     R1A_ATTACK_SPEC_REQUEST_CHANGES,
@@ -255,9 +256,9 @@ def _records_after_detection(
             try:
                 geometry = detect_attacked_rgb(detector, item.image)
                 errors = (
-                    ()
-                    if geometry.error is None
-                    else ("geometry_detect:reported_error",)
+                    ("geometry_detect:reported_error",)
+                    if geometry.status is GeometryStatus.ERROR
+                    else ()
                 )
                 record = evaluate_r1a_observation(
                     unit_id=item.unit_id,
