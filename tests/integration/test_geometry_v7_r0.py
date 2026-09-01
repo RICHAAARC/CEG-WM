@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 from PIL import Image
 import pytest
@@ -21,6 +22,18 @@ from cegwm.geometry_v7.r0 import (
     run_r0_four_arm_unit,
     select_r0_development_multiplier,
 )
+from cegwm.protocol.content_chain import load_content_chain_contract
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _fixed_rosters() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    contract = load_content_chain_contract(_REPO_ROOT)
+    return (
+        tuple(unit.unit_id for unit in contract.reference_roster[:4]),
+        tuple(unit.unit_id for unit in contract.evaluation_roster),
+    )
 
 
 @pytest.mark.integration
@@ -166,7 +179,7 @@ def _aggregate_record(
 
 @pytest.mark.integration
 def test_development_uses_separate_complete_family_means_and_selects_first_pass() -> None:
-    roster = tuple(f"reference-{index}" for index in range(4))
+    roster, _ = _fixed_rosters()
     qualities = (
         ImageQuality(39.0, 0.97, 0.06),
         ImageQuality(41.0, 0.99, 0.04),
@@ -178,8 +191,8 @@ def test_development_uses_separate_complete_family_means_and_selects_first_pass(
         for unit_id, quality in zip(roster, qualities, strict=True)
     )
     selection = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
         attempts=(R0MultiplierRecords(0.25, records),),
-        ordered_reference_roster_first_4=roster,
     )
     assert selection.complete is True
     assert selection.selected_residual_strength_multiplier == 0.25
@@ -192,7 +205,7 @@ def test_development_uses_separate_complete_family_means_and_selects_first_pass(
 
 @pytest.mark.integration
 def test_missing_pair_and_invalid_identity_remain_in_denominators_and_fail_closed() -> None:
-    roster = tuple(f"reference-{index}" for index in range(4))
+    roster, _ = _fixed_rosters()
     records = list(_aggregate_record(unit_id, 0.25) for unit_id in roster)
     bad_arms = list(records[0].arms)
     near_but_outside_tolerance = (
@@ -206,8 +219,8 @@ def test_missing_pair_and_invalid_identity_remain_in_denominators_and_fail_close
     )
     records[0] = replace(records[0], arms=tuple(bad_arms), failed_arm_count=1)
     aggregate = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
         attempts=(R0MultiplierRecords(0.25, tuple(records)),),
-        ordered_reference_roster_first_4=roster,
     )
     assert aggregate.complete is False
     aggregate = aggregate.attempts[0]
@@ -222,7 +235,7 @@ def test_missing_pair_and_invalid_identity_remain_in_denominators_and_fail_close
 
 @pytest.mark.integration
 def test_all_grid_failures_stop_boundedly_and_test_runs_selected_multiplier_once() -> None:
-    reference = tuple(f"reference-{index}" for index in range(4))
+    reference, evaluation = _fixed_rosters()
     attempts = tuple(
         R0MultiplierRecords(
             multiplier,
@@ -234,20 +247,21 @@ def test_all_grid_failures_stop_boundedly_and_test_runs_selected_multiplier_once
         for multiplier in R0NumericGates().residual_strength_multipliers
     )
     selection = select_r0_development_multiplier(
-        attempts=attempts, ordered_reference_roster_first_4=reference
+        repo_root=_REPO_ROOT,
+        attempts=attempts,
     )
     assert selection.complete is True
     assert selection.selected_residual_strength_multiplier is None
     assert selection.stop_reason is not None and "preregistered strength grid" in selection.stop_reason
-    evaluation = tuple(f"evaluation-{index}" for index in range(8))
     with pytest.raises(ValueError, match="passing development selection"):
         evaluate_r0_test(
+            repo_root=_REPO_ROOT,
             records=tuple(_aggregate_record(unit_id, 0.50) for unit_id in evaluation),
-            ordered_evaluation_roster_8=evaluation,
             development_selection=selection,
         )
 
     passing_selection = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
         attempts=(
             attempts[0],
             R0MultiplierRecords(
@@ -255,15 +269,100 @@ def test_all_grid_failures_stop_boundedly_and_test_runs_selected_multiplier_once
                 tuple(_aggregate_record(unit_id, 0.50) for unit_id in reference),
             ),
         ),
-        ordered_reference_roster_first_4=reference,
     )
     assert passing_selection.selected_residual_strength_multiplier == 0.50
     result = evaluate_r0_test(
+        repo_root=_REPO_ROOT,
         records=tuple(_aggregate_record(unit_id, 0.50) for unit_id in evaluation),
-        ordered_evaluation_roster_8=evaluation,
         development_selection=passing_selection,
     )
     assert result.stage is R0Stage.EVALUATION
     assert result.carrier_compatibility_passed is True
     assert result.cg_c_decision_flip_denominator == 8
     assert result.g_content_false_positive_denominator == 8
+
+
+@pytest.mark.integration
+def test_contract_rosters_reject_order_or_identity_drift() -> None:
+    reference, evaluation = _fixed_rosters()
+    development_records = tuple(_aggregate_record(unit_id, 0.25) for unit_id in reference)
+    with pytest.raises(ValueError, match="complete fixed roster in exact order"):
+        select_r0_development_multiplier(
+            repo_root=_REPO_ROOT,
+            attempts=(R0MultiplierRecords(0.25, development_records[::-1]),),
+        )
+    with pytest.raises(ValueError, match="complete fixed roster in exact order"):
+        select_r0_development_multiplier(
+            repo_root=_REPO_ROOT,
+            attempts=(
+                R0MultiplierRecords(
+                    0.25,
+                    tuple(_aggregate_record(f"arbitrary-{index}", 0.25) for index in range(4)),
+                ),
+            ),
+        )
+
+    selection = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
+        attempts=(R0MultiplierRecords(0.25, development_records),),
+    )
+    evaluation_records = tuple(_aggregate_record(unit_id, 0.25) for unit_id in evaluation)
+    with pytest.raises(ValueError, match="complete fixed roster in exact order"):
+        evaluate_r0_test(
+            repo_root=_REPO_ROOT,
+            records=(evaluation_records[1], evaluation_records[0], *evaluation_records[2:]),
+            development_selection=selection,
+        )
+
+
+@pytest.mark.integration
+def test_test_boundary_revalidates_selection_history_fail_closed() -> None:
+    reference, evaluation = _fixed_rosters()
+    first_fails = R0MultiplierRecords(
+        0.25,
+        tuple(
+            _aggregate_record(unit_id, 0.25, g_false_positive=True)
+            for unit_id in reference
+        ),
+    )
+    second_passes = R0MultiplierRecords(
+        0.50,
+        tuple(_aggregate_record(unit_id, 0.50) for unit_id in reference),
+    )
+    selection = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
+        attempts=(first_fails, second_passes),
+    )
+    evaluation_records = tuple(_aggregate_record(unit_id, 0.50) for unit_id in evaluation)
+
+    forged_selections = (
+        replace(selection, attempts=()),
+        replace(selection, selected_residual_strength_multiplier=0.75),
+        replace(selection, attempts=(selection.attempts[1],)),
+        replace(
+            selection,
+            attempts=(
+                selection.attempts[0],
+                replace(selection.attempts[1], roster=reference[::-1]),
+            ),
+        ),
+    )
+    for forged in forged_selections:
+        with pytest.raises(ValueError):
+            evaluate_r0_test(
+                repo_root=_REPO_ROOT,
+                records=evaluation_records,
+                development_selection=forged,
+            )
+
+    incomplete = select_r0_development_multiplier(
+        repo_root=_REPO_ROOT,
+        attempts=(first_fails,),
+    )
+    assert incomplete.complete is False
+    with pytest.raises(ValueError, match="completed passing development selection"):
+        evaluate_r0_test(
+            repo_root=_REPO_ROOT,
+            records=evaluation_records,
+            development_selection=incomplete,
+        )

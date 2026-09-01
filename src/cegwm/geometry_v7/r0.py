@@ -5,12 +5,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from PIL import Image
 
 from cegwm.geometry_v7.contracts import CANONICAL_CORNERS_NORMALIZED, GeometryEstimate
 from cegwm.geometry_v7.syncseal import SYNCSEAL_OFFICIAL_BASE_ALPHA
+from cegwm.protocol.content_chain import load_content_chain_contract
 from cegwm.runtime.observation import require_ordinary_rgb_image
 
 
@@ -397,6 +399,15 @@ def _arm_map(record: R0UnitRecord) -> dict[R0Arm, R0ArmRecord]:
     return {item.arm: item for item in record.arms}
 
 
+def _content_chain_r0_rosters(repo_root: str | Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    contract = load_content_chain_contract(repo_root)
+    development = tuple(unit.unit_id for unit in contract.reference_roster[:4])
+    evaluation = tuple(unit.unit_id for unit in contract.evaluation_roster)
+    if len(development) != R0_DEVELOPMENT_ROSTER_SIZE or len(evaluation) != R0_EVALUATION_ROSTER_SIZE:
+        raise ValueError("content-chain contract does not provide the fixed R0 rosters")
+    return development, evaluation
+
+
 def _quality_family(
     records: Sequence[R0UnitRecord],
     *,
@@ -627,15 +638,172 @@ def _evaluate_r0_records(
     )
 
 
+def _quality_family_contract_valid(
+    aggregate: R0QualityFamilyAggregate,
+    *,
+    pair_family: str,
+    gates: R0NumericGates,
+) -> bool:
+    if (
+        not isinstance(aggregate, R0QualityFamilyAggregate)
+        or aggregate.pair_family != pair_family
+        or aggregate.denominator != R0_DEVELOPMENT_ROSTER_SIZE
+        or not 0 <= aggregate.valid_count <= aggregate.denominator
+    ):
+        return False
+    means = (aggregate.mean_psnr, aggregate.mean_ssim, aggregate.mean_lpips)
+    extrema = (
+        aggregate.min_psnr,
+        aggregate.max_psnr,
+        aggregate.min_ssim,
+        aggregate.max_ssim,
+        aggregate.min_lpips,
+        aggregate.max_lpips,
+    )
+    complete = aggregate.valid_count == aggregate.denominator
+    if complete:
+        if any(value is None or not math.isfinite(float(value)) for value in (*means, *extrema)):
+            return False
+    elif any(value is not None for value in means):
+        return False
+    expected_pass = bool(
+        complete
+        and aggregate.mean_psnr is not None
+        and aggregate.mean_ssim is not None
+        and aggregate.mean_lpips is not None
+        and aggregate.mean_psnr >= gates.min_mean_psnr
+        and aggregate.mean_ssim >= gates.min_mean_ssim
+        and aggregate.mean_lpips <= gates.max_mean_lpips
+    )
+    return aggregate.passed is expected_pass
+
+
+def _rate_contract_valid(
+    *, count: int, valid_count: int, denominator: int, rate: float | None
+) -> bool:
+    if (
+        isinstance(count, bool)
+        or isinstance(valid_count, bool)
+        or not isinstance(count, int)
+        or not isinstance(valid_count, int)
+        or denominator != R0_DEVELOPMENT_ROSTER_SIZE
+        or not 0 <= count <= valid_count <= denominator
+    ):
+        return False
+    if valid_count != denominator:
+        return rate is None
+    return (
+        isinstance(rate, (int, float))
+        and not isinstance(rate, bool)
+        and math.isfinite(float(rate))
+        and float(rate) == count / denominator
+    )
+
+
+def _development_aggregate_contract_valid(
+    aggregate: R0AggregateEvaluation,
+    *,
+    roster: tuple[str, ...],
+    multiplier: float,
+    gates: R0NumericGates,
+) -> bool:
+    if (
+        not isinstance(aggregate, R0AggregateEvaluation)
+        or aggregate.stage is not R0Stage.DEVELOPMENT
+        or aggregate.roster != roster
+        or aggregate.base_syncseal_alpha != gates.base_syncseal_alpha
+        or aggregate.residual_strength_multiplier != multiplier
+        or not _quality_family_contract_valid(
+            aggregate.g_u_quality, pair_family="G_to_U", gates=gates
+        )
+        or not _quality_family_contract_valid(
+            aggregate.cg_c_quality, pair_family="CG_to_C", gates=gates
+        )
+        or not _rate_contract_valid(
+            count=aggregate.cg_c_decision_flip_count,
+            valid_count=aggregate.cg_c_decision_valid_count,
+            denominator=aggregate.cg_c_decision_flip_denominator,
+            rate=aggregate.cg_c_decision_flip_rate,
+        )
+        or not _rate_contract_valid(
+            count=aggregate.g_content_false_positive_count,
+            valid_count=aggregate.g_content_decision_valid_count,
+            denominator=aggregate.g_content_false_positive_denominator,
+            rate=aggregate.g_content_false_positive_rate,
+        )
+        or aggregate.identity_coordinate_valid_denominator
+        != 2 * R0_DEVELOPMENT_ROSTER_SIZE
+        or not 0
+        <= aggregate.identity_coordinate_valid_count
+        <= aggregate.identity_coordinate_valid_denominator
+        or aggregate.identity_coordinate_valid_rate
+        != aggregate.identity_coordinate_valid_count
+        / aggregate.identity_coordinate_valid_denominator
+    ):
+        return False
+    expected_pass = bool(
+        aggregate.g_u_quality.passed
+        and aggregate.cg_c_quality.passed
+        and aggregate.cg_c_decision_flip_rate is not None
+        and aggregate.cg_c_decision_flip_rate <= gates.max_cg_c_decision_flip_rate
+        and aggregate.g_content_false_positive_rate is not None
+        and aggregate.g_content_false_positive_rate
+        <= gates.max_g_content_false_positive_rate
+        and aggregate.identity_coordinate_valid_rate
+        >= gates.min_identity_coordinate_valid_rate
+    )
+    return aggregate.carrier_compatibility_passed is expected_pass
+
+
+def _validate_development_selection(
+    selection: R0DevelopmentSelection,
+    *,
+    roster: tuple[str, ...],
+    gates: R0NumericGates,
+) -> float | None:
+    if not isinstance(selection, R0DevelopmentSelection) or not selection.attempts:
+        raise ValueError("R0 development selection requires nonempty attempts")
+    attempts = tuple(selection.attempts)
+    if len(attempts) > len(gates.residual_strength_multipliers):
+        raise ValueError("R0 development selection exceeds the frozen multiplier grid")
+    expected_prefix = gates.residual_strength_multipliers[: len(attempts)]
+    for aggregate, multiplier in zip(attempts, expected_prefix, strict=True):
+        if not _development_aggregate_contract_valid(
+            aggregate, roster=roster, multiplier=multiplier, gates=gates
+        ):
+            raise ValueError("R0 development aggregate identity or gate contract differs")
+    pass_indexes = tuple(
+        index for index, aggregate in enumerate(attempts) if aggregate.carrier_compatibility_passed
+    )
+    if pass_indexes:
+        if (
+            pass_indexes != (len(attempts) - 1,)
+            or not selection.complete
+            or selection.selected_residual_strength_multiplier != expected_prefix[-1]
+            or selection.stop_reason is not None
+        ):
+            raise ValueError("R0 passing selection must stop at the first passing prefix entry")
+        return expected_prefix[-1]
+    if selection.selected_residual_strength_multiplier is not None:
+        raise ValueError("R0 nonpassing selection cannot bind a multiplier")
+    if len(attempts) == len(gates.residual_strength_multipliers):
+        if not selection.complete or selection.stop_reason != R0_NO_WINDOW_STOP:
+            raise ValueError("R0 full-grid failure must bind the exact bounded stop conclusion")
+    elif selection.complete or selection.stop_reason is not None:
+        raise ValueError("R0 incomplete prefix cannot be complete or bind a stop conclusion")
+    return None
+
+
 def select_r0_development_multiplier(
     *,
+    repo_root: str | Path,
     attempts: Sequence[R0MultiplierRecords],
-    ordered_reference_roster_first_4: Sequence[str],
     gates: R0NumericGates | None = None,
 ) -> R0DevelopmentSelection:
     """Select the first passing prefix entry or freeze the bounded stop conclusion."""
 
     frozen = R0NumericGates() if gates is None else gates
+    development_roster, _ = _content_chain_r0_rosters(repo_root)
     supplied = tuple(attempts)
     if not supplied or len(supplied) > len(frozen.residual_strength_multipliers):
         raise ValueError("development attempts must be a nonempty frozen-grid prefix")
@@ -651,7 +819,7 @@ def select_r0_development_multiplier(
         aggregate = _evaluate_r0_records(
             stage=R0Stage.DEVELOPMENT,
             records=attempt.records,
-            ordered_roster=ordered_reference_roster_first_4,
+            ordered_roster=development_roster,
             residual_strength_multiplier=expected_multiplier,
             gates=frozen,
         )
@@ -663,31 +831,33 @@ def select_r0_development_multiplier(
             break
     complete = selected is not None or len(supplied) == len(frozen.residual_strength_multipliers)
     stop_reason = R0_NO_WINDOW_STOP if complete and selected is None else None
-    return R0DevelopmentSelection(tuple(aggregates), selected, complete, stop_reason)
+    result = R0DevelopmentSelection(tuple(aggregates), selected, complete, stop_reason)
+    _validate_development_selection(result, roster=development_roster, gates=frozen)
+    return result
 
 
 def evaluate_r0_test(
     *,
+    repo_root: str | Path,
     records: Sequence[R0UnitRecord],
-    ordered_evaluation_roster_8: Sequence[str],
     development_selection: R0DevelopmentSelection,
     gates: R0NumericGates | None = None,
 ) -> R0AggregateEvaluation:
     """Run the same gates once on the fixed eight-unit test roster."""
 
-    if (
-        not isinstance(development_selection, R0DevelopmentSelection)
-        or not development_selection.complete
-        or development_selection.selected_residual_strength_multiplier is None
-        or development_selection.stop_reason is not None
-    ):
+    frozen = R0NumericGates() if gates is None else gates
+    development_roster, evaluation_roster = _content_chain_r0_rosters(repo_root)
+    selected = _validate_development_selection(
+        development_selection, roster=development_roster, gates=frozen
+    )
+    if selected is None:
         raise ValueError("R0 test requires a completed passing development selection")
     return _evaluate_r0_records(
         stage=R0Stage.EVALUATION,
         records=records,
-        ordered_roster=ordered_evaluation_roster_8,
-        residual_strength_multiplier=development_selection.selected_residual_strength_multiplier,
-        gates=gates,
+        ordered_roster=evaluation_roster,
+        residual_strength_multiplier=selected,
+        gates=frozen,
     )
 
 
