@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from numbers import Real
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -620,27 +621,59 @@ def _identity_coordinate_valid(
         not isinstance(estimate, GeometryEstimate)
         or not estimate.legal
         or estimate.error is not None
-        or estimate.homography_current_to_canonical is None
+        or estimate.corners_current_normalized is None
+        or isinstance(max_error_normalized, bool)
+        or not isinstance(max_error_normalized, Real)
+        or not math.isfinite(float(max_error_normalized))
+        or float(max_error_normalized) < 0.0
     ):
         return False
     try:
-        matrix = tuple(tuple(float(value) for value in row) for row in estimate.homography_current_to_canonical)
-        if len(matrix) != 3 or any(len(row) != 3 for row in matrix):
+        raw_corners = tuple(tuple(row) for row in estimate.corners_current_normalized)
+        if len(raw_corners) != 4 or any(len(row) != 2 for row in raw_corners):
             return False
-        if any(not math.isfinite(value) for row in matrix for value in row):
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, Real)
+            or not math.isfinite(float(value))
+            for row in raw_corners
+            for value in row
+        ):
             return False
-        probes = (*CANONICAL_CORNERS_NORMALIZED, (0.0, 0.0))
-        errors = []
-        for x, y in probes:
-            denominator = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2]
-            if not math.isfinite(denominator) or denominator == 0.0:
-                return False
-            mapped_x = (matrix[0][0] * x + matrix[0][1] * y + matrix[0][2]) / denominator
-            mapped_y = (matrix[1][0] * x + matrix[1][1] * y + matrix[1][2]) / denominator
-            if not math.isfinite(mapped_x) or not math.isfinite(mapped_y):
-                return False
-            errors.append(max(abs(mapped_x - x), abs(mapped_y - y)))
-        return max(errors) <= max_error_normalized
+        corners = tuple(
+            (float(row[0]), float(row[1])) for row in raw_corners
+        )
+        crosses = []
+        for index in range(4):
+            current = corners[index]
+            following = corners[(index + 1) % 4]
+            after_following = corners[(index + 2) % 4]
+            first_edge = (
+                following[0] - current[0],
+                following[1] - current[1],
+            )
+            second_edge = (
+                after_following[0] - following[0],
+                after_following[1] - following[1],
+            )
+            crosses.append(
+                first_edge[0] * second_edge[1]
+                - first_edge[1] * second_edge[0]
+            )
+        if not (all(value > 0.0 for value in crosses) or all(
+            value < 0.0 for value in crosses
+        )):
+            return False
+        maximum_error = max(
+            abs(observed - canonical)
+            for observed_corner, canonical_corner in zip(
+                corners, CANONICAL_CORNERS_NORMALIZED, strict=True
+            )
+            for observed, canonical in zip(
+                observed_corner, canonical_corner, strict=True
+            )
+        )
+        return maximum_error <= float(max_error_normalized)
     except (TypeError, ValueError, OverflowError):
         return False
 

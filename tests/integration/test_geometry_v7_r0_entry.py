@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -158,7 +159,7 @@ def test_runner_source_binds_real_routes_and_exact_eval_sync_semantics() -> None
 
 
 @pytest.mark.integration
-def test_phase_a_notebook_is_unexecuted_real_runner_wiring_and_fail_closed() -> None:
+def test_bound_notebook_is_unexecuted_real_runner_wiring_and_fail_closed() -> None:
     path = _REPO_ROOT / "notebooks" / "geometry_v7_r0.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     code = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
@@ -170,7 +171,9 @@ def test_phase_a_notebook_is_unexecuted_real_runner_wiring_and_fail_closed() -> 
     for index, cell in enumerate(code):
         ast.parse("".join(cell["source"]), filename=f"{path}:code-cell-{index}")
     source = "\n".join("".join(cell.get("source", ())) for cell in notebook["cells"])
-    assert "APPROVED_EXACT = 'PENDING_AFTER_GEOMETRY_V7_R0_RUNNER_PUSH'" in source
+    assert re.search(
+        r"^APPROVED_EXACT = '[0-9a-f]{40}'$", source, flags=re.MULTILINE
+    )
     assert "re.fullmatch(r'[0-9a-f]{40}', APPROVED_EXACT)" in source
     assert "'checkout', '--detach'" in source
     assert source.count("'experiments.run_geometry_v7_r0'") == 1

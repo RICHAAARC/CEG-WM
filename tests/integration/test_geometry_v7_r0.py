@@ -18,6 +18,7 @@ from cegwm.geometry_v7.r0 import (
     R0NumericGates,
     R0Stage,
     R0UnitRecord,
+    _identity_coordinate_valid,
     evaluate_r0_test,
     r0_record_payload,
     r0_producer_failure_record,
@@ -164,6 +165,90 @@ def test_numeric_gates_are_exactly_frozen_and_reject_drift() -> None:
         R0NumericGates(min_mean_psnr=39.0)
 
 
+@pytest.mark.integration
+def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -> None:
+    tolerance = R0NumericGates().identity_homography_max_error_normalized
+    identity = estimate_geometry(0.0, CANONICAL_CORNERS_NORMALIZED)
+    one_official_grid_step = replace(
+        identity,
+        corners_current_normalized=(
+            (-1.0, -1.0),
+            (257.0 / 255.0, -1.0),
+            (257.0 / 255.0, 257.0 / 255.0),
+            (-1.0, 257.0 / 255.0),
+        ),
+    )
+    assert _identity_coordinate_valid(one_official_grid_step, tolerance)
+    assert not _identity_coordinate_valid(
+        replace(
+            one_official_grid_step,
+            corners_current_normalized=(
+                (-1.0, -1.0),
+                (257.0 / 255.0 + 1e-12, -1.0),
+                (257.0 / 255.0, 257.0 / 255.0),
+                (-1.0, 257.0 / 255.0),
+            ),
+        ),
+        tolerance,
+    )
+    assert _identity_coordinate_valid(
+        replace(
+            identity,
+            homography_current_to_canonical=(
+                (1.0, 0.0, 0.5),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+            ),
+        ),
+        tolerance,
+    )
+
+    invalid_estimates = (
+        replace(
+            identity,
+            corners_current_normalized=(
+                (-1.0, -1.0),
+                (float("nan"), -1.0),
+                (1.0, 1.0),
+                (-1.0, 1.0),
+            ),
+        ),
+        replace(
+            identity,
+            corners_current_normalized=(
+                (-1.0, -1.0),
+                (-1.0, 1.0),
+                (1.0, 1.0),
+                (1.0, -1.0),
+            ),
+        ),
+        replace(
+            identity,
+            corners_current_normalized=(
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (-0.5, 0.0),
+                (-1.0, 1.0),
+            ),
+        ),
+        replace(
+            identity,
+            corners_current_normalized=(
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (1.0, -1.0),
+                (-1.0, 1.0),
+            ),
+        ),
+        replace(identity, legal=False),
+        replace(identity, error="reported geometry error"),
+    )
+    assert all(
+        not _identity_coordinate_valid(estimate, tolerance)
+        for estimate in invalid_estimates
+    )
+
+
 def _aggregate_record(
     unit_id: str,
     multiplier: float,
@@ -276,13 +361,16 @@ def test_missing_pair_and_invalid_identity_remain_in_denominators_and_fail_close
     roster, _ = _fixed_rosters()
     records = list(_aggregate_record(unit_id, 0.25) for unit_id in roster)
     bad_arms = list(records[0].arms)
-    near_but_outside_tolerance = (
-        (1.0, 0.0, 0.01), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+    corners_just_outside_tolerance = (
+        (-1.0, -1.0),
+        (1.0 + 2.0 / 255.0 + 1e-12, -1.0),
+        (1.0, 1.0),
+        (-1.0, 1.0),
     )
     bad_arms[1] = replace(
         bad_arms[1], quality_to_unsynchronized_pair=None, geometry=replace(
             bad_arms[1].geometry,
-            homography_current_to_canonical=near_but_outside_tolerance,
+            corners_current_normalized=corners_just_outside_tolerance,
         )
     )
     records[0] = replace(records[0], arms=tuple(bad_arms), failed_arm_count=1)
