@@ -1,8 +1,9 @@
 """Geometry-V7 coordinate-only contracts.
 
-The homography convention is column-vector ``canonical = H @ observed`` in
-normalized 512-by-512 pixel-center coordinates.  Nothing in this module can
-create or alter a content-watermark decision.
+The fixed observed/output-canvas corners are ``q`` in TL/TR/BR/BL order.
+SyncSeal predicts their correspondences ``p_hat`` in original/canonical image
+coordinates, and ``p_hat ~ H_observed_to_canonical @ q``.  Nothing in this
+module can create or alter a content-watermark decision.
 """
 
 from __future__ import annotations
@@ -46,15 +47,6 @@ class D4Transform(str, Enum):
     MIRROR_LEFT_RIGHT_THEN_ROTATE_270_CCW = "mirror_left_right_then_rotate_270_ccw"
 
 
-class CoreAttack(str, Enum):
-    """Frozen attack families; numeric severities remain protocol inputs."""
-
-    ROTATE = "rotate_about_canvas_center"
-    CROP_RESIZE = "axis_aligned_crop_then_resize_512"
-    PERSPECTIVE = "four_corner_perspective_to_512"
-    ROTATE_CROP_PERSPECTIVE = "rotate_then_crop_resize_then_perspective"
-
-
 Matrix3x3 = tuple[tuple[float, float, float], ...]
 Corners4 = tuple[tuple[float, float], ...]
 
@@ -64,11 +56,23 @@ class GeometryEstimate:
     status: GeometryStatus
     uncalibrated_sync_logit: float | None
     raw_syncseal_corners: Corners4 | None
-    corners_current_normalized: Corners4 | None
-    homography_current_to_canonical: Matrix3x3 | None
+    observed_corners_in_canonical_normalized: Corners4 | None
+    homography_observed_to_canonical: Matrix3x3 | None
     legal: bool
     basic_observable: bool
     error: str | None = None
+
+    @property
+    def corners_current_normalized(self) -> Corners4 | None:
+        """Deprecated alias; values are canonical correspondences, not locations."""
+
+        return self.observed_corners_in_canonical_normalized
+
+    @property
+    def homography_current_to_canonical(self) -> Matrix3x3 | None:
+        """Deprecated alias for :attr:`homography_observed_to_canonical`."""
+
+        return self.homography_observed_to_canonical
 
     @classmethod
     def error_record(cls, error: BaseException | str) -> "GeometryEstimate":
@@ -128,15 +132,19 @@ def _strict_convex_in_declared_order(corners: torch.Tensor) -> bool:
     return bool(torch.all(crosses > 0.0) or torch.all(crosses < 0.0))
 
 
-def homography_current_to_canonical(
-    corners_current_normalized: Sequence[Real] | Sequence[Sequence[Real]],
+def homography_observed_to_canonical(
+    observed_corners_in_canonical_normalized: Sequence[Real]
+    | Sequence[Sequence[Real]],
 ) -> Matrix3x3:
-    """Solve the unique projective map from observed corners to canonical corners."""
+    """Solve ``q -> p_hat`` for the fixed observed/output-canvas square."""
 
-    source = _corners_tensor(corners_current_normalized)
-    if not _strict_convex_in_declared_order(source):
-        raise ValueError("TL/TR/BR/BL corners must form a strict convex quadrilateral")
-    target = torch.tensor(CANONICAL_CORNERS_NORMALIZED, dtype=torch.float64)
+    target = _corners_tensor(observed_corners_in_canonical_normalized)
+    if not _strict_convex_in_declared_order(target):
+        raise ValueError(
+            "predicted canonical TL/TR/BR/BL correspondences must form a "
+            "strict convex quadrilateral"
+        )
+    source = torch.tensor(CANONICAL_CORNERS_NORMALIZED, dtype=torch.float64)
     rows: list[list[float]] = []
     rhs: list[float] = []
     for (x, y), (u, v) in zip(source.tolist(), target.tolist(), strict=True):
@@ -156,9 +164,26 @@ def homography_current_to_canonical(
     return tuple(tuple(float(value) for value in row) for row in matrix.tolist())
 
 
+def homography_current_to_canonical(
+    observed_corners_in_canonical_normalized: Sequence[Real]
+    | Sequence[Sequence[Real]],
+) -> Matrix3x3:
+    """Deprecated name for :func:`homography_observed_to_canonical`.
+
+    The argument uses the corrected ``p_hat`` canonical-correspondence
+    semantics; this compatibility alias does not restore the former reversed
+    solve direction.
+    """
+
+    return homography_observed_to_canonical(
+        observed_corners_in_canonical_normalized
+    )
+
+
 def estimate_geometry(
     uncalibrated_sync_logit: Real,
-    corners_current_normalized: Sequence[Real] | Sequence[Sequence[Real]],
+    observed_corners_in_canonical_normalized: Sequence[Real]
+    | Sequence[Sequence[Real]],
     *,
     raw_syncseal_corners: Sequence[Real] | Sequence[Sequence[Real]] | None = None,
 ) -> GeometryEstimate:
@@ -170,13 +195,15 @@ def estimate_geometry(
     if not math.isfinite(logit):
         return GeometryEstimate.error_record("uncalibrated SyncSeal logit must be finite")
     try:
-        corners_tensor = _corners_tensor(corners_current_normalized)
+        corners_tensor = _corners_tensor(
+            observed_corners_in_canonical_normalized
+        )
         corners = tuple(tuple(float(value) for value in row) for row in corners_tensor.tolist())
         raw = None
         if raw_syncseal_corners is not None:
             raw_tensor = _corners_tensor(raw_syncseal_corners)
             raw = tuple(tuple(float(value) for value in row) for row in raw_tensor.tolist())
-        homography = homography_current_to_canonical(corners)
+        homography = homography_observed_to_canonical(corners)
     except ValueError as error:
         return GeometryEstimate(
             GeometryStatus.UNSUPPORTED, logit, None, None, None, False, False, str(error)
@@ -212,13 +239,15 @@ def d4_homography(transform: D4Transform) -> Matrix3x3:
     return _D4_MATRICES[transform]
 
 
-def compose_d4_current_to_canonical(
-    raw_current_to_canonical: Sequence[Sequence[Real]], transform: D4Transform
+def compose_d4_observed_to_canonical(
+    raw_observed_to_canonical: Sequence[Sequence[Real]], transform: D4Transform
 ) -> Matrix3x3:
     """Freeze D4 composition as ``H_candidate = D_canonical @ H_raw``."""
 
     try:
-        raw = torch.as_tensor(raw_current_to_canonical, dtype=torch.float64).reshape(3, 3)
+        raw = torch.as_tensor(
+            raw_observed_to_canonical, dtype=torch.float64
+        ).reshape(3, 3)
     except (TypeError, ValueError, RuntimeError) as error:
         raise ValueError("raw homography must contain exactly 9 real values") from error
     if not bool(torch.isfinite(raw).all()):
@@ -229,10 +258,17 @@ def compose_d4_current_to_canonical(
     return tuple(tuple(float(value) for value in row) for row in composed.tolist())
 
 
+def compose_d4_current_to_canonical(
+    raw_observed_to_canonical: Sequence[Sequence[Real]], transform: D4Transform
+) -> Matrix3x3:
+    """Deprecated alias for :func:`compose_d4_observed_to_canonical`."""
+
+    return compose_d4_observed_to_canonical(raw_observed_to_canonical, transform)
+
+
 __all__ = [
     "CANONICAL_CORNERS_NORMALIZED",
     "CORNER_ORDER",
-    "CoreAttack",
     "D4Transform",
     "GeometryEstimate",
     "GeometryStatus",
@@ -240,9 +276,11 @@ __all__ = [
     "PUBLIC_IMAGE_WIDTH",
     "SYNCSEAL_MODEL_SIZE",
     "compose_d4_current_to_canonical",
+    "compose_d4_observed_to_canonical",
     "d4_homography",
     "estimate_geometry",
     "homography_current_to_canonical",
+    "homography_observed_to_canonical",
     "normalized_to_pixel_center",
     "pixel_center_to_normalized",
     "syncseal_raw_to_public_normalized",

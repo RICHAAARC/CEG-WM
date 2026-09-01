@@ -180,7 +180,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
     identity = estimate_geometry(0.0, CANONICAL_CORNERS_NORMALIZED)
     one_official_grid_step = replace(
         identity,
-        corners_current_normalized=(
+        observed_corners_in_canonical_normalized=(
             (-1.0, -1.0),
             (257.0 / 255.0, -1.0),
             (257.0 / 255.0, 257.0 / 255.0),
@@ -191,7 +191,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
     assert not _identity_coordinate_valid(
         replace(
             one_official_grid_step,
-            corners_current_normalized=(
+            observed_corners_in_canonical_normalized=(
                 (-1.0, -1.0),
                 (257.0 / 255.0 + 1e-12, -1.0),
                 (257.0 / 255.0, 257.0 / 255.0),
@@ -203,7 +203,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
     assert _identity_coordinate_valid(
         replace(
             identity,
-            homography_current_to_canonical=(
+            homography_observed_to_canonical=(
                 (1.0, 0.0, 0.5),
                 (0.0, 1.0, 0.0),
                 (0.0, 0.0, 1.0),
@@ -215,7 +215,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
     invalid_estimates = (
         replace(
             identity,
-            corners_current_normalized=(
+            observed_corners_in_canonical_normalized=(
                 (-1.0, -1.0),
                 (float("nan"), -1.0),
                 (1.0, 1.0),
@@ -224,7 +224,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
         ),
         replace(
             identity,
-            corners_current_normalized=(
+            observed_corners_in_canonical_normalized=(
                 (-1.0, -1.0),
                 (-1.0, 1.0),
                 (1.0, 1.0),
@@ -233,7 +233,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
         ),
         replace(
             identity,
-            corners_current_normalized=(
+            observed_corners_in_canonical_normalized=(
                 (-1.0, -1.0),
                 (1.0, -1.0),
                 (-0.5, 0.0),
@@ -242,7 +242,7 @@ def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -
         ),
         replace(
             identity,
-            corners_current_normalized=(
+            observed_corners_in_canonical_normalized=(
                 (-1.0, -1.0),
                 (1.0, -1.0),
                 (1.0, -1.0),
@@ -379,7 +379,9 @@ def test_missing_pair_and_invalid_identity_remain_in_denominators_and_fail_close
     bad_arms[1] = replace(
         bad_arms[1], quality_to_unsynchronized_pair=None, geometry=replace(
             bad_arms[1].geometry,
-            corners_current_normalized=corners_just_outside_tolerance,
+            observed_corners_in_canonical_normalized=(
+                corners_just_outside_tolerance
+            ),
         )
     )
     records[0] = replace(records[0], arms=tuple(bad_arms), failed_arm_count=1)

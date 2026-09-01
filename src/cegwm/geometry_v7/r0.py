@@ -513,8 +513,12 @@ def r0_record_payload(record: R0UnitRecord) -> dict[str, object]:
                     "status": geometry.status.value,
                     "uncalibrated_sync_logit": geometry.uncalibrated_sync_logit,
                     "raw_syncseal_corners": geometry.raw_syncseal_corners,
-                    "corners_current_normalized": geometry.corners_current_normalized,
-                    "homography_current_to_canonical": geometry.homography_current_to_canonical,
+                    "observed_corners_in_canonical_normalized": (
+                        geometry.observed_corners_in_canonical_normalized
+                    ),
+                    "homography_observed_to_canonical": (
+                        geometry.homography_observed_to_canonical
+                    ),
                     "legal": geometry.legal,
                     "basic_observable": geometry.basic_observable,
                     "error": geometry.error,
@@ -621,7 +625,7 @@ def _identity_coordinate_valid(
         not isinstance(estimate, GeometryEstimate)
         or not estimate.legal
         or estimate.error is not None
-        or estimate.corners_current_normalized is None
+        or estimate.observed_corners_in_canonical_normalized is None
         or isinstance(max_error_normalized, bool)
         or not isinstance(max_error_normalized, Real)
         or not math.isfinite(float(max_error_normalized))
@@ -629,7 +633,10 @@ def _identity_coordinate_valid(
     ):
         return False
     try:
-        raw_corners = tuple(tuple(row) for row in estimate.corners_current_normalized)
+        raw_corners = tuple(
+            tuple(row)
+            for row in estimate.observed_corners_in_canonical_normalized
+        )
         if len(raw_corners) != 4 or any(len(row) != 2 for row in raw_corners):
             return False
         if any(

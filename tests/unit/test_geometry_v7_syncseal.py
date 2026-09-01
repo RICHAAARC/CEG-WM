@@ -109,7 +109,10 @@ def test_official_detect_adapter_names_logit_and_validates_all_nine_values() -> 
         (-1.0, -1.0), (127.0 / 128.0, -1.0),
         (127.0 / 128.0, 127.0 / 128.0), (-1.0, 127.0 / 128.0),
     )
-    assert estimate.homography_current_to_canonical == (
+    assert estimate.observed_corners_in_canonical_normalized == (
+        (-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)
+    )
+    assert estimate.homography_observed_to_canonical == (
         (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
     )
     malformed = SyncSealTorchScript(_TorchScriptContractFixture(malformed=True)).detect_geometry(

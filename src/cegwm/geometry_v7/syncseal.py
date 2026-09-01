@@ -143,23 +143,38 @@ class SyncSealTorchScript:
             if not isinstance(output, dict) or set(output) != {"preds", "preds_pts"}:
                 raise TypeError("SyncSeal detect must return exactly preds and preds_pts")
             preds = output["preds"]
-            points = output["preds_pts"]
+            predicted_canonical_correspondences = output["preds_pts"]
             if not isinstance(preds, torch.Tensor) or preds.shape != (1, 9):
                 raise ValueError("SyncSeal preds must have shape 1x9")
-            if not isinstance(points, torch.Tensor) or points.shape != (1, 8):
+            if (
+                not isinstance(predicted_canonical_correspondences, torch.Tensor)
+                or predicted_canonical_correspondences.shape != (1, 8)
+            ):
                 raise ValueError("SyncSeal preds_pts must have shape 1x8")
-            if not preds.dtype.is_floating_point or not points.dtype.is_floating_point:
+            if (
+                not preds.dtype.is_floating_point
+                or not predicted_canonical_correspondences.dtype.is_floating_point
+            ):
                 raise TypeError("SyncSeal detection outputs must be floating point")
-            if not bool(torch.isfinite(preds).all()) or not bool(torch.isfinite(points).all()):
+            if not bool(torch.isfinite(preds).all()) or not bool(
+                torch.isfinite(predicted_canonical_correspondences).all()
+            ):
                 raise ValueError("SyncSeal detection outputs must be finite")
-            if not torch.equal(preds[:, 1:].to(points), points):
+            if not torch.equal(
+                preds[:, 1:].to(predicted_canonical_correspondences),
+                predicted_canonical_correspondences,
+            ):
                 raise ValueError("SyncSeal preds_pts must equal the final 8 raw outputs")
-            raw_corners = points[0].detach().cpu().tolist()
-            public_corners = syncseal_raw_to_public_normalized(raw_corners)
+            raw_correspondences = (
+                predicted_canonical_correspondences[0].detach().cpu().tolist()
+            )
+            public_canonical_correspondences = syncseal_raw_to_public_normalized(
+                raw_correspondences
+            )
             return estimate_geometry(
                 float(preds[0, 0]),
-                public_corners,
-                raw_syncseal_corners=raw_corners,
+                public_canonical_correspondences,
+                raw_syncseal_corners=raw_correspondences,
             )
         except Exception as error:
             return GeometryEstimate.error_record(error)
