@@ -49,8 +49,8 @@ class R0NumericGates:
     max_g_content_false_positive_rate: float = 0.0
     min_identity_coordinate_valid_rate: float = 1.0
     # One official 256-grid pixel step after public normalization.  This is
-    # implementation tolerance for identity coordinates, not a geometry gate.
-    identity_homography_max_error_normalized: float = 2.0 / 255.0
+    # direct-corner tolerance for the identity interface, not sync evidence.
+    identity_corner_max_error_normalized: float = 2.0 / 255.0
 
     def __post_init__(self) -> None:
         actual = (
@@ -62,7 +62,7 @@ class R0NumericGates:
             self.max_cg_c_decision_flip_rate,
             self.max_g_content_false_positive_rate,
             self.min_identity_coordinate_valid_rate,
-            self.identity_homography_max_error_normalized,
+            self.identity_corner_max_error_normalized,
         )
         expected = (
             0.20,
@@ -784,7 +784,7 @@ def _evaluate_r0_records(
         arms = _arm_map(record)
         identity_valid += sum(
             _identity_coordinate_valid(
-                arms[arm].geometry, frozen.identity_homography_max_error_normalized
+                arms[arm].geometry, frozen.identity_corner_max_error_normalized
             )
             for arm in (R0Arm.G, R0Arm.CG)
         )

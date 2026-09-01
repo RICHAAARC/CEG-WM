@@ -160,14 +160,23 @@ def test_numeric_gates_are_exactly_frozen_and_reject_drift() -> None:
     assert (gates.min_mean_psnr, gates.min_mean_ssim, gates.max_mean_lpips) == (
         40.0, 0.98, 0.05
     )
-    assert gates.identity_homography_max_error_normalized == 2.0 / 255.0
+    assert gates.identity_corner_max_error_normalized == 2.0 / 255.0
+    legacy_name = "identity_" + "homography_max_error_normalized"
+    assert not hasattr(gates, legacy_name)
+    for relative_path in (
+        "src/cegwm/geometry_v7/r0.py",
+        "docs/geometry_v7_stage_contract.md",
+    ):
+        assert legacy_name not in (_REPO_ROOT / relative_path).read_text(
+            encoding="utf-8"
+        )
     with pytest.raises(ValueError, match="exact user-frozen"):
         R0NumericGates(min_mean_psnr=39.0)
 
 
 @pytest.mark.integration
 def test_identity_coordinate_valid_uses_direct_ordered_strict_convex_corners() -> None:
-    tolerance = R0NumericGates().identity_homography_max_error_normalized
+    tolerance = R0NumericGates().identity_corner_max_error_normalized
     identity = estimate_geometry(0.0, CANONICAL_CORNERS_NORMALIZED)
     one_official_grid_step = replace(
         identity,
