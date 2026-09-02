@@ -14,9 +14,11 @@ from experiments import run_geometry_v7_r3_advanced as entry
 
 
 def _old_result():
-    roster = R2_DEV_UNIT_IDS + R2_TEST_UNIT_IDS
-    rows = [{"condition_id": condition, "unit_id": unit, "split": "dev" if unit in R2_DEV_UNIT_IDS else "test"}
-            for condition in R2_CONDITION_IDS for unit in roster]
+    rows = [
+        {"condition_id": condition, "unit_id": unit, "split": split}
+        for split, roster in (("dev", R2_DEV_UNIT_IDS), ("test", R2_TEST_UNIT_IDS))
+        for condition in R2_CONDITION_IDS for unit in roster
+    ]
     return {
         "schema": entry.OLD_R3_SCHEMA, "exact": entry.OLD_R3_PRODUCER_EXACT,
         "status": entry.OLD_R3_STATUS, "feature_rows": rows,
@@ -36,7 +38,14 @@ def test_old_r3_loader_binds_exact_immutable_baseline_and_order(tmp_path):
     root = tmp_path / "old-r3"
     root.mkdir()
     (root / "result.json").write_text(json.dumps(_old_result()), encoding="utf-8")
-    assert len(entry._validate_old_r3(root)) == 80
+    rows = entry._validate_old_r3(root)
+    assert len(rows) == 80
+    assert tuple((row["condition_id"], row["unit_id"], row["split"]) for row in rows[:40]) == tuple(
+        (condition, unit, "dev") for condition in R2_CONDITION_IDS for unit in R2_DEV_UNIT_IDS
+    )
+    assert tuple((row["condition_id"], row["unit_id"], row["split"]) for row in rows[40:]) == tuple(
+        (condition, unit, "test") for condition in R2_CONDITION_IDS for unit in R2_TEST_UNIT_IDS
+    )
     changed = _old_result()
     changed["development_threshold_selection"]["grid_metrics"][0]["safe_rescue_count"] = 7
     (root / "result.json").write_text(json.dumps(changed), encoding="utf-8")

@@ -61,7 +61,7 @@ def _validate_old_r3(root: Path) -> tuple[Mapping[str, Any], ...]:
     rows = result.get("feature_rows")
     if not isinstance(rows, list) or len(rows) != 80:
         raise ValueError("old R3 fixed 80 feature rows differ")
-    expected = _expected(R2_DEV_UNIT_IDS + R2_TEST_UNIT_IDS)
+    expected = _expected(R2_DEV_UNIT_IDS) + _expected(R2_TEST_UNIT_IDS)
     if tuple((row.get("condition_id"), row.get("unit_id")) for row in rows if isinstance(row, Mapping)) != expected:
         raise ValueError("old R3 feature identity/order differs")
     selection = result.get("development_threshold_selection")
