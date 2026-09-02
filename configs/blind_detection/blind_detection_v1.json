@@ -1,0 +1,39 @@
+{
+  "base_exact": "3d0ebe699c4319fb2435e9eacca7e943096e9abd",
+  "claim_ceiling": "BlindDetection-V1 implementation authorized; engineering single-image closure only; N_dev=256; science_denominator=0",
+  "content_calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+  "content_calibration_asset_sidecar": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
+  "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+  "development": {
+    "denominator": 256,
+    "disjoint_from": [
+      "geometry_v7_development",
+      "future_paper_calibration",
+      "future_paper_test"
+    ],
+    "geometry_attempts_per_unit": 1,
+    "independence_unit": "base_ordinary_rgb",
+    "roster_freeze": "before_any_scoring",
+    "source_strata_and_order": "frozen_in_roster_input"
+  },
+  "embedding_order": [
+    "existing_content_embed",
+    "frozen_final_rgb_syncseal"
+  ],
+  "geometry_role": "coordinates_only_no_positive_vote",
+  "method_id": "blind_detection_v1_single_image_geometry_direct",
+  "preprocess_id": "ordinary_rgb_then_frozen_content_v9_branch_preprocessing_v1",
+  "recovery": {
+    "b_low_blind": false,
+    "fallback": false,
+    "raw_h_rectification_attempts": 1,
+    "retry": false,
+    "same_scorer_key_preprocess_assets_tau_pre_post": true
+  },
+  "reliable_ablation": "optional_nonblocking_not_primary_method",
+  "scorer_id": "content_v9_weighted_joint_registered_minus_exact16_wrong_max_v1",
+  "statistic": "registered weighted_joint - max(exact 16 wrong-key weighted_joint)",
+  "threshold_asset": "configs/blind_detection/assets/blind_detection_v1_thresholds.json",
+  "threshold_asset_state": "ABSENT_UNTIL_AUTHORIZED_COMPLETE_N_DEV_256_AND_ZERO_OF_256_REPLAY",
+  "wrong_key_attribution": "separate_experiment_separate_fixed_denominator"
+}
