@@ -22,7 +22,11 @@ import torch
 from experiments import content_adaptive_engine as engine
 from experiments import run_content_chain as content_chain_runner
 from experiments import run_geometry_v7_r0 as r0_runner
-from cegwm.geometry_v7.contracts import CANONICAL_CORNERS_NORMALIZED, Matrix3x3
+from cegwm.geometry_v7.contracts import (
+    CANONICAL_CORNERS_NORMALIZED,
+    Matrix3x3,
+    homography_observed_to_canonical,
+)
 from cegwm.geometry_v7.r0 import ContentScore, R0Arm
 from cegwm.geometry_v7.r1a import (
     R1A_CORE_CONDITIONS,
@@ -102,6 +106,12 @@ class OldR1BArtifact:
 
 
 ContentScorer = Callable[[Image.Image], ContentScore]
+
+
+class _ContentScorerRuntimeInterruption(RuntimeError):
+    def __init__(self, cause: BaseException) -> None:
+        self.cause_class = type(cause).__name__
+        super().__init__(f"content scorer runtime interruption: {self.cause_class}")
 
 
 def _dependency_version(distribution: str) -> str:
@@ -468,6 +478,11 @@ def _validate_r1a_artifact(
                     )
                 except ValueError:
                     errors.append("stored_prediction:invalid_correspondences")
+                if predicted is not None:
+                    try:
+                        homography_observed_to_canonical(predicted)
+                    except ValueError:
+                        errors.append("stored_prediction:invalid_correspondences")
                 try:
                     matrix = _matrix(
                         geometry.get("homography_observed_to_canonical"),
@@ -652,17 +667,32 @@ def _render_attacks(inputs: Sequence[R0R1BInput]) -> tuple[
     return rendered, failures
 
 
-def _score_shared_h(
+def _rectify_shared_h(
     attacked: AttackedTriplet,
     observed_to_canonical: Matrix3x3,
-    scorer: ContentScorer,
-) -> R1BScoredTriplet:
+) -> AttackedTriplet:
     """Use one CG-derived H for the paired U/G/CG rectifications."""
 
-    u = rectify_attacked_rgb(attacked.u, observed_to_canonical)
-    g = rectify_attacked_rgb(attacked.g, observed_to_canonical)
-    cg = rectify_attacked_rgb(attacked.cg, observed_to_canonical)
-    return scored_triplet(u=scorer(u), g=scorer(g), cg=scorer(cg))
+    return AttackedTriplet(
+        attacked.unit_id,
+        attacked.condition_id,
+        rectify_attacked_rgb(attacked.u, observed_to_canonical),
+        rectify_attacked_rgb(attacked.g, observed_to_canonical),
+        rectify_attacked_rgb(attacked.cg, observed_to_canonical),
+    )
+
+
+def _score_rectified_triplet(
+    rectified: AttackedTriplet, scorer: ContentScorer
+) -> R1BScoredTriplet:
+    try:
+        return scored_triplet(
+            u=scorer(rectified.u),
+            g=scorer(rectified.g),
+            cg=scorer(rectified.cg),
+        )
+    except Exception as error:
+        raise _ContentScorerRuntimeInterruption(error) from error
 
 
 def _real_h_records(
@@ -685,11 +715,13 @@ def _real_h_records(
             scores = None
             if not errors and prediction.predicted_h_observed_to_canonical is not None:
                 try:
-                    scores = _score_shared_h(
-                        rendered[identity], prediction.predicted_h_observed_to_canonical, scorer
+                    rectified = _rectify_shared_h(
+                        rendered[identity], prediction.predicted_h_observed_to_canonical
                     )
                 except Exception as error:
                     errors.append(f"real_h_recovery:{type(error).__name__}")
+                else:
+                    scores = _score_rectified_triplet(rectified, scorer)
             records.append(evaluate_repair_point_unit(
                 pre_record=pre_record,
                 point_kind="real_h",
@@ -739,9 +771,13 @@ def _fine_grid_records(
                         errors_list.append(f"directional_h:{type(error).__name__}")
                     if not errors_list:
                         try:
-                            scores = _score_shared_h(rendered[identity], homography, scorer)
+                            rectified = _rectify_shared_h(
+                                rendered[identity], homography
+                            )
                         except Exception as error:
                             errors_list.append(f"directional_recovery:{type(error).__name__}")
+                        else:
+                            scores = _score_rectified_triplet(rectified, scorer)
                     errors = tuple(errors_list)
                 records.append(evaluate_repair_point_unit(
                     pre_record=pre_record,
@@ -764,7 +800,10 @@ def _operational_records(
     Mapping[str, tuple[R1BRepairPointRecord, ...]],
     Mapping[str, Mapping[int, tuple[R1BRepairPointRecord, ...]]],
 ]:
-    failure = f"content_runtime_setup:{type(error).__name__}"
+    if isinstance(error, _ContentScorerRuntimeInterruption):
+        failure = f"content_scorer_runtime:{error.cause_class}"
+    else:
+        failure = f"content_runtime_setup:{type(error).__name__}"
     real = {}
     fine = {}
     for spec in R1A_CORE_CONDITIONS:
@@ -986,27 +1025,43 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             detection_key = b""
 
     if setup_error is not None or scorer is None:
+        operational_error = setup_error or RuntimeError(
+            "content scorer setup unavailable"
+        )
         real, fine = _operational_records(
             pre=old.pre_by_condition, old_zero=old.zero_by_condition,
-            error=setup_error or RuntimeError("content scorer unavailable"),
+            error=operational_error,
         )
         return _result_payload(
             exact=exact, r0_root=r0_root, r1a_root=r1a_root,
             old_r1b_root=old_r1b_root, inputs=inputs, old=old,
             predictions=predictions, real=real, fine=fine,
-            evaluation=None, setup_error=setup_error,
+            evaluation=None, setup_error=operational_error,
         )
 
     rendered, render_failures = _render_attacks(inputs)
-    real = _real_h_records(
-        pre=old.pre_by_condition, predictions=predictions, rendered=rendered,
-        render_failures=render_failures, scorer=scorer,
-    )
-    fine = _fine_grid_records(
-        pre=old.pre_by_condition, old_zero=old.zero_by_condition,
-        predictions=predictions, rendered=rendered,
-        render_failures=render_failures, scorer=scorer,
-    )
+    try:
+        real = _real_h_records(
+            pre=old.pre_by_condition, predictions=predictions, rendered=rendered,
+            render_failures=render_failures, scorer=scorer,
+        )
+        fine = _fine_grid_records(
+            pre=old.pre_by_condition, old_zero=old.zero_by_condition,
+            predictions=predictions, rendered=rendered,
+            render_failures=render_failures, scorer=scorer,
+        )
+    except _ContentScorerRuntimeInterruption as operational_error:
+        real, fine = _operational_records(
+            pre=old.pre_by_condition,
+            old_zero=old.zero_by_condition,
+            error=operational_error,
+        )
+        return _result_payload(
+            exact=exact, r0_root=r0_root, r1a_root=r1a_root,
+            old_r1b_root=old_r1b_root, inputs=inputs, old=old,
+            predictions=predictions, real=real, fine=fine,
+            evaluation=None, setup_error=operational_error,
+        )
     evaluation = evaluate_r1b_repair(
         pre_records_by_condition=old.pre_by_condition,
         real_h_records_by_condition=real,

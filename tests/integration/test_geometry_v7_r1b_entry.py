@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import argparse
 import inspect
 import json
 import math
@@ -21,6 +22,7 @@ from cegwm.geometry_v7.r0 import ContentScore, R0Arm
 from cegwm.geometry_v7.r1a import (
     R1A_CORE_CONDITIONS,
     R1A_SANITY_CONDITIONS,
+    apply_homography,
     corner_rmse,
     truth_correspondences,
 )
@@ -347,6 +349,40 @@ def test_invalid_stored_prediction_is_unit_failure_not_artifact_drift(
 
 
 @pytest.mark.integration
+def test_matching_h_bow_tie_prediction_is_unit_invalid_correspondence(
+    tmp_path: Path,
+) -> None:
+    r0_root = tmp_path / "r0"
+    r0_root.mkdir()
+    roster = _write_fake_r0(r0_root)
+    r1a_root = tmp_path / "r1a"
+    _write_fake_r1a(r1a_root, roster)
+    path = r1a_root / "result.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    spec = R1A_CORE_CONDITIONS[0]
+    identity = (spec.condition_id, roster[0])
+    item = next(
+        record
+        for record in payload["raw_records"]
+        if (record["condition_id"], record["unit_id"]) == identity
+    )
+    matching_h = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.5, 0.0, 1.0))
+    bow_tie = apply_homography(matching_h, CANONICAL_CORNERS_NORMALIZED)
+    item["geometry"]["observed_corners_in_canonical_normalized"] = bow_tie
+    item["geometry"]["homography_observed_to_canonical"] = matching_h
+    item["prediction_rmse"] = corner_rmse(
+        bow_tie, truth_correspondences(spec)
+    )
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+    predictions = runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
+    prediction = predictions[identity]
+    assert prediction.predicted_correspondences == bow_tie
+    assert prediction.predicted_h_observed_to_canonical == matching_h
+    assert "stored_prediction:invalid_correspondences" in prediction.errors
+
+
+@pytest.mark.integration
 def test_r1a_truth_or_order_drift_is_rejected_before_method(tmp_path: Path) -> None:
     r0_root = tmp_path / "r0"
     r0_root.mkdir()
@@ -395,9 +431,12 @@ def test_real_h_is_one_cg_derived_matrix_shared_across_u_g_cg(
     attacked = runner.AttackedTriplet(
         "unit", "condition", *(Image.new("RGB", (512, 512)) for _ in range(3))
     )
-    runner._score_shared_h(attacked, matrix, lambda _image: _score(0.1))
+    rectified = runner._rectify_shared_h(attacked, matrix)
     assert len(observed) == 3
     assert all(item[1] is matrix for item in observed)
+    assert (rectified.u, rectified.g, rectified.cg) == (
+        attacked.u, attacked.g, attacked.cg
+    )
 
 
 @pytest.mark.integration
@@ -519,6 +558,138 @@ def test_operational_payload_has_null_method_axes_and_fixed_records(tmp_path: Pa
     assert payload["r2_candidate"] is None
     assert len(payload["real_h_records"]) == 80
     assert len(payload["fine_grid_records"]) == 480
+
+
+def _run_with_injected_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scorer,
+    *,
+    rectification_failure: bool = False,
+) -> dict[str, object]:
+    r0_root = tmp_path / "r0"
+    r0_root.mkdir()
+    roster = _write_fake_r0(r0_root)
+    r1a_root = tmp_path / "r1a"
+    old_root = tmp_path / "old"
+    _write_fake_r1a(r1a_root, roster)
+    _write_fake_old_r1b(old_root, roster)
+
+    class FakeCalibrationAssets:
+        pass
+
+    monkeypatch.setenv(runner.engine.KEY_ENV, "injected-key")
+    monkeypatch.setenv(runner.engine.TOKEN_ENV, "injected-token")
+    monkeypatch.setattr(runner, "_git_exact", lambda _root, exact: exact)
+    monkeypatch.setattr(runner, "normalize_detection_key", lambda _key: b"k")
+    monkeypatch.setattr(
+        runner, "public_key_digest", lambda _key: runner.CONTENT_CHAIN_PUBLIC_KEY_DIGEST
+    )
+    monkeypatch.setattr(runner, "derive_stability_wrong_keys", lambda _key: ())
+    monkeypatch.setattr(runner.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(runner, "ContentCalibrationAssets", FakeCalibrationAssets)
+    monkeypatch.setattr(
+        runner.content_chain_runner,
+        "_load_pipeline_and_assets",
+        lambda _model_id, _token: (object(), FakeCalibrationAssets()),
+    )
+    monkeypatch.setattr(
+        runner.r0_runner, "_content_scorer", lambda **_kwargs: scorer
+    )
+    rendered = {
+        (spec.condition_id, unit_id): runner.AttackedTriplet(
+            unit_id,
+            spec.condition_id,
+            *(Image.new("RGB", (512, 512)) for _ in range(3)),
+        )
+        for spec in R1A_CORE_CONDITIONS
+        for unit_id in roster
+    }
+    monkeypatch.setattr(
+        runner, "_render_attacks", lambda _inputs: (rendered, {})
+    )
+    if rectification_failure:
+        monkeypatch.setattr(
+            runner,
+            "rectify_attacked_rgb",
+            lambda _image, _homography: (_ for _ in ()).throw(
+                ValueError("injected rectification failure")
+            ),
+        )
+    return runner._run(
+        argparse.Namespace(
+            repo_root=str(_REPO_ROOT),
+            expected_exact="1" * 40,
+            r0_artifact_root=str(r0_root),
+            r1a_artifact_root=str(r1a_root),
+            old_r1b_artifact_root=str(old_root),
+            result_dir=str(tmp_path / "result"),
+        )
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("raise_after", (0, 240), ids=("part_a", "part_b"))
+def test_scorer_runtime_interruption_is_global_operational_on_real_runner_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raise_after: int,
+) -> None:
+    calls = 0
+
+    def scorer(_image):
+        nonlocal calls
+        calls += 1
+        if calls > raise_after:
+            raise RuntimeError("injected content runtime interruption")
+        return _score(0.5)
+
+    payload = _run_with_injected_runtime(tmp_path, monkeypatch, scorer)
+    assert calls == raise_after + 1
+    assert payload["status"] == R1B_OPERATIONAL_FAILURE
+    assert payload["real_h_status"] is None
+    assert payload["fine_grid_status"] is None
+    assert payload["r2_candidate"] is None
+    assert len(payload["real_h_records"]) == 80
+    assert len(payload["fine_grid_records"]) == 480
+    assert any(
+        "content_scorer_runtime:RuntimeError" in failure["errors"]
+        for failure in payload["failures"]
+    )
+
+
+@pytest.mark.integration
+def test_none_scorer_setup_is_operational_without_evaluation_dereference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _run_with_injected_runtime(tmp_path, monkeypatch, None)
+    assert payload["status"] == R1B_OPERATIONAL_FAILURE
+    assert payload["real_h_status"] is None
+    assert payload["fine_grid_status"] is None
+    assert payload["r2_candidate"] is None
+    assert len(payload["real_h_records"]) == 80
+    assert len(payload["fine_grid_records"]) == 480
+    assert payload["provenance"]["operational_setup_error_class"] == "RuntimeError"
+
+
+@pytest.mark.integration
+def test_rectification_failure_remains_fixed_denominator_method_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _run_with_injected_runtime(
+        tmp_path, monkeypatch, lambda _image: _score(0.5),
+        rectification_failure=True,
+    )
+    assert payload["status"] == R1B_REPAIR_METHOD_NOT_READY
+    assert payload["real_h_status"] == "NO_CORE_PASSED"
+    assert payload["fine_grid_status"] == "ZERO_ONLY_ALL_CORE"
+    assert payload["r2_candidate"] is False
+    assert len(payload["real_h_records"]) == 80
+    assert len(payload["fine_grid_records"]) == 480
+    assert any(
+        "real_h_recovery:ValueError" in failure["errors"]
+        for failure in payload["failures"]
+    )
 
 
 @pytest.mark.integration
