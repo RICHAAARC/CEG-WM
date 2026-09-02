@@ -29,23 +29,21 @@ from cegwm.geometry_v7.r2 import (
     R2_CONDITION_IDS, R2_DEV_UNIT_IDS, R2_TEST_UNIT_IDS, outcome_row_from_repair,
 )
 from cegwm.geometry_v7.r3 import (
-    R3_B_LOW_CLAIM_CEILING,
+    R3_B_LOW,
+    R3_B_LOW_HEX,
     R3_CLAIM_CEILING,
-    R3_DEV_B_LOW_FROZEN,
-    R3_FAILED,
+    R3_METHOD_IMPROVED,
+    R3_METHOD_NOT_IMPROVED,
     R3_NOT_PROBED_INELIGIBLE,
-    R3_DIAGNOSTIC_OPERATIONAL,
-    R3_NOT_APPLICABLE,
     R3_OPERATIONAL_FAILURE,
-    R3_PASSED,
+    R3_THRESHOLD_GRID_PX,
     CycleFeatureRow,
     D4BranchRecord,
-    R3DevUnit,
+    R3Unit,
     cycle_feature_row,
-    evaluate_frozen_cycle_candidate,
-    route_for_b_low,
-    select_b_low,
-    select_cycle_candidate,
+    evaluate_selected_threshold,
+    route_from_s0,
+    select_threshold,
 )
 from cegwm.geometry_v7.syncseal import (
     SyncSealTorchScript,
@@ -123,10 +121,6 @@ def _validate_r2(root: Path) -> tuple[tuple[str, ...], tuple[Mapping[str, Any], 
     if (
         result.get("schema") != R2_SCHEMA or result.get("exact") != R2_PRODUCER_EXACT
         or result.get("status") != "R2_SELECTIVE_RISK_FAILED"
-        or result.get("R1B_FULL_PASS") is not False
-        or result.get("R1B_SELECTIVE_CANDIDATE") is not True
-        or result.get("R2_SELECTIVE_RELIABILITY_AUTHORIZED") is not True
-        or result.get("prior_aggregate_visibility") is not True
     ):
         raise ValueError("R2 artifact identity differs")
     selection = result.get("selection")
@@ -145,16 +139,6 @@ def _validate_r2(root: Path) -> tuple[tuple[str, ...], tuple[Mapping[str, Any], 
         or component.get("threshold") != R2_SELECTED_THRESHOLD
     ):
         raise ValueError("R2 frozen selector threshold differs")
-    formal = result.get("formal_test")
-    formal_metrics = formal.get("metrics") if isinstance(formal, Mapping) else None
-    if (
-        not isinstance(formal_metrics, Mapping)
-        or formal_metrics.get("accepted_count") != 24
-        or formal_metrics.get("unsafe_accept_count") != 6
-        or formal_metrics.get("selected_negative_control_fp_count") != 1
-        or formal_metrics.get("covered_attack_count") != 7
-    ):
-        raise ValueError("R2 accepted failed formal metrics differ")
     roster = tuple(result.get("ordered_roster", ()))
     if roster != R2_DEV_UNIT_IDS + R2_TEST_UNIT_IDS:
         raise ValueError("R2 frozen roster differs")
@@ -171,7 +155,7 @@ def _validate_r2(root: Path) -> tuple[tuple[str, ...], tuple[Mapping[str, Any], 
 
 def _validate_repair(
     root: Path, roster: Sequence[str], r2_outcomes: Sequence[Mapping[str, Any]],
-) -> tuple[R3DevUnit, ...]:
+) -> tuple[R3Unit, ...]:
     result = _read_json(root, "R1B repair")
     if (
         result.get("schema") != REPAIR_SCHEMA or result.get("exact") != REPAIR_PRODUCER_EXACT
@@ -217,18 +201,20 @@ def _validate_repair(
         fp = outcome.get("observed_negative_false_positive")
         if fp not in (True, False, None):
             raise ValueError("R2 outcome false-positive field differs")
-        units.append(R3DevUnit(
-            identity[0], identity[1], None if s0 is None else float(s0), False,
+        units.append(R3Unit(
+            _split(identity[1]), identity[0], identity[1],
+            None if s0 is None else float(s0), False,
             bool(outcome["complete"]), bool(outcome["safe"]),
-            bool(outcome["safe_rescue"]), fp,
+            bool(outcome["safe_rescue"]), bool(outcome["baseline_positive"]),
+            outcome["post_positive"], fp,
             tuple(str(item) for item in outcome.get("errors", ()) if isinstance(item, str)),
         ))
     return tuple(units)
 
 
 def _bind_r2_acceptance(
-    units: Sequence[R3DevUnit], features: Sequence[Mapping[str, Any]],
-) -> tuple[R3DevUnit, ...]:
+    units: Sequence[R3Unit], features: Sequence[Mapping[str, Any]],
+) -> tuple[R3Unit, ...]:
     result = []
     for unit, row in zip(units, features, strict=True):
         area = row.get("area_ratio")
@@ -237,9 +223,10 @@ def _bind_r2_acceptance(
             and isinstance(area, (int, float)) and not isinstance(area, bool)
             and math.isfinite(float(area)) and float(area) >= R2_SELECTED_THRESHOLD
         )
-        result.append(R3DevUnit(
-            unit.condition_id, unit.unit_id, unit.s0, accepted,
+        result.append(R3Unit(
+            unit.split, unit.condition_id, unit.unit_id, unit.s0, accepted,
             unit.outcome_complete, unit.safe, unit.safe_rescue,
+            unit.baseline_positive, unit.post_positive,
             unit.observed_negative_false_positive, unit.errors,
         ))
     return tuple(result)
@@ -334,21 +321,21 @@ def _not_probed(reason: str) -> tuple[D4BranchRecord, ...]:
 
 
 def _rows_for_split(
-    *, split: str, units: Sequence[R3DevUnit], b_low: float,
+    *, split: str, units: Sequence[R3Unit],
     r1a: Mapping[tuple[str, str], Mapping[str, Any]], r1a_root: Path,
     detector, allow_probe: bool,
 ) -> tuple[CycleFeatureRow, ...]:
     result = []
     for unit in units:
-        route = route_for_b_low(unit, b_low)
+        route = route_from_s0(unit.s0)
         eligible = route == "BOUNDARY" and unit.r2_selector_accepted
         branches = _not_probed(f"{R3_NOT_PROBED_INELIGIBLE}:{route}")
         if eligible and allow_probe:
-            raw = r1a[(unit.condition_id, unit.unit_id)]
-            geometry = raw.get("geometry")
-            h0 = geometry.get("homography_observed_to_canonical") if isinstance(geometry, Mapping) else None
-            relative = raw.get("attacked_image_file")
             try:
+                raw = r1a[(unit.condition_id, unit.unit_id)]
+                geometry = raw.get("geometry")
+                h0 = geometry.get("homography_observed_to_canonical") if isinstance(geometry, Mapping) else None
+                relative = raw.get("attacked_image_file")
                 if not isinstance(relative, str) or not isinstance(h0, (list, tuple)):
                     raise ValueError("stored H0/image is missing")
                 with Image.open(r1a_root / relative) as source:
@@ -359,81 +346,62 @@ def _rows_for_split(
         elif eligible:
             branches = _not_probed("R3_NOT_PROBED_NO_FROZEN_DEV_CANDIDATE")
         result.append(cycle_feature_row(
-            split=split, unit=unit, route=route, branches=branches, d4_order=D4_ORDER,
+            unit=unit, branches=branches, d4_order=D4_ORDER,
         ))
     return tuple(result)
 
 
 def _setup_failure_rows(
-    *, split: str, units: Sequence[R3DevUnit], b_low: float, error: BaseException,
+    *, split: str, units: Sequence[R3Unit], error: BaseException,
 ) -> tuple[CycleFeatureRow, ...]:
     rows = []
     for unit in units:
-        route = route_for_b_low(unit, b_low)
+        route = route_from_s0(unit.s0)
         eligible = route == "BOUNDARY" and unit.r2_selector_accepted
         reason = f"syncseal_runtime_setup:{type(error).__name__}:{error}"
         branches = _not_probed(reason)
         rows.append(cycle_feature_row(
-            split=split, unit=unit, route=route, branches=branches, d4_order=D4_ORDER,
+            unit=unit, branches=branches, d4_order=D4_ORDER,
         ))
     return tuple(rows)
 
 
-def _ordered_split(units: Sequence[R3DevUnit], split: str) -> tuple[R3DevUnit, ...]:
+def _ordered_split(units: Sequence[R3Unit], split: str) -> tuple[R3Unit, ...]:
     wanted = R2_DEV_UNIT_IDS if split == "dev" else R2_TEST_UNIT_IDS
     return tuple(item for item in units if item.unit_id in wanted)
 
 
 def _payload(
     *, exact: str, r1a_root: Path, repair_root: Path, r2_root: Path,
-    b_low_selection=None, cycle_selection=None, dev_rows=(), test_rows=(),
-    test_status=None, test_metrics=None, input_error: BaseException | None = None,
+    selection=None, dev_rows=(), test_rows=(), test_metrics=None,
+    input_error: BaseException | None = None,
     setup_error: BaseException | None = None,
 ) -> Mapping[str, Any]:
     operational = input_error is not None or setup_error is not None
-    if operational:
-        status = R3_OPERATIONAL_FAILURE
-    elif b_low_selection is None or b_low_selection.status != R3_DEV_B_LOW_FROZEN:
-        status = None if b_low_selection is None else b_low_selection.status
-    elif cycle_selection is None or cycle_selection.selected is None:
-        status = None if cycle_selection is None else cycle_selection.status
-    else:
-        status = test_status
+    status = R3_OPERATIONAL_FAILURE if operational else (
+        R3_METHOD_NOT_IMPROVED if selection is None else selection.status
+    )
     return {
         "schema": RESULT_SCHEMA, "stage": STAGE_LABEL, "exact": exact,
         "status": status, "scientific_status": "not_adjudicated",
-        "R1B_FULL_PASS": False, "R1B_SELECTIVE_CANDIDATE": True,
-        "R2_SELECTIVE_RELIABILITY_AUTHORIZED": True,
-        "prior_aggregate_visibility": True,
         "claim_ceiling": R3_CLAIM_CEILING,
-        "phase1_claim_ceiling": R3_B_LOW_CLAIM_CEILING,
+        "data_used_for_development": True,
         "inputs": {
             "r1a": {"producer_exact": R1A_PRODUCER_EXACT, "artifact_root": str(r1a_root)},
             "r1b_repair": {"producer_exact": REPAIR_PRODUCER_EXACT, "artifact_root": str(repair_root)},
             "r2": {"producer_exact": R2_PRODUCER_EXACT, "artifact_root": str(r2_root),
                    "frozen_candidate_id": R2_SELECTED_ID,
-                   "recorded_status_unchanged": "R2_SELECTIVE_RISK_FAILED",
-                   "recorded_formal_metrics_unchanged": {
-                       "accepted_count": 24, "unsafe_accept_count": 6,
-                       "selected_negative_control_fp_count": 1,
-                       "covered_attack_count": 7,
-                   }},
+                   "recorded_status_unchanged": "R2_SELECTIVE_RISK_FAILED"},
         },
         "fixed": {
-            "tau": 0.0, "b_low_quantiles_type7": [0.20, 0.40, 0.60, 0.80],
-            "d4_order": list(D4_ORDER), "cycle_quantiles_type7": [0.20, 0.40, 0.60, 0.80],
+            "tau": 0.0, "b_low": R3_B_LOW, "b_low_hex": R3_B_LOW_HEX,
+            "b_low_source_note": "frozen prior development q20; not a calibration claim",
+            "d4_order": list(D4_ORDER), "cycle_threshold_grid_px": list(R3_THRESHOLD_GRID_PX),
             "conditions": 10, "units": 8, "dev": 40, "test": 40,
             "probe_scope": "BOUNDARY_AND_FROZEN_R2_ACCEPTED_ONLY",
         },
-        "b_low_selection": _jsonable(b_low_selection),
-        "cycle_dev_selection": _jsonable(cycle_selection),
-        "exploratory_seen_r2_test": (
-            None if test_metrics is None else {"status": test_status, "metrics": _jsonable(test_metrics)}
-        ),
-        "exploratory_diagnostic_status": (
-            R3_DIAGNOSTIC_OPERATIONAL if operational
-            else (R3_NOT_APPLICABLE if test_status is None else test_status)
-        ),
+        "development_threshold_selection": _jsonable(selection),
+        "existing_test40_engineering_diagnostic": _jsonable(test_metrics),
         "feature_rows": [_jsonable(item) for item in (*dev_rows, *test_rows)],
         "probe_accounting": {
             "eligible_units": sum(item.route == "BOUNDARY" and item.r2_selector_accepted for item in (*dev_rows, *test_rows)),
@@ -453,8 +421,10 @@ def _payload(
         },
         "operational_error": None if not operational else f"{type(input_error or setup_error).__name__}: {input_error or setup_error}",
         "route": {
-            "test_used_for_selection": False, "eligible_only_d4_probes": True,
+            "unseen_or_formal_test_claim": False, "eligible_only_d4_probes": True,
             "h0_updated_replaced_or_averaged": False, "content_scorer_invoked": False,
+            "final_recovery_uses_raw_h0_once": True,
+            "same_detector_key_preprocess_tau_for_recovery": True,
             "content_positive_vote_from_geometry": False, "no_retry_fallback_or_subset": True,
         },
     }
@@ -488,7 +458,6 @@ def _run(args: argparse.Namespace) -> Mapping[str, Any]:
         r1a = _validate_r1a(r1a_root, roster)
         dev_units = _ordered_split(units, "dev")
         test_units = _ordered_split(units, "test")
-        b_low = select_b_low(dev_units)
     except Exception as error:
         payload = _payload(
             exact=exact, r1a_root=r1a_root, repair_root=repair_root,
@@ -496,24 +465,17 @@ def _run(args: argparse.Namespace) -> Mapping[str, Any]:
         )
         _write_result(result_root, payload)
         return payload
-    if b_low.selected is None:
-        payload = _payload(
-            exact=exact, r1a_root=r1a_root, repair_root=repair_root,
-            r2_root=r2_root, b_low_selection=b_low,
-        )
-        _write_result(result_root, payload)
-        return payload
     if not torch.cuda.is_available():
         setup_error = RuntimeError("cuda_required_for_real_geometry_v7_r3")
         dev_rows = _setup_failure_rows(
-            split="dev", units=dev_units, b_low=b_low.selected.b_low, error=setup_error,
+            split="dev", units=dev_units, error=setup_error,
         )
         test_rows = _setup_failure_rows(
-            split="test", units=test_units, b_low=b_low.selected.b_low, error=setup_error,
+            split="test", units=test_units, error=setup_error,
         )
         payload = _payload(
             exact=exact, r1a_root=r1a_root, repair_root=repair_root,
-            r2_root=r2_root, b_low_selection=b_low, dev_rows=dev_rows,
+            r2_root=r2_root, dev_rows=dev_rows,
             test_rows=test_rows, setup_error=setup_error,
         )
         _write_result(result_root, payload)
@@ -523,37 +485,37 @@ def _run(args: argparse.Namespace) -> Mapping[str, Any]:
         syncseal = SyncSealTorchScript.from_file(loaded, device="cuda")
     except Exception as error:
         dev_rows = _setup_failure_rows(
-            split="dev", units=dev_units, b_low=b_low.selected.b_low, error=error,
+            split="dev", units=dev_units, error=error,
         )
         test_rows = _setup_failure_rows(
-            split="test", units=test_units, b_low=b_low.selected.b_low, error=error,
+            split="test", units=test_units, error=error,
         )
         payload = _payload(
             exact=exact, r1a_root=r1a_root, repair_root=repair_root,
-            r2_root=r2_root, b_low_selection=b_low, dev_rows=dev_rows,
+            r2_root=r2_root, dev_rows=dev_rows,
             test_rows=test_rows, setup_error=error,
         )
         _write_result(result_root, payload)
         return payload
     dev_rows = _rows_for_split(
-        split="dev", units=dev_units, b_low=b_low.selected.b_low, r1a=r1a,
+        split="dev", units=dev_units, r1a=r1a,
         r1a_root=r1a_root, detector=syncseal.detect_geometry, allow_probe=True,
     )
-    cycle = select_cycle_candidate(dev_rows, dev_units)
+    selection = select_threshold(dev_rows, dev_units)
     test_rows = _rows_for_split(
-        split="test", units=test_units, b_low=b_low.selected.b_low, r1a=r1a,
+        split="test", units=test_units, r1a=r1a,
         r1a_root=r1a_root, detector=syncseal.detect_geometry,
-        allow_probe=cycle.selected is not None,
+        allow_probe=selection.selected_threshold_px is not None,
     )
-    test_status = test_metrics = None
-    if cycle.selected is not None:
-        test_status, test_metrics = evaluate_frozen_cycle_candidate(
-            cycle.selected, test_rows, test_units
+    test_metrics = None
+    if selection.selected_threshold_px is not None:
+        test_metrics = evaluate_selected_threshold(
+            selection.selected_threshold_px, test_rows, test_units
         )
     payload = _payload(
         exact=exact, r1a_root=r1a_root, repair_root=repair_root, r2_root=r2_root,
-        b_low_selection=b_low, cycle_selection=cycle, dev_rows=dev_rows,
-        test_rows=test_rows, test_status=test_status, test_metrics=test_metrics,
+        selection=selection, dev_rows=dev_rows,
+        test_rows=test_rows, test_metrics=test_metrics,
     )
     _write_result(result_root, payload)
     return payload
@@ -579,7 +541,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"status": "RUNNER_STOPPED_BEFORE_PACKAGE", "error": f"{type(error).__name__}: {error}"}, sort_keys=True))
         return 2
     print(json.dumps({"status": payload["status"], "result_dir": args.result_dir}, sort_keys=True))
-    return 0 if payload["status"] == R3_PASSED else 2
+    return 0 if payload["status"] == R3_METHOD_IMPROVED else 2
 
 
 if __name__ == "__main__":
