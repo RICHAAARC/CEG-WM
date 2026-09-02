@@ -369,6 +369,26 @@ def _validate_r1a_identity(
             raise ValueError("R1A core record identity/order differs")
 
 
+def _validate_callback_repair(artifact_root: Path) -> Mapping[str, Any]:
+    result = reliable_runner._read(artifact_root.resolve(), "R1B repair")
+    expected = _expected(R2_DEV_UNIT_IDS + R2_TEST_UNIT_IDS)
+    memberships = result.get("frozen_old_membership_records")
+    real_h = result.get("real_h_records")
+    if (
+        result.get("schema") != reliable_runner.REPAIR_SCHEMA
+        or result.get("exact") != reliable_runner.REPAIR_EXACT
+        or result.get("status") != "R1B_REPAIR_REAL_H_NOT_END_TO_END_READY"
+        or not isinstance(memberships, list)
+        or not isinstance(real_h, list)
+        or len(memberships) != 80
+        or len(real_h) != 80
+        or _identities(memberships) != expected
+        or _identities(real_h) != expected
+    ):
+        raise ValueError("R1B repair callback identity/status/order differs")
+    return result
+
+
 def _render_callback_inputs(r0_inputs: Sequence[Any]) -> tuple[CallbackInput, ...]:
     by_unit = {item.unit_id: item for item in r0_inputs}
     by_condition = {spec.condition_id: spec for spec in R1A_CORE_CONDITIONS}
@@ -595,7 +615,7 @@ def _replay_payload(
 
 
 def _callback_payload(
-    *, exact: str, r0_root: Path, r1a_root: Path, checkpoint: Path,
+    *, exact: str, r0_root: Path, r1a_root: Path, repair_root: Path, checkpoint: Path,
     rows: Sequence[Mapping[str, Any]], error: BaseException | None = None,
 ):
     operational = error is not None or any(row["operational_interruption"] for row in rows)
@@ -605,7 +625,11 @@ def _callback_payload(
         "scientific_status": "not_adjudicated", "claim_ceiling": CLAIM_CEILING,
         "data_used_for_development": True,
         "inputs": {"r0": {"exact": R0_EXACT, "root": str(r0_root)},
-                   "r1a": {"exact": R1A_EXACT, "root": str(r1a_root)}},
+                   "r1a": {"exact": R1A_EXACT, "root": str(r1a_root)},
+                   "r1b_repair": {
+                       "exact": reliable_runner.REPAIR_EXACT,
+                       "root": str(repair_root),
+                   }},
         "checkpoint": {"path": str(checkpoint), "official_url_only": True,
                        "sha_gate": False},
         "fixed_roster": [
@@ -645,9 +669,11 @@ def _run_callback(args, exact: str):
 
     r0_root = Path(args.r0_artifact_root).resolve()
     r1a_root = Path(args.r1a_artifact_root).resolve()
+    repair_root = Path(args.r1b_repair_root).resolve()
     checkpoint = Path(args.syncseal_checkpoint).resolve()
     rendered = None
     try:
+        _validate_callback_repair(repair_root)
         inputs = repair_runner._load_r0_inputs(Path(args.repo_root).resolve(), r0_root)
         roster = tuple(item.unit_id for item in inputs)
         _validate_r1a_identity(Path(args.repo_root).resolve(), r1a_root, roster)
@@ -655,13 +681,13 @@ def _run_callback(args, exact: str):
         scorer, detector = _setup_real_callbacks(Path(args.repo_root).resolve(), checkpoint)
         rows = _callback_records(rendered, scorer=scorer, detector=detector)
         return _callback_payload(
-            exact=exact, r0_root=r0_root, r1a_root=r1a_root,
+            exact=exact, r0_root=r0_root, r1a_root=r1a_root, repair_root=repair_root,
             checkpoint=checkpoint, rows=rows,
         )
     except Exception as error:
         rows = _operational_callback_rows(error, rendered)
         return _callback_payload(
-            exact=exact, r0_root=r0_root, r1a_root=r1a_root,
+            exact=exact, r0_root=r0_root, r1a_root=r1a_root, repair_root=repair_root,
             checkpoint=checkpoint, rows=rows, error=error,
         )
 
@@ -695,7 +721,10 @@ def execute(args) -> Mapping[str, Any]:
         _required(args, ("r1b_repair_root", "r2_root", "advanced_r3_root"))
         payload = _run_replay(args, exact)
     else:
-        _required(args, ("r0_artifact_root", "r1a_artifact_root", "syncseal_checkpoint"))
+        _required(args, (
+            "r0_artifact_root", "r1a_artifact_root", "r1b_repair_root",
+            "syncseal_checkpoint",
+        ))
         payload = _run_callback(args, exact)
     _write_result(result, payload)
     return payload

@@ -351,9 +351,12 @@ def test_run_callback_preserves_render_failure_and_processes_unaffected(monkeypa
         entry, "_setup_real_callbacks",
         lambda *_args: (scorer, lambda _image: _geometry()),
     )
+    repair_root = tmp_path / "repair"
+    _write_result(repair_root, _fixture_payloads()[0])
     args = Namespace(
         repo_root=str(tmp_path), r0_artifact_root=str(tmp_path / "r0"),
         r1a_artifact_root=str(tmp_path / "r1a"),
+        r1b_repair_root=str(repair_root),
         syncseal_checkpoint=str(tmp_path / "syncseal.pt"),
     )
     payload = entry._run_callback(args, "1" * 40)
@@ -366,6 +369,31 @@ def test_run_callback_preserves_render_failure_and_processes_unaffected(monkeypa
     assert all(row["attempted"] for row in payload["rows"][1:])
     assert all(row["runtime"]["final_positive"] for row in payload["rows"][1:])
     assert content_calls == 36
+    assert payload["inputs"]["r1b_repair"] == {
+        "exact": entry.reliable_runner.REPAIR_EXACT,
+        "root": str(repair_root.resolve()),
+    }
+
+
+@pytest.mark.parametrize("invalid", (False, True))
+def test_callback_missing_or_invalid_repair_binding_is_fixed7_operational(tmp_path, invalid):
+    repair_root = tmp_path / "repair"
+    if invalid:
+        repair = _fixture_payloads()[0]
+        repair["status"] = "WRONG_STATUS"
+        _write_result(repair_root, repair)
+    args = Namespace(
+        repo_root=str(tmp_path), r0_artifact_root=str(tmp_path / "r0"),
+        r1a_artifact_root=str(tmp_path / "r1a"),
+        r1b_repair_root=str(repair_root),
+        syncseal_checkpoint=str(tmp_path / "syncseal.pt"),
+    )
+    payload = entry._run_callback(args, "1" * 40)
+    assert payload["status"] == entry.OPERATIONAL_STATUS
+    assert len(payload["rows"]) == 7
+    assert all(not row["attempted"] for row in payload["rows"])
+    assert all(row["operational_interruption"] for row in payload["rows"])
+    assert payload["operational_error"] == "ValueError"
 
 
 def test_callback_runtime_call_has_no_outer_metadata_arguments():
