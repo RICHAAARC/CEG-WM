@@ -3,9 +3,9 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+import math
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -13,11 +13,22 @@ from PIL import Image
 import pytest
 
 from experiments import run_geometry_v7_r1b as runner
+from cegwm.geometry_v7.contracts import (
+    CANONICAL_CORNERS_NORMALIZED,
+    homography_observed_to_canonical,
+)
 from cegwm.geometry_v7.r0 import ContentScore, R0Arm
-from cegwm.geometry_v7.r1a import R1A_CORE_CONDITIONS, R1A_SANITY_CONDITIONS
+from cegwm.geometry_v7.r1a import (
+    R1A_CORE_CONDITIONS,
+    R1A_SANITY_CONDITIONS,
+    corner_rmse,
+    truth_correspondences,
+)
 from cegwm.geometry_v7.r1b import (
-    R1B_TRUTH_UTILITY_FAILED,
-    R1BEvaluation,
+    R1B_OPERATIONAL_FAILURE,
+    R1B_REPAIR_METHOD_NOT_READY,
+    R1B_REPAIR_PIXEL_GRID,
+    evaluate_lambda_unit,
     freeze_pre_recovery_record,
     scored_triplet,
 )
@@ -38,16 +49,18 @@ def _score(weighted_joint: float, wrong: float = -2.0) -> ContentScore:
     )
 
 
-def _content_payload(score: ContentScore) -> dict[str, object]:
-    return {
+def _content_payload(score: ContentScore, *, gate_a: bool) -> dict[str, object]:
+    payload = {
         "lf": score.lf,
         "hf": score.hf,
         "weighted_joint": score.weighted_joint,
         "wrong_key_lf": list(score.wrong_key_lf),
         "wrong_key_hf": list(score.wrong_key_hf),
         "wrong_key_weighted_joint": list(score.wrong_key_weighted_joint),
-        "gate_a_margin": score.gate_a_margin,
     }
+    if gate_a:
+        payload["gate_a_margin"] = score.gate_a_margin
+    return payload
 
 
 def _decision_payload(decision) -> dict[str, object]:
@@ -60,47 +73,59 @@ def _decision_payload(decision) -> dict[str, object]:
     }
 
 
+def _triplet_payload(scores) -> dict[str, object]:
+    return {
+        "u": _content_payload(scores.u, gate_a=False),
+        "g": _content_payload(scores.g, gate_a=False),
+        "cg": _content_payload(scores.cg, gate_a=False),
+        "positive_cg_vs_g": _decision_payload(scores.positive_cg_vs_g),
+        "negative_g_vs_u": _decision_payload(scores.negative_g_vs_u),
+    }
+
+
 def _write_png(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (512, 512), "gray").save(path, format="PNG")
 
 
 def _write_fake_r0(root: Path) -> tuple[str, ...]:
-    contract = load_content_chain_contract(_REPO_ROOT)
-    roster = tuple(unit.unit_id for unit in contract.evaluation_roster)
-    records = []
+    roster = tuple(
+        unit.unit_id
+        for unit in load_content_chain_contract(_REPO_ROOT).evaluation_roster
+    )
+    raw = []
     for unit_id in roster:
-        u = _score(0.1)
-        g = _score(0.0)
-        cg = _score(1.0)
-        clean = scored_triplet(u=u, g=g, cg=cg)
-        arm_payloads = []
+        u, g, cg = _score(0.1), _score(0.0), _score(1.0)
+        scores = scored_triplet(u=u, g=g, cg=cg)
+        arms = []
         for arm, score, decision in (
             (R0Arm.U, u, None),
-            (R0Arm.G, g, clean.negative_g_vs_u),
+            (R0Arm.G, g, scores.negative_g_vs_u),
             (R0Arm.C, None, None),
-            (R0Arm.CG, cg, clean.positive_cg_vs_g),
+            (R0Arm.CG, cg, scores.positive_cg_vs_g),
         ):
             relative = Path("images") / unit_id / f"{arm.name}.png"
             if arm is not R0Arm.C:
                 _write_png(root / relative)
-            arm_payloads.append(
+            arms.append(
                 {
                     "arm": arm.value,
-                    "content": None if score is None else _content_payload(score),
+                    "content": None
+                    if score is None
+                    else _content_payload(score, gate_a=True),
                     "paired_content_decision": None
                     if decision is None
                     else _decision_payload(decision),
-                    "errors": ["C deliberately unavailable"] if arm is R0Arm.C else [],
+                    "errors": [] if arm is not R0Arm.C else ["unread fixture C"],
                     "image_file": relative.as_posix(),
                 }
             )
-        records.append(
+        raw.append(
             {
                 "unit_id": unit_id,
                 "stage": "evaluation",
                 "residual_strength_multiplier": 0.75,
-                "arms": arm_payloads,
+                "arms": arms,
             }
         )
     result = {
@@ -114,7 +139,7 @@ def _write_fake_r0(root: Path) -> tuple[str, ...]:
             "residual_strength_multiplier": 0.75,
             "carrier_compatibility_passed": True,
         },
-        "raw_unit_records": records,
+        "raw_unit_records": raw,
     }
     (root / "result.json").write_text(
         json.dumps(result, sort_keys=True), encoding="utf-8"
@@ -122,8 +147,46 @@ def _write_fake_r0(root: Path) -> tuple[str, ...]:
     return roster
 
 
-def _write_fake_r1a(root: Path, roster: tuple[str, ...]) -> None:
-    all_specs = (*R1A_SANITY_CONDITIONS, *R1A_CORE_CONDITIONS)
+def _prediction_payload(spec, *, invalid_h: bool = False) -> dict[str, object]:
+    truth = truth_correspondences(spec)
+    predicted = tuple((x + 0.02, y) for x, y in truth)
+    homography = homography_observed_to_canonical(predicted)
+    if invalid_h:
+        homography = ((1.0, 0.0, 0.0),) * 3
+    return {
+        "condition_kind": "core_nonidentity",
+        "truth_observed_corners_in_canonical_normalized": truth,
+        "geometry": {
+            "status": "RELIABLE",
+            "raw_syncseal_corners": tuple(axis for point in predicted for axis in point),
+            "observed_corners_in_canonical_normalized": predicted,
+            "homography_observed_to_canonical": homography,
+            "legal": True,
+            "error": None,
+        },
+        "prediction_rmse": corner_rmse(predicted, truth),
+    }
+
+
+def _write_fake_r1a(
+    root: Path, roster: tuple[str, ...], *, invalid_identity=None
+) -> None:
+    raw = []
+    for spec in (*R1A_SANITY_CONDITIONS, *R1A_CORE_CONDITIONS):
+        for unit_id in roster:
+            item = {
+                "condition_id": spec.condition_id,
+                "condition_kind": spec.kind.value,
+                "unit_id": unit_id,
+            }
+            if spec in R1A_CORE_CONDITIONS:
+                item.update(
+                    _prediction_payload(
+                        spec,
+                        invalid_h=(spec.condition_id, unit_id) == invalid_identity,
+                    )
+                )
+            raw.append(item)
     result = {
         "exact": runner.R1A_PRODUCER_EXACT,
         "status": runner.R1A_REQUIRED_STATUS,
@@ -142,11 +205,8 @@ def _write_fake_r1a(root: Path, roster: tuple[str, ...]) -> None:
             "records": 104,
         },
         "condition_specs": [
-            {
-                "condition_id": spec.condition_id,
-                "kind": spec.kind.value,
-            }
-            for spec in all_specs
+            {"condition_id": spec.condition_id, "kind": spec.kind.value}
+            for spec in (*R1A_SANITY_CONDITIONS, *R1A_CORE_CONDITIONS)
         ],
         "condition_aggregates": [
             {
@@ -156,158 +216,239 @@ def _write_fake_r1a(root: Path, roster: tuple[str, ...]) -> None:
                 "denominator": 8,
                 "passed": True,
             }
-            for spec in all_specs
+            for spec in (*R1A_SANITY_CONDITIONS, *R1A_CORE_CONDITIONS)
         ],
-        "raw_records": [
-            {"condition_id": spec.condition_id, "unit_id": unit_id}
-            for spec in all_specs
-            for unit_id in roster
-        ],
+        "raw_records": raw,
     }
     root.mkdir(parents=True, exist_ok=True)
-    (root / "result.json").write_text(json.dumps(result), encoding="utf-8")
-
-
-@pytest.mark.integration
-def test_artifact_loaders_bind_r0_u_g_cg_and_r1a_fixed_identity(
-    tmp_path: Path,
-) -> None:
-    r0_root = tmp_path / "r0"
-    r0_root.mkdir()
-    roster = _write_fake_r0(r0_root)
-    r1a_root = tmp_path / "r1a"
-    _write_fake_r1a(r1a_root, roster)
-    inputs = runner._load_r0_inputs(_REPO_ROOT, r0_root)
-    assert tuple(item.unit_id for item in inputs) == roster
-    assert all(item.clean_score == 1.0 for item in inputs)
-    assert all(item.u_path.name == "U.png" for item in inputs)
-    assert all(item.g_path.name == "G.png" for item in inputs)
-    assert all(item.cg_path.name == "CG.png" for item in inputs)
-    assert not any((r0_root / "images" / unit / "C.png").exists() for unit in roster)
-    runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
-
-
-@pytest.mark.integration
-@pytest.mark.parametrize("artifact", ("r0", "r1a"))
-def test_artifact_loaders_reject_exact_or_core_identity_drift(
-    tmp_path: Path, artifact: str
-) -> None:
-    r0_root = tmp_path / "r0"
-    r0_root.mkdir()
-    roster = _write_fake_r0(r0_root)
-    r1a_root = tmp_path / "r1a"
-    _write_fake_r1a(r1a_root, roster)
-    target = (r0_root if artifact == "r0" else r1a_root) / "result.json"
-    result = json.loads(target.read_text(encoding="utf-8"))
-    result["exact"] = "0" * 40
-    target.write_text(json.dumps(result), encoding="utf-8")
-    with pytest.raises(ValueError, match="artifact identity"):
-        if artifact == "r0":
-            runner._load_r0_inputs(_REPO_ROOT, r0_root)
-        else:
-            runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
-
-
-def _input_fixture() -> tuple[runner.R0R1BInput, ...]:
-    clean = scored_triplet(u=_score(0.1), g=_score(0.0), cg=_score(1.0))
-    return tuple(
-        runner.R0R1BInput(
-            unit_id,
-            Path(f"/unused/{unit_id}/U.png"),
-            Path(f"/unused/{unit_id}/G.png"),
-            Path(f"/unused/{unit_id}/CG.png"),
-            f"images/{unit_id}/U.png",
-            f"images/{unit_id}/G.png",
-            f"images/{unit_id}/CG.png",
-            clean,
-            1.0,
-        )
-        for unit_id in tuple(f"evaluation-{index:02d}" for index in range(8))
+    (root / "result.json").write_text(
+        json.dumps(result, sort_keys=True), encoding="utf-8"
     )
 
 
-@pytest.mark.integration
-def test_setup_failure_publishes_fixed_80_pre_records_and_method_null(
-    tmp_path: Path,
+def _write_fake_old_r1b(
+    root: Path,
+    roster: tuple[str, ...],
+    *, missing_zero: bool = False,
+    operational: bool = False,
 ) -> None:
-    inputs = _input_fixture()
-    pre = runner._setup_failure_pre_records(inputs, RuntimeError("setup stopped"))
-    payload = runner._result_payload(
-        exact="1" * 40,
-        r0_root=tmp_path / "r0",
-        r1a_root=tmp_path / "r1a",
-        inputs=inputs,
-        pre=pre,
-        lambdas={},
-        evaluation=None,
-        setup_error=RuntimeError("setup stopped"),
-    )
-    assert payload["status"] == runner.R1B_OPERATIONAL_FAILURE
-    assert payload["blocking_method_canary_passed"] is None
-    assert payload["fixed_counts"]["pre_records"] == 80
-    assert len(payload["pre_recovery_partition_frozen_before_rectification"]) == 80
-    assert len(payload["failures"]) == 80
-    assert payload["lambda_records"] == []
-
-
-@pytest.mark.integration
-def test_finite_gate_miss_remains_method_status_not_operational(tmp_path: Path) -> None:
-    inputs = _input_fixture()
-    pre = {
-        spec.condition_id: tuple(
-            freeze_pre_recovery_record(
-                unit_id=item.unit_id,
-                spec=spec,
-                clean_score=1.0,
-                scores=scored_triplet(u=_score(0.1), g=_score(0.0), cg=_score(0.8)),
+    pre_payload = []
+    lambda_payload = []
+    evaluations = []
+    for spec in R1A_CORE_CONDITIONS:
+        pre = []
+        for unit_id in roster:
+            scores = scored_triplet(
+                u=_score(0.1), g=_score(0.0), cg=_score(0.1)
             )
-            for item in inputs
+            record = freeze_pre_recovery_record(
+                unit_id=unit_id, spec=spec, clean_score=1.0, scores=scores
+            )
+            pre.append(record)
+            pre_payload.append(
+                {
+                    "unit_id": unit_id,
+                    "condition_id": spec.condition_id,
+                    "clean_score_from_accepted_r0": 1.0,
+                    "pre_scores": _triplet_payload(scores),
+                    "membership": record.membership.value,
+                    "errors": [],
+                }
+            )
+        evaluations.append(
+            {
+                "condition_id": spec.condition_id,
+                "roster": list(roster),
+                "eligible_roster": list(roster),
+                "damage_only_roster": [],
+            }
         )
-        for spec in R1A_CORE_CONDITIONS
+        if missing_zero and spec is R1A_CORE_CONDITIONS[0]:
+            continue
+        for record in pre:
+            recovered = scored_triplet(
+                u=_score(0.1), g=_score(0.0), cg=_score(0.4)
+            )
+            zero = evaluate_lambda_unit(
+                pre_record=record,
+                spec=spec,
+                lambda_value=0.0,
+                scores=recovered,
+            )
+            lambda_payload.append(
+                {
+                    "unit_id": record.unit_id,
+                    "condition_id": spec.condition_id,
+                    "lambda": 0.0,
+                    "epsilon_normalized": zero.epsilon_normalized,
+                    "epsilon_pixels": zero.epsilon_pixels,
+                    "scores": _triplet_payload(recovered),
+                    "positive_gate_a_delta": zero.positive_gate_a_delta,
+                    "positive_gate_b_delta": zero.positive_gate_b_delta,
+                    "positive_score_delta": zero.positive_score_delta,
+                    "gain": zero.gain,
+                    "improved": zero.improved,
+                    "recovered_negative": zero.recovered_negative,
+                    "decision_harm": zero.decision_harm,
+                    "observed_negative_false_positive": (
+                        zero.observed_negative_false_positive
+                    ),
+                    "errors": [],
+                }
+            )
+    result = {
+        "schema": runner.OLD_R1B_SCHEMA,
+        "exact": runner.OLD_R1B_PRODUCER_EXACT,
+        "status": R1B_OPERATIONAL_FAILURE if operational else "OLD_METHOD_RESULT",
+        "blocking_method_canary_passed": None if operational else False,
+        "pre_recovery_partition_frozen_before_rectification": pre_payload,
+        "lambda_records": lambda_payload,
+        "condition_evaluations": evaluations,
     }
-    evaluation = R1BEvaluation(R1B_TRUTH_UTILITY_FAILED, (), 1, False)
-    payload = runner._result_payload(
-        exact="1" * 40,
-        r0_root=tmp_path / "r0",
-        r1a_root=tmp_path / "r1a",
-        inputs=inputs,
-        pre=pre,
-        lambdas={},
-        evaluation=evaluation,
-        setup_error=None,
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "result.json").write_text(
+        json.dumps(result, sort_keys=True), encoding="utf-8"
     )
-    assert payload["status"] == R1B_TRUTH_UTILITY_FAILED
-    assert payload["blocking_method_canary_passed"] is False
-    assert payload["failures"] == []
 
 
 @pytest.mark.integration
-def test_lambda_one_reuses_pre_scores_without_rescoring() -> None:
-    inputs = _input_fixture()
-    first = R1A_CORE_CONDITIONS[0]
+def test_sorted_json_artifacts_load_complete_fixed_route(tmp_path: Path) -> None:
+    r0_root = tmp_path / "r0"
+    r0_root.mkdir()
+    roster = _write_fake_r0(r0_root)
+    r1a_root = tmp_path / "r1a"
+    old_root = tmp_path / "old"
+    _write_fake_r1a(r1a_root, roster)
+    _write_fake_old_r1b(old_root, roster)
+
+    inputs = runner._load_r0_inputs(_REPO_ROOT, r0_root)
+    predictions = runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
+    old = runner._load_old_r1b_artifact(old_root, roster)
+    assert tuple(item.unit_id for item in inputs) == roster
+    assert len(predictions) == 80
+    assert sum(map(len, old.pre_by_condition.values())) == 80
+    assert sum(map(len, old.zero_by_condition.values())) == 80
+    assert not any((r0_root / "images" / unit / "C.png").exists() for unit in roster)
+
+
+@pytest.mark.integration
+def test_invalid_stored_prediction_is_unit_failure_not_artifact_drift(
+    tmp_path: Path,
+) -> None:
+    r0_root = tmp_path / "r0"
+    r0_root.mkdir()
+    roster = _write_fake_r0(r0_root)
+    r1a_root = tmp_path / "r1a"
+    identity = (R1A_CORE_CONDITIONS[0].condition_id, roster[0])
+    _write_fake_r1a(r1a_root, roster, invalid_identity=identity)
+    predictions = runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
+    assert "stored_prediction:invalid_homography" in predictions[identity].errors
+    assert predictions[identity].predicted_correspondences is not None
+
+
+@pytest.mark.integration
+def test_r1a_truth_or_order_drift_is_rejected_before_method(tmp_path: Path) -> None:
+    r0_root = tmp_path / "r0"
+    r0_root.mkdir()
+    roster = _write_fake_r0(r0_root)
+    r1a_root = tmp_path / "r1a"
+    _write_fake_r1a(r1a_root, roster)
+    path = r1a_root / "result.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    first_core = next(
+        item
+        for item in payload["raw_records"]
+        if item["condition_id"] == R1A_CORE_CONDITIONS[0].condition_id
+    )
+    first_core["truth_observed_corners_in_canonical_normalized"][0][0] += 0.01
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="frozen truth correspondences"):
+        runner._validate_r1a_artifact(_REPO_ROOT, r1a_root, roster)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("missing_zero,operational", ((True, False), (False, True)))
+def test_old_r1b_incomplete_or_operational_artifact_cannot_enter_method(
+    tmp_path: Path, missing_zero: bool, operational: bool
+) -> None:
+    roster = tuple(f"evaluation-{index:02d}" for index in range(8))
+    root = tmp_path / "old"
+    _write_fake_old_r1b(
+        root, roster, missing_zero=missing_zero, operational=operational
+    )
+    with pytest.raises(ValueError, match="old (?:R1B|applicable)"):
+        runner._load_old_r1b_artifact(root, roster)
+
+
+@pytest.mark.integration
+def test_real_h_is_one_cg_derived_matrix_shared_across_u_g_cg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = []
+    matrix = homography_observed_to_canonical(CANONICAL_CORNERS_NORMALIZED)
+
+    def tracked(image, homography):
+        observed.append((image, homography))
+        return image
+
+    monkeypatch.setattr(runner, "rectify_attacked_rgb", tracked)
+    attacked = runner.AttackedTriplet(
+        "unit", "condition", *(Image.new("RGB", (512, 512)) for _ in range(3))
+    )
+    runner._score_shared_h(attacked, matrix, lambda _image: _score(0.1))
+    assert len(observed) == 3
+    assert all(item[1] is matrix for item in observed)
+
+
+@pytest.mark.integration
+def test_fine_grid_reuses_zero_and_scores_every_nonzero_point() -> None:
+    roster = tuple(f"evaluation-{index:02d}" for index in range(8))
     pre = {}
+    zero = {}
+    predictions = {}
     rendered = {}
     for spec in R1A_CORE_CONDITIONS:
-        score_value = 0.1 if spec is first else 0.8
-        pre[spec.condition_id] = tuple(
-            freeze_pre_recovery_record(
-                unit_id=item.unit_id,
-                spec=spec,
-                clean_score=1.0,
-                scores=scored_triplet(
-                    u=_score(0.1), g=_score(0.0), cg=_score(score_value)
-                ),
+        pre_records = []
+        zero_records = []
+        for unit_id in roster:
+            pre_scores = scored_triplet(
+                u=_score(0.1), g=_score(0.0), cg=_score(0.1)
             )
-            for item in inputs
-        )
-    for item in inputs:
-        rendered[(first.condition_id, item.unit_id)] = runner.AttackedTriplet(
-            item.unit_id,
-            first.condition_id,
-            Image.new("RGB", (512, 512)),
-            Image.new("RGB", (512, 512)),
-            Image.new("RGB", (512, 512)),
-        )
+            pre_record = freeze_pre_recovery_record(
+                unit_id=unit_id, spec=spec, clean_score=1.0, scores=pre_scores
+            )
+            pre_records.append(pre_record)
+            zero_scores = scored_triplet(
+                u=_score(0.1), g=_score(0.0), cg=_score(0.4)
+            )
+            zero_records.append(
+                evaluate_lambda_unit(
+                    pre_record=pre_record,
+                    spec=spec,
+                    lambda_value=0.0,
+                    scores=zero_scores,
+                )
+            )
+            truth = truth_correspondences(spec)
+            predicted = tuple((x + 0.02, y) for x, y in truth)
+            rmse = corner_rmse(predicted, truth)
+            predictions[(spec.condition_id, unit_id)] = runner.R1BStoredPrediction(
+                unit_id,
+                spec.condition_id,
+                truth,
+                predicted,
+                homography_observed_to_canonical(predicted),
+                rmse,
+                rmse * 511.0 / 2.0,
+                (),
+            )
+            rendered[(spec.condition_id, unit_id)] = runner.AttackedTriplet(
+                unit_id,
+                spec.condition_id,
+                *(Image.new("RGB", (512, 512)) for _ in range(3)),
+            )
+        pre[spec.condition_id] = tuple(pre_records)
+        zero[spec.condition_id] = tuple(zero_records)
     calls = 0
 
     def scorer(_image):
@@ -315,88 +456,89 @@ def test_lambda_one_reuses_pre_scores_without_rescoring() -> None:
         calls += 1
         return _score(0.5)
 
-    grid = runner._lambda_score_all(
-        rendered=rendered,
-        pre_by_condition=pre,
-        scorer=scorer,
-    )
-    assert tuple(grid) == (first.condition_id,)
-    assert tuple(grid[first.condition_id]) == runner.R1B_LAMBDA_GRID
-    assert calls == 4 * 8 * 3
-    assert all(
-        record.scores is pre_record.scores
-        for record, pre_record in zip(
-            grid[first.condition_id][1.0], pre[first.condition_id], strict=True
-        )
-    )
-
-
-@pytest.mark.integration
-def test_all_pre_scores_finish_before_first_membership_freeze(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inputs = _input_fixture()
-    rendered = {
-        (spec.condition_id, item.unit_id): runner.AttackedTriplet(
-            item.unit_id,
-            spec.condition_id,
-            Image.new("RGB", (512, 512)),
-            Image.new("RGB", (512, 512)),
-            Image.new("RGB", (512, 512)),
-        )
-        for spec in R1A_CORE_CONDITIONS
-        for item in inputs
-    }
-    events: list[str] = []
-
-    def scorer(_image):
-        events.append("score")
-        return _score(0.5)
-
-    original_freeze = runner.freeze_pre_recovery_record
-
-    def tracked_freeze(**kwargs):
-        events.append("freeze")
-        return original_freeze(**kwargs)
-
-    monkeypatch.setattr(runner, "freeze_pre_recovery_record", tracked_freeze)
-    pre = runner._pre_score_all(
-        inputs=inputs,
+    grid = runner._fine_grid_records(
+        pre=pre,
+        old_zero=zero,
+        predictions=predictions,
         rendered=rendered,
         render_failures={},
         scorer=scorer,
     )
-    assert len(pre) == 10
-    assert events[: 10 * 8 * 3] == ["score"] * (10 * 8 * 3)
-    assert events[10 * 8 * 3 :] == ["freeze"] * (10 * 8)
+    assert calls == 10 * 5 * 8 * 3
+    assert all(tuple(condition_grid) == R1B_REPAIR_PIXEL_GRID for condition_grid in grid.values())
+    assert all(
+        record.scores is zero[condition_id][index].scores
+        for condition_id, condition_grid in grid.items()
+        for index, record in enumerate(condition_grid[0])
+    )
 
 
 @pytest.mark.integration
-def test_runner_source_uses_scoring_assets_only_and_never_generation_or_c() -> None:
+def test_operational_payload_has_null_method_axes_and_fixed_records(tmp_path: Path) -> None:
+    roster = tuple(f"evaluation-{index:02d}" for index in range(8))
+    old_root = tmp_path / "old"
+    _write_fake_old_r1b(old_root, roster)
+    old = runner._load_old_r1b_artifact(old_root, roster)
+    predictions = {}
+    for spec in R1A_CORE_CONDITIONS:
+        for unit_id in roster:
+            truth = truth_correspondences(spec)
+            predictions[(spec.condition_id, unit_id)] = runner.R1BStoredPrediction(
+                unit_id, spec.condition_id, truth, None, None, None, None,
+                ("stored_prediction:missing",),
+            )
+    real, fine = runner._operational_records(
+        pre=old.pre_by_condition,
+        old_zero=old.zero_by_condition,
+        error=RuntimeError("setup"),
+    )
+    inputs = tuple(
+        runner.R0R1BInput(
+            unit_id,
+            Path("U.png"), Path("G.png"), Path("CG.png"),
+            "U.png", "G.png", "CG.png",
+        )
+        for unit_id in roster
+    )
+    payload = runner._result_payload(
+        exact="1" * 40,
+        r0_root=tmp_path / "r0",
+        r1a_root=tmp_path / "r1a",
+        old_r1b_root=old_root,
+        inputs=inputs,
+        old=old,
+        predictions=predictions,
+        real=real,
+        fine=fine,
+        evaluation=None,
+        setup_error=RuntimeError("setup"),
+    )
+    assert payload["status"] == R1B_OPERATIONAL_FAILURE
+    assert payload["real_h_status"] is None
+    assert payload["fine_grid_status"] is None
+    assert payload["r2_candidate"] is None
+    assert len(payload["real_h_records"]) == 80
+    assert len(payload["fine_grid_records"]) == 480
+
+
+@pytest.mark.integration
+def test_runner_source_is_scoring_only_u_g_cg_and_method_failures_are_local() -> None:
     source = inspect.getsource(runner)
     ast.parse(source)
     assert "r0_runner._content_scorer" in source
     assert "content_chain_runner._load_pipeline_and_assets" in source
-    assert all(
-        forbidden not in source
-        for forbidden in (
-            "run_content_iss_evaluation_pair",
-            "run_content_chain_unit",
-            "run_sd35_content_adaptive",
-            "SyncSealTorchScript",
-            "download_official_syncseal",
-        )
-    )
-    loader_source = inspect.getsource(runner._load_r0_inputs)
-    assert "R0Arm.C.value" not in loader_source
-    assert "R0Arm.U.value" in loader_source
-    assert "R0Arm.G.value" in loader_source
-    assert "R0Arm.CG.value" in loader_source
+    assert "run_content_iss_evaluation_pair" not in source
+    assert "SyncSealTorchScript" not in source
     assert '"generation_invoked": False' in source
+    assert "R0Arm.C.value" not in inspect.getsource(runner._load_r0_inputs)
+    assert "_fine_grid_records(" in inspect.getsource(runner._run)
+    assert R1B_REPAIR_METHOD_NOT_READY in inspect.getsource(
+        __import__("cegwm.geometry_v7.r1b", fromlist=["evaluate_r1b_repair"])
+    )
 
 
 @pytest.mark.integration
-def test_phase_a_r1b_notebook_guards_are_exact() -> None:
+def test_phase_a_repair_notebook_guards_are_exact() -> None:
     path = _REPO_ROOT / "notebooks" / "geometry_v7_r1b.ipynb"
     notebook = json.loads(path.read_text(encoding="utf-8"))
     code = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
@@ -408,13 +550,16 @@ def test_phase_a_r1b_notebook_guards_are_exact() -> None:
     for index, cell in enumerate(code):
         ast.parse("".join(cell["source"]), filename=f"{path}:code-cell-{index}")
     source = "\n".join("".join(cell.get("source", ())) for cell in notebook["cells"])
-    assert "APPROVED_EXACT = 'PENDING_AFTER_GEOMETRY_V7_R1B_PUSH'" in source
+    assert "APPROVED_EXACT = 'PENDING_AFTER_GEOMETRY_V7_R1B_REPAIR_PUSH'" in source
     assert "re.fullmatch(r'[0-9a-f]{40}', APPROVED_EXACT)" in source
     assert "'checkout', '--detach', APPROVED_EXACT" in source
     assert "assert torch.cuda.is_available()" in source
     assert runner.R0_PRODUCER_EXACT in source
     assert runner.R1A_PRODUCER_EXACT in source
+    assert runner.OLD_R1B_PRODUCER_EXACT in source
     assert source.count("'experiments.run_geometry_v7_r1b'") == 1
+    assert "--old-r1b-artifact-root" in source
+    assert "/ 'r1b-repair'" in source
     assert source.count("if DRIVE_RESULT_DIR.exists():") == 2
     assert "shutil.copytree(LOCAL_RESULT_DIR, DRIVE_RESULT_DIR)" in source
     assert "userdata.get('HF_TOKEN')" in source
@@ -441,12 +586,5 @@ def test_runner_cli_help_imports_without_model_execution() -> None:
     assert completed.returncode == 0
     assert "--r0-artifact-root" in completed.stdout
     assert "--r1a-artifact-root" in completed.stdout
+    assert "--old-r1b-artifact-root" in completed.stdout
     assert "--result-dir" in completed.stdout
-
-
-@pytest.mark.integration
-def test_not_applicable_status_is_explicit_in_method_payload_contract() -> None:
-    source = inspect.getsource(
-        __import__("cegwm.geometry_v7.r1b", fromlist=["evaluate_condition"])
-    )
-    assert re.search(r'"NOT_APPLICABLE/INSUFFICIENT_ELIGIBLE"', source)

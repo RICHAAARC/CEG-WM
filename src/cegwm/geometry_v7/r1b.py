@@ -41,6 +41,18 @@ R1B_OPERATIONAL_FAILURE = "OPERATIONAL_FAILURE_RETAINED_FIXED_DENOMINATOR"
 R1B_CLAIM_CEILING = (
     "small_sample_truth_utility_and_under_correction_tolerance_canary_only"
 )
+R1B_REPAIR_PIXEL_GRID = (0, 1, 2, 4, 6, 8)
+R1B_REPAIR_CLAIM_CEILING = (
+    "small_sample_real_syncseal_recovery_and_directional_pixel_tolerance_canary_only"
+)
+R1B_REPAIR_REAL_ALL_CORE_PASSED = "ALL_CORE_PASSED"
+R1B_REPAIR_REAL_PARTIAL_CORE_PASSED = "PARTIAL_CORE_PASSED"
+R1B_REPAIR_REAL_NO_CORE_PASSED = "NO_CORE_PASSED"
+R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX = "ALL_CORE_NONZERO_PREFIX"
+R1B_REPAIR_FINE_PARTIAL_CORE_NONZERO_PREFIX = "PARTIAL_CORE_NONZERO_PREFIX"
+R1B_REPAIR_FINE_ZERO_ONLY_ALL_CORE = "ZERO_ONLY_ALL_CORE"
+R1B_REPAIR_METHOD_PASSED = "R1B_REPAIR_REAL_H_END_TO_END_PASSED"
+R1B_REPAIR_METHOD_NOT_READY = "R1B_REPAIR_REAL_H_NOT_END_TO_END_READY"
 
 
 class R1BMembership(str, Enum):
@@ -135,6 +147,83 @@ class R1BEvaluation:
     conditions: tuple[R1BConditionEvaluation, ...]
     applicable_condition_count: int
     blocking_method_canary_passed: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class R1BStoredPrediction:
+    unit_id: str
+    condition_id: str
+    truth_correspondences: tuple[tuple[float, float], ...]
+    predicted_correspondences: tuple[tuple[float, float], ...] | None
+    predicted_h_observed_to_canonical: Matrix3x3 | None
+    prediction_rmse_normalized: float | None
+    prediction_rmse_pixels: float | None
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class R1BRepairPointRecord:
+    unit_id: str
+    condition_id: str
+    point_kind: str
+    radius_pixels: int | None
+    scores: R1BScoredTriplet | None
+    positive_gate_a_delta: float | None
+    positive_gate_b_delta: float | None
+    positive_score_delta: float | None
+    improved: bool | None
+    recovered_negative: bool | None
+    decision_harm: bool | None
+    observed_negative_false_positive: bool | None
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class R1BRepairPointAggregate:
+    condition_id: str
+    point_kind: str
+    radius_pixels: int | None
+    roster: tuple[str, ...]
+    eligible_roster: tuple[str, ...]
+    recovery_negative_roster: tuple[str, ...]
+    damage_only_roster: tuple[str, ...]
+    eligible_denominator: int
+    valid_gain_count: int
+    improved_count: int
+    required_improved_count: int
+    full_eligible_gain_median: float | None
+    missing_gain_sentinel_count: int
+    recovery_negative_count: int | None
+    required_recovery_negative_count: int | None
+    damage_harm_count: int
+    observed_negative_false_positive_count: int
+    observed_negative_denominator: int
+    passed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class R1BRepairConditionEvaluation:
+    condition_id: str
+    roster: tuple[str, ...]
+    eligible_roster: tuple[str, ...]
+    damage_only_roster: tuple[str, ...]
+    eligibility_status: str
+    real_h_aggregate: R1BRepairPointAggregate
+    fine_grid_aggregates: tuple[R1BRepairPointAggregate, ...]
+    accepted_max_pixels: int | None
+    real_h_passed: bool
+    fine_nonzero_prefix_passed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class R1BRepairEvaluation:
+    status: str
+    real_h_status: str
+    fine_grid_status: str
+    conditions: tuple[R1BRepairConditionEvaluation, ...]
+    real_h_passed_condition_count: int
+    fine_nonzero_prefix_condition_count: int
+    r2_candidate: bool
 
 
 def paired_content_decision(
@@ -656,6 +745,348 @@ def evaluate_r1b(
     )
 
 
+def directional_correspondences_for_pixels(
+    prediction: R1BStoredPrediction,
+    radius_pixels: int,
+) -> tuple[tuple[float, float], ...]:
+    """Scale or extrapolate along the stored R1A predicted-error direction."""
+
+    if not isinstance(prediction, R1BStoredPrediction):
+        raise TypeError("R1B repair direction requires a stored R1A prediction")
+    if radius_pixels not in R1B_REPAIR_PIXEL_GRID:
+        raise ValueError("R1B repair radius must lie on the exact pixel grid")
+    truth = prediction.truth_correspondences
+    if radius_pixels == 0:
+        return truth
+    if (
+        prediction.errors
+        or prediction.predicted_correspondences is None
+        or prediction.prediction_rmse_normalized is None
+        or prediction.prediction_rmse_pixels is None
+        or not math.isfinite(prediction.prediction_rmse_normalized)
+        or not math.isfinite(prediction.prediction_rmse_pixels)
+        or prediction.prediction_rmse_normalized <= 0.0
+        or prediction.prediction_rmse_pixels <= 0.0
+    ):
+        raise ValueError("stored predicted-error direction is unavailable")
+    expected_pixels = prediction.prediction_rmse_normalized * 511.0 / 2.0
+    if not math.isclose(
+        prediction.prediction_rmse_pixels,
+        expected_pixels,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("stored predicted-error pixel conversion differs")
+    scale = radius_pixels / expected_pixels
+    return tuple(
+        tuple(
+            truth_axis + scale * (predicted_axis - truth_axis)
+            for truth_axis, predicted_axis in zip(
+                truth_point, predicted_point, strict=True
+            )
+        )
+        for truth_point, predicted_point in zip(
+            truth, prediction.predicted_correspondences, strict=True
+        )
+    )
+
+
+def directional_homography_for_pixels(
+    prediction: R1BStoredPrediction,
+    radius_pixels: int,
+) -> Matrix3x3:
+    return homography_observed_to_canonical(
+        directional_correspondences_for_pixels(prediction, radius_pixels)
+    )
+
+
+def evaluate_repair_point_unit(
+    *,
+    pre_record: R1BPreUnitRecord,
+    point_kind: str,
+    radius_pixels: int | None,
+    scores: R1BScoredTriplet | None,
+    errors: Sequence[str] = (),
+) -> R1BRepairPointRecord:
+    if point_kind not in {"real_h", "directional_pixel"}:
+        raise ValueError("R1B repair point kind differs")
+    if point_kind == "real_h":
+        if radius_pixels is not None:
+            raise ValueError("real-H point has no directional radius")
+    elif radius_pixels not in R1B_REPAIR_PIXEL_GRID:
+        raise ValueError("directional repair point radius differs")
+    recorded_errors = tuple(str(error) for error in errors)
+    gate_a_delta = gate_b_delta = score_delta = None
+    improved = recovered = harm = false_positive = None
+    if scores is None:
+        if not recorded_errors:
+            recorded_errors = ("repair_score:missing",)
+    elif not recorded_errors and pre_record.scores is not None:
+        gate_a_delta = (
+            scores.positive_cg_vs_g.gate_a_margin
+            - pre_record.scores.positive_cg_vs_g.gate_a_margin
+        )
+        gate_b_delta = (
+            scores.positive_cg_vs_g.gate_b_margin
+            - pre_record.scores.positive_cg_vs_g.gate_b_margin
+        )
+        score_delta = (
+            scores.positive_cg_vs_g.margin
+            - pre_record.scores.positive_cg_vs_g.margin
+        )
+        if any(
+            not math.isfinite(value)
+            for value in (gate_a_delta, gate_b_delta, score_delta)
+        ):
+            gate_a_delta = gate_b_delta = score_delta = None
+            recorded_errors = ("repair_score:nonfinite_delta",)
+        else:
+            improved = score_delta > 0.0
+            if pre_record.membership is R1BMembership.RECOVERY_NEGATIVE:
+                recovered = scores.positive_cg_vs_g.margin > 0.0
+            if pre_record.membership is R1BMembership.DAMAGE_ONLY:
+                harm = not scores.positive_cg_vs_g.positive
+            false_positive = scores.negative_g_vs_u.positive
+    return R1BRepairPointRecord(
+        pre_record.unit_id,
+        pre_record.condition_id,
+        point_kind,
+        radius_pixels,
+        scores,
+        gate_a_delta,
+        gate_b_delta,
+        score_delta,
+        improved,
+        recovered,
+        harm,
+        false_positive,
+        recorded_errors,
+    )
+
+
+def aggregate_repair_point(
+    *,
+    pre_records: Sequence[R1BPreUnitRecord],
+    point_records: Sequence[R1BRepairPointRecord],
+    ordered_roster: Sequence[str],
+) -> R1BRepairPointAggregate:
+    pre, roster = _validate_roster(pre_records, ordered_roster)
+    records = tuple(point_records)
+    if (
+        len(records) != R1B_FIXED_UNIT_COUNT
+        or tuple(record.unit_id for record in records) != roster
+        or len({record.condition_id for record in records}) != 1
+        or records[0].condition_id != pre[0].condition_id
+        or len({record.point_kind for record in records}) != 1
+        or len({record.radius_pixels for record in records}) != 1
+    ):
+        raise ValueError("R1B repair point records differ from the fixed roster")
+    point_kind = records[0].point_kind
+    radius_pixels = records[0].radius_pixels
+    eligible = tuple(
+        record.unit_id
+        for record in pre
+        if record.membership in (
+            R1BMembership.RECOVERY_NEGATIVE,
+            R1BMembership.BOUNDARY,
+        )
+    )
+    recovery_negative = tuple(
+        record.unit_id
+        for record in pre
+        if record.membership is R1BMembership.RECOVERY_NEGATIVE
+    )
+    damage = tuple(
+        record.unit_id
+        for record in pre
+        if record.membership is R1BMembership.DAMAGE_ONLY
+    )
+    by_unit = {record.unit_id: record for record in records}
+    gains = tuple(
+        by_unit[unit_id].positive_score_delta
+        if not by_unit[unit_id].errors
+        and isinstance(by_unit[unit_id].positive_score_delta, float)
+        and math.isfinite(by_unit[unit_id].positive_score_delta)
+        else -math.inf
+        for unit_id in eligible
+    )
+    missing = sum(not math.isfinite(value) for value in gains)
+    median_with_sentinel = float(median(gains)) if gains else None
+    public_median = (
+        median_with_sentinel
+        if median_with_sentinel is not None and math.isfinite(median_with_sentinel)
+        else None
+    )
+    improved_count = sum(value > 0.0 for value in gains)
+    required_improved = math.ceil(R1B_MIN_GAIN_FRACTION * len(eligible))
+    gain_gate = bool(
+        eligible
+        and improved_count >= required_improved
+        and median_with_sentinel is not None
+        and median_with_sentinel > 0.0
+    )
+    if recovery_negative:
+        recovered_count = sum(
+            not by_unit[unit_id].errors
+            and by_unit[unit_id].recovered_negative is True
+            for unit_id in recovery_negative
+        )
+        required_recovered = math.ceil(
+            R1B_MIN_NEGATIVE_RECOVERY_FRACTION * len(recovery_negative)
+        )
+        recovery_gate = recovered_count >= required_recovered
+    else:
+        recovered_count = required_recovered = None
+        recovery_gate = True
+    harm_count = sum(
+        by_unit[unit_id].decision_harm is True for unit_id in damage
+    )
+    damage_gate = all(
+        not by_unit[unit_id].errors
+        and by_unit[unit_id].decision_harm is False
+        for unit_id in damage
+    )
+    false_positive_count = sum(
+        record.observed_negative_false_positive is True for record in records
+    )
+    negative_gate = all(
+        not record.errors
+        and record.observed_negative_false_positive is False
+        for record in records
+    )
+    return R1BRepairPointAggregate(
+        pre[0].condition_id,
+        point_kind,
+        radius_pixels,
+        roster,
+        eligible,
+        recovery_negative,
+        damage,
+        len(eligible),
+        len(gains) - missing,
+        improved_count,
+        required_improved,
+        public_median,
+        missing,
+        recovered_count,
+        required_recovered,
+        harm_count,
+        false_positive_count,
+        R1B_FIXED_UNIT_COUNT,
+        gain_gate and recovery_gate and damage_gate and negative_gate,
+    )
+
+
+def evaluate_r1b_repair(
+    *,
+    pre_records_by_condition: Mapping[str, Sequence[R1BPreUnitRecord]],
+    real_h_records_by_condition: Mapping[
+        str, Sequence[R1BRepairPointRecord]
+    ],
+    fine_grid_records_by_condition: Mapping[
+        str, Mapping[int, Sequence[R1BRepairPointRecord]]
+    ],
+    ordered_roster: Sequence[str],
+) -> R1BRepairEvaluation:
+    expected = tuple(spec.condition_id for spec in R1A_CORE_CONDITIONS)
+    if (
+        tuple(pre_records_by_condition) != expected
+        or tuple(real_h_records_by_condition) != expected
+    ):
+        raise ValueError("R1B repair requires all ten core conditions in order")
+    conditions: list[R1BRepairConditionEvaluation] = []
+    for spec in R1A_CORE_CONDITIONS:
+        pre, roster = _validate_roster(
+            pre_records_by_condition[spec.condition_id], ordered_roster
+        )
+        if any(record.errors or record.membership is None for record in pre):
+            raise ValueError("R1B repair requires complete frozen old membership")
+        eligible = tuple(
+            record.unit_id
+            for record in pre
+            if record.membership in (
+                R1BMembership.RECOVERY_NEGATIVE,
+                R1BMembership.BOUNDARY,
+            )
+        )
+        damage = tuple(
+            record.unit_id
+            for record in pre
+            if record.membership is R1BMembership.DAMAGE_ONLY
+        )
+        real = aggregate_repair_point(
+            pre_records=pre,
+            point_records=real_h_records_by_condition[spec.condition_id],
+            ordered_roster=roster,
+        )
+        if eligible:
+            grid = fine_grid_records_by_condition.get(spec.condition_id)
+            if grid is None or tuple(grid) != R1B_REPAIR_PIXEL_GRID:
+                raise ValueError(
+                    "applicable R1B repair condition requires the full pixel grid"
+                )
+            fine = tuple(
+                aggregate_repair_point(
+                    pre_records=pre,
+                    point_records=grid[radius],
+                    ordered_roster=roster,
+                )
+                for radius in R1B_REPAIR_PIXEL_GRID
+            )
+            accepted = None
+            for aggregate in fine:
+                if not aggregate.passed:
+                    break
+                accepted = aggregate.radius_pixels
+            eligibility_status = "APPLICABLE"
+        else:
+            if spec.condition_id in fine_grid_records_by_condition:
+                raise ValueError(
+                    "empty-E R1B repair condition must not create fine-grid records"
+                )
+            fine = ()
+            accepted = None
+            eligibility_status = "NOT_APPLICABLE/INSUFFICIENT_ELIGIBLE"
+        conditions.append(
+            R1BRepairConditionEvaluation(
+                spec.condition_id,
+                roster,
+                eligible,
+                damage,
+                eligibility_status,
+                real,
+                fine,
+                accepted,
+                bool(eligible and real.passed),
+                bool(eligible and accepted is not None and accepted >= 1),
+            )
+        )
+    real_count = sum(condition.real_h_passed for condition in conditions)
+    fine_count = sum(condition.fine_nonzero_prefix_passed for condition in conditions)
+    if real_count == len(R1A_CORE_CONDITIONS):
+        real_status = R1B_REPAIR_REAL_ALL_CORE_PASSED
+    elif real_count:
+        real_status = R1B_REPAIR_REAL_PARTIAL_CORE_PASSED
+    else:
+        real_status = R1B_REPAIR_REAL_NO_CORE_PASSED
+    if fine_count == len(R1A_CORE_CONDITIONS):
+        fine_status = R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX
+    elif fine_count:
+        fine_status = R1B_REPAIR_FINE_PARTIAL_CORE_NONZERO_PREFIX
+    else:
+        fine_status = R1B_REPAIR_FINE_ZERO_ONLY_ALL_CORE
+    r2_candidate = real_status == R1B_REPAIR_REAL_ALL_CORE_PASSED
+    return R1BRepairEvaluation(
+        R1B_REPAIR_METHOD_PASSED if r2_candidate else R1B_REPAIR_METHOD_NOT_READY,
+        real_status,
+        fine_status,
+        tuple(conditions),
+        real_count,
+        fine_count,
+        r2_candidate,
+    )
+
+
 __all__ = [
     "R1B_BOUNDARY_RATIO",
     "R1B_CLAIM_CEILING",
@@ -666,6 +1097,16 @@ __all__ = [
     "R1B_TRUTH_UTILITY_AND_NONZERO_EPSILON_PASSED",
     "R1B_TRUTH_UTILITY_FAILED",
     "R1B_ZERO_ONLY_TOLERANCE_FAILED",
+    "R1B_REPAIR_CLAIM_CEILING",
+    "R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX",
+    "R1B_REPAIR_FINE_PARTIAL_CORE_NONZERO_PREFIX",
+    "R1B_REPAIR_FINE_ZERO_ONLY_ALL_CORE",
+    "R1B_REPAIR_METHOD_NOT_READY",
+    "R1B_REPAIR_METHOD_PASSED",
+    "R1B_REPAIR_PIXEL_GRID",
+    "R1B_REPAIR_REAL_ALL_CORE_PASSED",
+    "R1B_REPAIR_REAL_NO_CORE_PASSED",
+    "R1B_REPAIR_REAL_PARTIAL_CORE_PASSED",
     "R1BConditionEvaluation",
     "R1BEvaluation",
     "R1BLambdaAggregate",
@@ -673,15 +1114,25 @@ __all__ = [
     "R1BMembership",
     "R1BPreUnitRecord",
     "R1BScoredTriplet",
+    "R1BRepairConditionEvaluation",
+    "R1BRepairEvaluation",
+    "R1BRepairPointAggregate",
+    "R1BRepairPointRecord",
+    "R1BStoredPrediction",
     "aggregate_lambda",
     "controlled_correspondences",
     "controlled_homography",
+    "directional_correspondences_for_pixels",
+    "directional_homography_for_pixels",
     "epsilon_for_lambda",
     "evaluate_condition",
     "evaluate_lambda_unit",
+    "evaluate_repair_point_unit",
     "evaluate_r1b",
+    "evaluate_r1b_repair",
     "freeze_pre_recovery_record",
     "paired_content_decision",
+    "aggregate_repair_point",
     "rectify_attacked_rgb",
     "scored_triplet",
 ]

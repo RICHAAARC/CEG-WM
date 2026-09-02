@@ -10,6 +10,7 @@ from cegwm.geometry_v7.r0 import ContentScore
 from cegwm.geometry_v7.r1a import (
     R1A_CORE_CONDITIONS,
     apply_homography,
+    corner_rmse,
     render_r1a_attack,
     truth_correspondences,
 )
@@ -19,14 +20,26 @@ from cegwm.geometry_v7.r1b import (
     R1B_TRUTH_UTILITY_AND_NONZERO_EPSILON_PASSED,
     R1B_TRUTH_UTILITY_FAILED,
     R1B_ZERO_ONLY_TOLERANCE_FAILED,
+    R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX,
+    R1B_REPAIR_FINE_PARTIAL_CORE_NONZERO_PREFIX,
+    R1B_REPAIR_METHOD_NOT_READY,
+    R1B_REPAIR_METHOD_PASSED,
+    R1B_REPAIR_PIXEL_GRID,
+    R1B_REPAIR_REAL_ALL_CORE_PASSED,
+    R1B_REPAIR_REAL_PARTIAL_CORE_PASSED,
     R1BMembership,
+    R1BStoredPrediction,
     aggregate_lambda,
     controlled_correspondences,
     controlled_homography,
+    directional_correspondences_for_pixels,
+    directional_homography_for_pixels,
     epsilon_for_lambda,
     evaluate_condition,
     evaluate_lambda_unit,
+    evaluate_repair_point_unit,
     evaluate_r1b,
+    evaluate_r1b_repair,
     freeze_pre_recovery_record,
     rectify_attacked_rgb,
     scored_triplet,
@@ -349,3 +362,198 @@ def test_membership_failure_cannot_enter_method_evaluation() -> None:
             lambda_records={},
             ordered_roster=_ROSTER,
         )
+
+
+def _stored_prediction(spec, unit_id: str, *, predicted_rmse=None):
+    truth = truth_correspondences(spec)
+    predicted = tuple((x + 0.02, y) for x, y in truth)
+    rmse = corner_rmse(predicted, truth) if predicted_rmse is None else predicted_rmse
+    return R1BStoredPrediction(
+        unit_id,
+        spec.condition_id,
+        truth,
+        predicted,
+        controlled_homography(spec, 0.0),
+        rmse,
+        rmse * 511.0 / 2.0,
+        (),
+    )
+
+
+@pytest.mark.integration
+def test_directional_pixel_grid_scales_and_extrapolates_stored_error() -> None:
+    spec = R1A_CORE_CONDITIONS[0]
+    prediction = _stored_prediction(spec, _ROSTER[0])
+    assert R1B_REPAIR_PIXEL_GRID == (0, 1, 2, 4, 6, 8)
+    assert directional_correspondences_for_pixels(prediction, 0) == (
+        prediction.truth_correspondences
+    )
+    for radius in R1B_REPAIR_PIXEL_GRID:
+        points = directional_correspondences_for_pixels(prediction, radius)
+        error_pixels = (
+            corner_rmse(points, prediction.truth_correspondences) * 511.0 / 2.0
+        )
+        assert error_pixels == pytest.approx(radius)
+        solved = directional_homography_for_pixels(prediction, radius)
+        mapped = apply_homography(solved, CANONICAL_CORNERS_NORMALIZED)
+        for actual, expected in zip(mapped, points, strict=True):
+            assert actual == pytest.approx(expected)
+    assert prediction.prediction_rmse_pixels < 8.0
+
+
+@pytest.mark.integration
+def test_zero_radius_survives_missing_direction_nonzero_points_fail() -> None:
+    spec = R1A_CORE_CONDITIONS[0]
+    truth = truth_correspondences(spec)
+    prediction = R1BStoredPrediction(
+        _ROSTER[0], spec.condition_id, truth, truth, None, 0.0, 0.0,
+        ("stored_prediction:invalid_homography",),
+    )
+    assert directional_correspondences_for_pixels(prediction, 0) == truth
+    with pytest.raises(ValueError, match="direction is unavailable"):
+        directional_correspondences_for_pixels(prediction, 1)
+
+    inconsistent = R1BStoredPrediction(
+        _ROSTER[0], spec.condition_id, truth, truth, None, 0.1, 1.0, ()
+    )
+    with pytest.raises(ValueError, match="pixel conversion differs"):
+        directional_correspondences_for_pixels(inconsistent, 1)
+
+
+def _repair_inputs(*, real_fail_condition=None, fine_fail_condition=None):
+    pre_by_condition = {}
+    real_by_condition = {}
+    fine_by_condition = {}
+    for spec in R1A_CORE_CONDITIONS:
+        pre = _pre_records(spec, (0.1,) * 8)
+        pre_by_condition[spec.condition_id] = pre
+        real_gain = -0.2 if spec.condition_id == real_fail_condition else 0.2
+        real_by_condition[spec.condition_id] = tuple(
+            evaluate_repair_point_unit(
+                pre_record=record,
+                point_kind="real_h",
+                radius_pixels=None,
+                scores=_triplet(record.scores.positive_cg_vs_g.margin + real_gain),
+            )
+            for record in pre
+        )
+        grid = {}
+        for radius in R1B_REPAIR_PIXEL_GRID:
+            gain = (
+                -0.2
+                if spec.condition_id == fine_fail_condition and radius == 1
+                else 0.2
+            )
+            grid[radius] = tuple(
+                evaluate_repair_point_unit(
+                    pre_record=record,
+                    point_kind="directional_pixel",
+                    radius_pixels=radius,
+                    scores=_triplet(record.scores.positive_cg_vs_g.margin + gain),
+                )
+                for record in pre
+            )
+        fine_by_condition[spec.condition_id] = grid
+    return pre_by_condition, real_by_condition, fine_by_condition
+
+
+@pytest.mark.integration
+def test_repair_real_and_fine_statuses_are_orthogonal() -> None:
+    pre, real, fine = _repair_inputs()
+    passed = evaluate_r1b_repair(
+        pre_records_by_condition=pre,
+        real_h_records_by_condition=real,
+        fine_grid_records_by_condition=fine,
+        ordered_roster=_ROSTER,
+    )
+    assert passed.real_h_status == R1B_REPAIR_REAL_ALL_CORE_PASSED
+    assert passed.fine_grid_status == R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX
+    assert passed.status == R1B_REPAIR_METHOD_PASSED
+    assert passed.r2_candidate
+
+    pre, real, fine = _repair_inputs(
+        real_fail_condition=R1A_CORE_CONDITIONS[0].condition_id
+    )
+    real_partial = evaluate_r1b_repair(
+        pre_records_by_condition=pre,
+        real_h_records_by_condition=real,
+        fine_grid_records_by_condition=fine,
+        ordered_roster=_ROSTER,
+    )
+    assert real_partial.real_h_status == R1B_REPAIR_REAL_PARTIAL_CORE_PASSED
+    assert real_partial.fine_grid_status == R1B_REPAIR_FINE_ALL_CORE_NONZERO_PREFIX
+    assert real_partial.status == R1B_REPAIR_METHOD_NOT_READY
+    assert not real_partial.r2_candidate
+
+    pre, real, fine = _repair_inputs(
+        fine_fail_condition=R1A_CORE_CONDITIONS[0].condition_id
+    )
+    fine_partial = evaluate_r1b_repair(
+        pre_records_by_condition=pre,
+        real_h_records_by_condition=real,
+        fine_grid_records_by_condition=fine,
+        ordered_roster=_ROSTER,
+    )
+    assert fine_partial.real_h_status == R1B_REPAIR_REAL_ALL_CORE_PASSED
+    assert fine_partial.fine_grid_status == R1B_REPAIR_FINE_PARTIAL_CORE_NONZERO_PREFIX
+    assert fine_partial.status == R1B_REPAIR_METHOD_PASSED
+    assert fine_partial.r2_candidate
+    assert fine_partial.conditions[0].accepted_max_pixels == 0
+    assert len(fine_partial.conditions[0].fine_grid_aggregates) == 6
+
+
+@pytest.mark.integration
+def test_repair_empty_e_is_not_applicable_and_cannot_pass_core() -> None:
+    pre, real, fine = _repair_inputs()
+    spec = R1A_CORE_CONDITIONS[0]
+    damage_pre = _pre_records(spec, (0.8,) * 8)
+    pre[spec.condition_id] = damage_pre
+    real[spec.condition_id] = tuple(
+        evaluate_repair_point_unit(
+            pre_record=record,
+            point_kind="real_h",
+            radius_pixels=None,
+            scores=_triplet(1.0),
+        )
+        for record in damage_pre
+    )
+    del fine[spec.condition_id]
+    evaluation = evaluate_r1b_repair(
+        pre_records_by_condition=pre,
+        real_h_records_by_condition=real,
+        fine_grid_records_by_condition=fine,
+        ordered_roster=_ROSTER,
+    )
+    first = evaluation.conditions[0]
+    assert first.eligibility_status == "NOT_APPLICABLE/INSUFFICIENT_ELIGIBLE"
+    assert not first.real_h_passed
+    assert not first.fine_nonzero_prefix_passed
+    assert evaluation.real_h_status == R1B_REPAIR_REAL_PARTIAL_CORE_PASSED
+    assert evaluation.status == R1B_REPAIR_METHOD_NOT_READY
+
+
+@pytest.mark.integration
+def test_repair_failure_stays_in_full_eligible_denominator() -> None:
+    pre, real, fine = _repair_inputs()
+    spec = R1A_CORE_CONDITIONS[0]
+    records = list(real[spec.condition_id])
+    records[0] = evaluate_repair_point_unit(
+        pre_record=pre[spec.condition_id][0],
+        point_kind="real_h",
+        radius_pixels=None,
+        scores=None,
+        errors=("real_h_recovery:RuntimeError",),
+    )
+    real[spec.condition_id] = tuple(records)
+    evaluation = evaluate_r1b_repair(
+        pre_records_by_condition=pre,
+        real_h_records_by_condition=real,
+        fine_grid_records_by_condition=fine,
+        ordered_roster=_ROSTER,
+    )
+    aggregate = evaluation.conditions[0].real_h_aggregate
+    assert aggregate.eligible_denominator == 8
+    assert aggregate.valid_gain_count == 7
+    assert aggregate.missing_gain_sentinel_count == 1
+    assert not aggregate.passed
+    assert evaluation.real_h_status == R1B_REPAIR_REAL_PARTIAL_CORE_PASSED
