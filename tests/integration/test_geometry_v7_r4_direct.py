@@ -4,6 +4,7 @@ from argparse import Namespace
 import ast
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from PIL import Image
 import pytest
@@ -290,6 +291,81 @@ def test_callback_errors_keep_fixed_seven_and_never_retry():
     assert len(setup_rows) == 7
     assert [(row["condition_id"], row["unit_id"]) for row in setup_rows] == list(entry.CALLBACK_ROSTER)
     assert all(not row["attempted"] and row["operational_interruption"] for row in setup_rows)
+
+
+def test_boundary_post_score_failure_has_null_final_fp_and_completed_recovery():
+    image = Image.new("RGB", (512, 512), (128, 128, 128))
+    item = entry.CallbackInput(*entry.CALLBACK_ROSTER[0], image, image, image)
+    scorer_calls = 0
+
+    def scorer(_image):
+        nonlocal scorer_calls
+        scorer_calls += 1
+        if scorer_calls == 4:
+            raise RuntimeError("post score interrupted")
+        phase = (scorer_calls - 1) % 6
+        return _content_score(-1.0 if phase == 2 else 0.0)
+
+    record = entry._callback_record(item, scorer=scorer, detector=lambda _image: _geometry())
+    assert record["route"] == "BOUNDARY"
+    assert record["runtime"]["recovered"] is True
+    assert record["runtime"]["post_score"] is None
+    assert record["final_negative_false_positive"] is None
+    assert record["call_counts"] == {
+        "score_rgb": 2, "content_scorer": 4, "detect_geometry": 1,
+        "paired_null_rectifications": 2, "candidate_rectifications": 1,
+    }
+    assert record["operational_interruption"] is True
+    assert len(record["score_snapshots"]) == 1
+
+
+def test_run_callback_preserves_render_failure_and_processes_unaffected(monkeypatch, tmp_path):
+    from experiments import run_geometry_v7_r1b as repair_runner
+
+    image = Image.new("RGB", (512, 512), (128, 128, 128))
+    rendered = tuple(
+        entry.CallbackInput(
+            condition, unit,
+            None if index == 0 else image,
+            None if index == 0 else image,
+            None if index == 0 else image,
+            ("attack_render:OSError",) if index == 0 else (),
+        )
+        for index, (condition, unit) in enumerate(entry.CALLBACK_ROSTER)
+    )
+    monkeypatch.setattr(
+        repair_runner, "_load_r0_inputs",
+        lambda *_args: tuple(SimpleNamespace(unit_id=unit) for unit in ALL_UNITS),
+    )
+    monkeypatch.setattr(entry, "_validate_r1a_identity", lambda *_args: None)
+    monkeypatch.setattr(entry, "_render_callback_inputs", lambda _inputs: rendered)
+    content_calls = 0
+
+    def scorer(_image):
+        nonlocal content_calls
+        phase = content_calls % 6
+        content_calls += 1
+        return _content_score(-1.0 if phase == 2 else 1.0 if phase == 5 else 0.0)
+
+    monkeypatch.setattr(
+        entry, "_setup_real_callbacks",
+        lambda *_args: (scorer, lambda _image: _geometry()),
+    )
+    args = Namespace(
+        repo_root=str(tmp_path), r0_artifact_root=str(tmp_path / "r0"),
+        r1a_artifact_root=str(tmp_path / "r1a"),
+        syncseal_checkpoint=str(tmp_path / "syncseal.pt"),
+    )
+    payload = entry._run_callback(args, "1" * 40)
+    assert payload["status"] == entry.OPERATIONAL_STATUS
+    assert len(payload["rows"]) == 7
+    assert payload["rows"][0]["condition_id"] == entry.CALLBACK_ROSTER[0][0]
+    assert payload["rows"][0]["unit_id"] == entry.CALLBACK_ROSTER[0][1]
+    assert payload["rows"][0]["errors"] == ["attack_render:OSError"]
+    assert payload["rows"][0]["attempted"] is False
+    assert all(row["attempted"] for row in payload["rows"][1:])
+    assert all(row["runtime"]["final_positive"] for row in payload["rows"][1:])
+    assert content_calls == 36
 
 
 def test_callback_runtime_call_has_no_outer_metadata_arguments():

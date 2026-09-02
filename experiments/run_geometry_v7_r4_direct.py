@@ -458,7 +458,11 @@ def _callback_record(
         item.cg, score_rgb=score_rgb, detect_geometry=detect_geometry
     )
     snapshots = tuple(state["snapshots"])
-    final_snapshot = snapshots[-1] if snapshots else None
+    final_snapshot = None
+    if runtime.route in ("DIRECT_POSITIVE", "DIRECT_NEGATIVE") and snapshots:
+        final_snapshot = snapshots[0]
+    elif runtime.route == "BOUNDARY" and runtime.post_score is not None and len(snapshots) >= 2:
+        final_snapshot = snapshots[1]
     final_fp = (
         final_snapshot.negative_g_vs_u.positive if final_snapshot is not None else None
     )
@@ -495,17 +499,27 @@ def _callback_records(
     return tuple(_callback_record(item, scorer=scorer, detector=detector) for item in inputs)
 
 
-def _operational_callback_rows(error: BaseException):
+def _operational_callback_rows(
+    error: BaseException, rendered: Sequence[CallbackInput] | None = None,
+):
     category = f"setup:{type(error).__name__}"
-    return tuple({
-        "condition_id": condition_id, "unit_id": unit_id,
-        "attempted": False, "route": "ERROR", "runtime": None,
-        "score_snapshots": [],
-        "call_counts": {"score_rgb": 0, "content_scorer": 0,
-                        "detect_geometry": 0, "paired_null_rectifications": 0},
-        "final_negative_false_positive": None,
-        "errors": [category], "operational_interruption": True,
-    } for condition_id, unit_id in CALLBACK_ROSTER)
+    rendered_by = {
+        (item.condition_id, item.unit_id): item for item in (rendered or ())
+    }
+    rows = []
+    for condition_id, unit_id in CALLBACK_ROSTER:
+        item = rendered_by.get((condition_id, unit_id))
+        evidence = list(item.errors) if item is not None and item.errors else [category]
+        rows.append({
+            "condition_id": condition_id, "unit_id": unit_id,
+            "attempted": False, "route": "ERROR", "runtime": None,
+            "score_snapshots": [],
+            "call_counts": {"score_rgb": 0, "content_scorer": 0,
+                            "detect_geometry": 0, "paired_null_rectifications": 0},
+            "final_negative_false_positive": None,
+            "errors": evidence, "operational_interruption": True,
+        })
+    return tuple(rows)
 
 
 def _setup_real_callbacks(repo_root: Path, checkpoint: Path):
@@ -632,13 +646,12 @@ def _run_callback(args, exact: str):
     r0_root = Path(args.r0_artifact_root).resolve()
     r1a_root = Path(args.r1a_artifact_root).resolve()
     checkpoint = Path(args.syncseal_checkpoint).resolve()
+    rendered = None
     try:
         inputs = repair_runner._load_r0_inputs(Path(args.repo_root).resolve(), r0_root)
         roster = tuple(item.unit_id for item in inputs)
         _validate_r1a_identity(Path(args.repo_root).resolve(), r1a_root, roster)
         rendered = _render_callback_inputs(inputs)
-        if any(item.errors for item in rendered):
-            raise RuntimeError("fixed callback attack rendering failed")
         scorer, detector = _setup_real_callbacks(Path(args.repo_root).resolve(), checkpoint)
         rows = _callback_records(rendered, scorer=scorer, detector=detector)
         return _callback_payload(
@@ -646,7 +659,7 @@ def _run_callback(args, exact: str):
             checkpoint=checkpoint, rows=rows,
         )
     except Exception as error:
-        rows = _operational_callback_rows(error)
+        rows = _operational_callback_rows(error, rendered)
         return _callback_payload(
             exact=exact, r0_root=r0_root, r1a_root=r1a_root,
             checkpoint=checkpoint, rows=rows, error=error,
