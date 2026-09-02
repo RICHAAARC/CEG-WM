@@ -142,7 +142,6 @@ def test_single_raw_h_recovery_reuses_same_scorer_key_assets_and_tau(monkeypatch
     [
         (_geometry(h=None, legal=True), "GEOMETRY_NO_H"),
         (_geometry(h=((1.0, 0.0, 0.0),) * 3), "GEOMETRY_FAIL_CLOSED"),
-        (_geometry(h=IDENTITY_H, legal=False), "GEOMETRY_FAIL_CLOSED"),
     ],
 )
 def test_no_h_and_invalid_h_are_complete_fail_closed(monkeypatch, estimate, route) -> None:
@@ -198,6 +197,79 @@ def test_unknown_geometry_status_fails_operationally(monkeypatch) -> None:
     record = _detect(Image.new("RGB", (512, 512)), backend)
     assert record.route == "ERROR_FAIL_CLOSED" and not record.method_complete
     assert "unknown GeometryStatus" in record.operational_error
+
+
+def test_inconsistent_observable_geometry_blocks_detection_calibration_and_replay(
+    monkeypatch,
+) -> None:
+    inconsistent = GeometryEstimate(
+        GeometryStatus.UNRELIABLE, 0.0, None, None, IDENTITY_H, True, False, None
+    )
+    backend = GeometryBackend(inconsistent)
+    seen = _install_scores(monkeypatch, [0.0] * 513)
+    rectifications = []
+
+    def forbidden_rectification(image, matrix):
+        rectifications.append((image, matrix))
+        raise AssertionError("inconsistent Geometry must never be rectified")
+
+    monkeypatch.setattr(runtime, "rectify_attacked_rgb", forbidden_rectification)
+    record = _detect(Image.new("RGB", (512, 512)), backend)
+    assert record.route == "ERROR_FAIL_CLOSED" and not record.positive
+    assert not record.method_complete and not record.recovered
+    assert "UNRELIABLE invariant violation" in record.operational_error
+    rows = runtime.run_development_calibration(
+        _roster(), KEY, _test_assets(backend), lambda ref: Image.new("RGB", (512, 512))
+    )
+    assert all(row.geometry_outcome == "GEOMETRY_ERROR" for row in rows)
+    assert all(not row.method_complete and row.operational_error for row in rows)
+    replay = runtime.run_development_full_system_replay(
+        _roster(), KEY, _test_assets(backend),
+        lambda ref: Image.new("RGB", (512, 512)), 1.0,
+    )
+    assert all(row.route == "ERROR_FAIL_CLOSED" and not row.positive for row in replay)
+    assert all(not row.method_complete and not row.recovered for row in replay)
+    assert len(seen) == backend.calls == 513
+    assert rectifications == []
+
+
+@pytest.mark.parametrize(
+    "inconsistent",
+    [
+        GeometryEstimate(
+            GeometryStatus.UNSUPPORTED, 0.0, None, None, None, True, False, "degenerate"
+        ),
+        GeometryEstimate(
+            GeometryStatus.UNSUPPORTED, 0.0, None, None, IDENTITY_H, False, False,
+            "degenerate",
+        ),
+        GeometryEstimate(
+            GeometryStatus.UNSUPPORTED, 0.0, None, None, None, False, False, None
+        ),
+        GeometryEstimate(
+            GeometryStatus.RELIABLE, 0.0, None, None, None, False, True, None
+        ),
+        GeometryEstimate(
+            GeometryStatus.UNRELIABLE, 0.0, None, None, IDENTITY_H, False, False, None
+        ),
+        GeometryEstimate(
+            GeometryStatus.UNRELIABLE, 0.0, None, None, None, True, True, "unexpected"
+        ),
+    ],
+)
+def test_other_inconsistent_known_geometry_states_block_before_rectification(
+    monkeypatch, inconsistent,
+) -> None:
+    backend = GeometryBackend(inconsistent)
+    _install_scores(monkeypatch, [0.0])
+    monkeypatch.setattr(
+        runtime, "rectify_attacked_rgb",
+        lambda image, matrix: pytest.fail("inconsistent Geometry must never be rectified"),
+    )
+    record = _detect(Image.new("RGB", (512, 512)), backend)
+    assert record.route == "ERROR_FAIL_CLOSED" and not record.positive
+    assert not record.method_complete and not record.recovered
+    assert "geometry_runtime:" in record.operational_error
 
 
 def test_post_score_error_is_operational_without_retry(monkeypatch) -> None:

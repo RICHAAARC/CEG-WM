@@ -189,14 +189,38 @@ def _geometry_disposition(geometry: GeometryEstimate) -> tuple[str, str | None]:
         detail = geometry.error or "GeometryStatus.ERROR without explanatory error"
         return "OPERATIONAL", f"geometry_runtime:{detail}"
     if geometry.status is GeometryStatus.UNSUPPORTED:
+        if (
+            geometry.legal is not False
+            or geometry.basic_observable is not False
+            or geometry.homography_observed_to_canonical is not None
+            or not isinstance(geometry.error, str)
+            or not geometry.error
+        ):
+            return (
+                "OPERATIONAL",
+                "geometry_runtime:UNSUPPORTED invariant violation: expected "
+                "legal=False, basic_observable=False, H=None, explanatory error",
+            )
         return "INVALID_H", None
     if geometry.status is GeometryStatus.RELIABLE:
         if geometry.error is not None:
             return "OPERATIONAL", f"geometry_runtime:RELIABLE carried error: {geometry.error}"
+        if geometry.legal is not True or geometry.basic_observable is not True:
+            return (
+                "OPERATIONAL",
+                "geometry_runtime:RELIABLE invariant violation: expected "
+                "legal=True, basic_observable=True",
+            )
         return "RAW_H", None
     if geometry.status is GeometryStatus.UNRELIABLE:
         if geometry.error is not None:
             return "OPERATIONAL", f"geometry_runtime:UNRELIABLE carried error: {geometry.error}"
+        if geometry.legal is not True or geometry.basic_observable is not True:
+            return (
+                "OPERATIONAL",
+                "geometry_runtime:UNRELIABLE invariant violation: expected "
+                "legal=True, basic_observable=True",
+            )
         return "RAW_H", None
     return "OPERATIONAL", f"geometry_runtime:unknown GeometryStatus: {geometry.status!r}"
 
