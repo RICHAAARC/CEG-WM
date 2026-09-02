@@ -378,8 +378,16 @@ def _payload(
     setup_error: BaseException | None = None,
 ) -> Mapping[str, Any]:
     operational = input_error is not None or setup_error is not None
+    complete_method_improvement = (
+        selection is not None
+        and selection.selected_threshold_px is not None
+        and selection.selected_metrics is not None
+        and selection.selected_metrics.usable is True
+        and test_metrics is not None
+        and test_metrics.usable is True
+    )
     status = R3_OPERATIONAL_FAILURE if operational else (
-        R3_METHOD_NOT_IMPROVED if selection is None else selection.status
+        R3_METHOD_IMPROVED if complete_method_improvement else R3_METHOD_NOT_IMPROVED
     )
     return {
         "schema": RESULT_SCHEMA, "stage": STAGE_LABEL, "exact": exact,

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -103,6 +104,36 @@ def test_runner_accepts_and_preserves_the_observed_failed_r2_identity(tmp_path):
     root.mkdir()
     (root / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     assert len(entry._validate_r2(root)[1]) == 80
+
+
+def test_top_status_requires_both_development_and_existing_test40_usable():
+    root = Path("/record-only")
+    selection = SimpleNamespace(
+        status="R3_METHOD_IMPROVED", selected_threshold_px=1,
+        selected_metrics=SimpleNamespace(usable=True),
+    )
+    unusable_test = SimpleNamespace(usable=False)
+    payload = entry._payload(
+        exact="0" * 40, r1a_root=root, repair_root=root, r2_root=root,
+        selection=selection, test_metrics=unusable_test,
+    )
+    assert payload["status"] == "R3_METHOD_NOT_IMPROVED"
+    assert payload["development_threshold_selection"] is selection
+    assert payload["existing_test40_engineering_diagnostic"] is unusable_test
+
+
+def test_top_status_is_improved_only_when_both_observed_splits_are_usable():
+    root = Path("/record-only")
+    selection = SimpleNamespace(
+        status="R3_METHOD_IMPROVED", selected_threshold_px=1,
+        selected_metrics=SimpleNamespace(usable=True),
+    )
+    usable_test = SimpleNamespace(usable=True)
+    payload = entry._payload(
+        exact="0" * 40, r1a_root=root, repair_root=root, r2_root=root,
+        selection=selection, test_metrics=usable_test,
+    )
+    assert payload["status"] == "R3_METHOD_IMPROVED"
 
 
 def test_notebook_and_cli_are_thin_create_only_phase_a_guards():
