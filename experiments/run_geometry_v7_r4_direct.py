@@ -237,6 +237,28 @@ def _row_metrics(rows: Sequence[Mapping[str, Any]]):
     }
 
 
+def _metric_comparison(observed: Mapping[str, Any], expected: Mapping[str, Any]):
+    mismatches = []
+
+    def compare(path: str, actual: Any, frozen: Any) -> None:
+        if isinstance(actual, Mapping) and isinstance(frozen, Mapping):
+            for key in sorted(set(actual) | set(frozen)):
+                compare(
+                    f"{path}.{key}" if path else str(key),
+                    actual.get(key),
+                    frozen.get(key),
+                )
+        elif actual != frozen:
+            mismatches.append({"field": path, "observed": actual, "expected": frozen})
+
+    compare("", observed, expected)
+    return {
+        "matched": not mismatches,
+        "expected": dict(expected),
+        "mismatches": mismatches,
+    }
+
+
 def _aggregate_replay(rows: Sequence[Mapping[str, Any]]):
     global_metrics = _row_metrics(rows)
     split_metrics = {
@@ -297,37 +319,57 @@ def _aggregate_replay(rows: Sequence[Mapping[str, Any]]):
         "recovery_failure_count": 0,
         "content_only_final_positive_count": 0,
     }
-    if global_metrics != expected_global:
-        raise ValueError("Geometry-V7-Direct frozen global replay metrics differ")
-    if main != {
+    expected_main = {
         "fixed_denominator": 56,
         "safe_recovered_count": 36,
         "paired_negative_false_positive_count": 0,
         "dev": {"fixed_denominator": 28, "safe_recovered_count": 18},
         "test": {"fixed_denominator": 28, "safe_recovered_count": 18},
-    }:
-        raise ValueError("Geometry-V7-Direct seven-family replay metrics differ")
+    }
+    expected_per_attack = {}
     for condition, expected in EXPECTED_ATTACK_SAFE_FP.items():
-        actual = (
-            per_attack[condition]["safe_recovered_count"],
-            per_attack[condition]["paired_negative_false_positive_count"],
-        )
-        if actual != expected:
-            raise ValueError("Geometry-V7-Direct per-attack replay metrics differ")
-    if reliable != {
+        expected_per_attack[condition] = {
+            "safe_recovered_count": expected[0],
+            "paired_negative_false_positive_count": expected[1],
+        }
+    expected_reliable = {
         "accepted_count": 21,
         "safe_recovered_count": 21,
         "paired_negative_false_positive_count": 0,
         "dev_accepted_count": 10,
         "test_accepted_count": 11,
-    }:
-        raise ValueError("Geometry-V7 Reliable ablation metrics differ")
+    }
+    observed_vs_expected = {
+        "global": _metric_comparison(global_metrics, expected_global),
+        "seven_main_conditions": _metric_comparison(main, expected_main),
+        "per_attack": {
+            condition: _metric_comparison(
+                {
+                    "safe_recovered_count": per_attack[condition]["safe_recovered_count"],
+                    "paired_negative_false_positive_count": per_attack[condition][
+                        "paired_negative_false_positive_count"
+                    ],
+                },
+                expected,
+            )
+            for condition, expected in expected_per_attack.items()
+        },
+        "reliable_ablation": _metric_comparison(reliable, expected_reliable),
+    }
+    observed_vs_expected["all_matched"] = all(
+        comparison["matched"]
+        for section, value in observed_vs_expected.items()
+        for comparison in (
+            value.values() if section == "per_attack" else (value,)
+        )
+    )
     return {
         "global": global_metrics,
         "by_split": split_metrics,
         "per_attack": per_attack,
         "seven_main_conditions": main,
         "reliable_ablation": reliable,
+        "observed_vs_expected": observed_vs_expected,
     }
 
 

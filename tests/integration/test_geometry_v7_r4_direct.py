@@ -175,7 +175,25 @@ def test_replay_mechanically_reconstructs_all_80_and_frozen_metrics():
     assert aggregates["seven_main_conditions"]["test"]["safe_recovered_count"] == 18
     assert aggregates["reliable_ablation"]["accepted_count"] == 21
     assert aggregates["reliable_ablation"]["safe_recovered_count"] == 21
+    assert aggregates["observed_vs_expected"]["all_matched"] is True
     assert all("raw" in row and "errors" in row for row in rows)
+
+
+def test_replay_aggregate_mismatch_is_serialized_without_blocking():
+    repair, r2, advanced = _fixture_payloads()
+    rows = json.loads(json.dumps(entry._replay_rows(repair, r2, advanced)))
+    rows[0]["direct"]["safe_recovered"] = not rows[0]["direct"]["safe_recovered"]
+
+    aggregates = entry._aggregate_replay(rows)
+
+    assert aggregates["global"]["safe_recovered_count"] == 39
+    report = aggregates["observed_vs_expected"]
+    assert report["all_matched"] is False
+    assert report["global"]["matched"] is False
+    assert report["global"]["mismatches"] == [{
+        "field": "safe_recovered_count", "observed": 39, "expected": 40,
+    }]
+    assert json.loads(json.dumps(aggregates))["global"]["fixed_denominator"] == 80
 
 
 def test_replay_loader_validates_real_shape_order_and_bindings(tmp_path):
