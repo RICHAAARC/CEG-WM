@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from PIL import Image
 
-from cegwm.geometry_v7.contracts import GeometryEstimate
+from cegwm.geometry_v7.contracts import GeometryEstimate, GeometryStatus
 from cegwm.geometry_v7.r1b import rectify_attacked_rgb
 from cegwm.geometry_v7.syncseal import SyncSealTorchScript
 from cegwm.method.blind_detection import (
@@ -182,6 +182,25 @@ def _raw_h(geometry: GeometryEstimate) -> tuple[tuple[float, float, float], ...]
     return parsed
 
 
+def _geometry_disposition(geometry: GeometryEstimate) -> tuple[str, str | None]:
+    """Classify the typed Geometry result before inspecting any raw H."""
+
+    if geometry.status is GeometryStatus.ERROR:
+        detail = geometry.error or "GeometryStatus.ERROR without explanatory error"
+        return "OPERATIONAL", f"geometry_runtime:{detail}"
+    if geometry.status is GeometryStatus.UNSUPPORTED:
+        return "INVALID_H", None
+    if geometry.status is GeometryStatus.RELIABLE:
+        if geometry.error is not None:
+            return "OPERATIONAL", f"geometry_runtime:RELIABLE carried error: {geometry.error}"
+        return "RAW_H", None
+    if geometry.status is GeometryStatus.UNRELIABLE:
+        if geometry.error is not None:
+            return "OPERATIONAL", f"geometry_runtime:UNRELIABLE carried error: {geometry.error}"
+        return "RAW_H", None
+    return "OPERATIONAL", f"geometry_runtime:unknown GeometryStatus: {geometry.status!r}"
+
+
 def _record(
     route: str,
     positive: bool,
@@ -240,11 +259,17 @@ def _detect_core(
             method_complete=False,
             operational_error="geometry_runtime:TypeError: detector must return GeometryEstimate",
         )
-    if geometry.error is not None:
+    disposition, geometry_error = _geometry_disposition(geometry)
+    if disposition == "OPERATIONAL":
         return _record(
             "ERROR_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
             method_complete=False,
-            operational_error=f"geometry_runtime:{geometry.error}",
+            operational_error=geometry_error,
+        )
+    if disposition == "INVALID_H":
+        return _record(
+            "GEOMETRY_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
+            method_complete=True,
         )
     try:
         matrix = _raw_h(geometry)
@@ -364,10 +389,16 @@ def _calibration_row(
             "GEOMETRY_ERROR", False,
             "geometry_runtime:TypeError: detector must return GeometryEstimate",
         )
-    if geometry.error is not None:
+    disposition, geometry_error = _geometry_disposition(geometry)
+    if disposition == "OPERATIONAL":
         return BlindCalibrationRow(
             roster_index, unit_id, source_stratum, image_digest, pre, None,
-            "GEOMETRY_ERROR", False, f"geometry_runtime:{geometry.error}",
+            "GEOMETRY_ERROR", False, geometry_error,
+        )
+    if disposition == "INVALID_H":
+        return BlindCalibrationRow(
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "INVALID_H", True, None,
         )
     try:
         matrix = _raw_h(geometry)

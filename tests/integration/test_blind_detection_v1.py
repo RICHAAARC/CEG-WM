@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from cegwm.geometry_v7.contracts import GeometryEstimate, GeometryStatus
+from cegwm.geometry_v7.contracts import GeometryEstimate, GeometryStatus, estimate_geometry
 from cegwm.geometry_v7.syncseal import SyncSealTorchScript
 from cegwm.method.blind_detection import (
     BlindCalibrationRoster,
@@ -153,16 +153,51 @@ def test_no_h_and_invalid_h_are_complete_fail_closed(monkeypatch, estimate, rout
     assert backend.calls == 1
 
 
-def test_every_geometry_error_is_operational_and_retained(monkeypatch) -> None:
-    raw = "unclassified backend failure that must not be guessed"
-    backend = GeometryBackend(GeometryEstimate.error_record(raw))
-    _install_scores(monkeypatch, [0.0] * 256)
+def test_real_unsupported_geometry_is_complete_invalid_h_in_detection_and_calibration(
+    monkeypatch,
+) -> None:
+    unsupported = estimate_geometry(0.0, ((0.0, 0.0),) * 4)
+    assert unsupported.status is GeometryStatus.UNSUPPORTED
+    assert not unsupported.legal and unsupported.homography_observed_to_canonical is None
+    assert unsupported.error is not None
+    backend = GeometryBackend(unsupported)
+    _install_scores(monkeypatch, [0.0] * 257)
+    record = _detect(Image.new("RGB", (512, 512)), backend)
+    assert record.route == "GEOMETRY_FAIL_CLOSED" and not record.positive
+    assert record.method_complete and record.operational_error is None
+    assert record.geometry is unsupported
     rows = runtime.run_development_calibration(
         _roster(), KEY, _test_assets(backend), lambda ref: Image.new("RGB", (512, 512))
     )
-    assert len(rows) == 256 and backend.calls == 256
+    assert len(rows) == 256 and backend.calls == 257
+    assert all(row.geometry_outcome == "INVALID_H" for row in rows)
+    assert all(row.method_complete and row.operational_error is None for row in rows)
+
+
+def test_every_geometry_error_is_operational_and_retained(monkeypatch) -> None:
+    raw = "unclassified backend failure that must not be guessed"
+    backend = GeometryBackend(GeometryEstimate.error_record(raw))
+    _install_scores(monkeypatch, [0.0] * 257)
+    record = _detect(Image.new("RGB", (512, 512)), backend)
+    assert record.route == "ERROR_FAIL_CLOSED" and not record.method_complete
+    assert record.operational_error == f"geometry_runtime:{raw}"
+    rows = runtime.run_development_calibration(
+        _roster(), KEY, _test_assets(backend), lambda ref: Image.new("RGB", (512, 512))
+    )
+    assert len(rows) == 256 and backend.calls == 257
     assert all(not row.method_complete for row in rows)
     assert all(row.operational_error == f"geometry_runtime:{raw}" for row in rows)
+
+
+def test_unknown_geometry_status_fails_operationally(monkeypatch) -> None:
+    unknown = GeometryEstimate(
+        "FUTURE_STATUS", 0.0, None, None, None, False, False, None  # type: ignore[arg-type]
+    )
+    backend = GeometryBackend(unknown)
+    _install_scores(monkeypatch, [0.0])
+    record = _detect(Image.new("RGB", (512, 512)), backend)
+    assert record.route == "ERROR_FAIL_CLOSED" and not record.method_complete
+    assert "unknown GeometryStatus" in record.operational_error
 
 
 def test_post_score_error_is_operational_without_retry(monkeypatch) -> None:
