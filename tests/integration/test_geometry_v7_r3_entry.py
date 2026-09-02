@@ -183,6 +183,21 @@ def test_drive_complete_skips_and_partial_conflict_is_precise(tmp_path):
         helpers["plan_result_state"](conflict, local, checkpoint, exact)
 
 
+def test_state_cell_uses_execution_896_drive_result_and_prints_skip(tmp_path, capsys):
+    exact = "896571fd17fbc161bbb617f74677328a012ce43a"
+    source = _state_source().replace("/content/drive/MyDrive", str(tmp_path / "drive"))
+    source = source.replace("/content", str(tmp_path / "content"))
+    drive_result = tmp_path / "drive" / "CEG-WM" / "Geometry-V7" / exact / "r3-exploratory"
+    _write_complete(drive_result, exact, "R3_METHOD_NOT_IMPROVED")
+    namespace = {}
+    exec(compile(source, str(NOTEBOOK), "exec"), namespace)
+    output = capsys.readouterr().out
+    assert "existing_drive_artifacts_ready R3_METHOD_NOT_IMPROVED" in output
+    assert str(drive_result) in output
+    assert namespace["RUN_REQUIRED"] is False
+    assert namespace["PUBLISH_REQUIRED"] is False
+
+
 def test_local_complete_is_publish_only_and_residual_paths_are_preserved(tmp_path):
     helpers = _helpers()
     exact = "b" * 40
@@ -202,6 +217,26 @@ def test_local_complete_is_publish_only_and_residual_paths_are_preserved(tmp_pat
     assert plan["LOCAL_RESULT_DIR"] != residual and not plan["LOCAL_RESULT_DIR"].exists()
     assert plan["SYNCSEAL_CHECKPOINT"] != checkpoint and not plan["SYNCSEAL_CHECKPOINT"].exists()
     assert plan["RUN_REQUIRED"] is True and plan["PUBLISH_REQUIRED"] is True
+
+
+def test_partial_base_reuses_complete_resume_workspace_on_repeated_planning(tmp_path):
+    helpers = _helpers()
+    exact = "896571fd17fbc161bbb617f74677328a012ce43a"
+    drive = tmp_path / "drive"
+    local = tmp_path / "local"
+    local.mkdir()
+    resume = tmp_path / "local.resume-001"
+    payload = _write_complete(resume, exact)
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_text("preserve", encoding="utf-8")
+    first = helpers["plan_result_state"](drive, local, checkpoint, exact)
+    second = helpers["plan_result_state"](drive, local, checkpoint, exact)
+    for plan in (first, second):
+        assert plan["LOCAL_RESULT_DIR"] == resume
+        assert plan["LOCAL_STATE"]["payload"] == payload
+        assert plan["RUN_REQUIRED"] is False and plan["PUBLISH_REQUIRED"] is True
+    assert local.exists() and checkpoint.exists()
+    assert not (tmp_path / "local.resume-002").exists()
 
 
 def test_checkout_reuses_only_exact_clean_and_isolates_invalid_without_mutation(tmp_path):
@@ -225,10 +260,8 @@ def test_checkout_reuses_only_exact_clean_and_isolates_invalid_without_mutation(
 
 
 def test_state_cell_defines_all_cross_cell_variables_on_sequential_reexecution(tmp_path):
-    exact = "e" * 40
-    source = _state_source().replace(
-        "PENDING_AFTER_GEOMETRY_V7_R3_RESUME_PUSH", exact
-    )
+    exact = "896571fd17fbc161bbb617f74677328a012ce43a"
+    source = _state_source()
     source = source.replace("/content/drive/MyDrive", str(tmp_path / "drive"))
     source = source.replace("/content", str(tmp_path / "content"))
     namespace = {}
@@ -239,6 +272,9 @@ def test_state_cell_defines_all_cross_cell_variables_on_sequential_reexecution(t
         "RUN_REQUIRED", "PUBLISH_REQUIRED", "checkout", "CHECKOUT_REUSED",
     ):
         assert name in namespace
+    assert namespace["EXECUTION_EXACT"] == exact
+    assert namespace["NOTEBOOK_DELIVERY_EXACT"] == "PENDING_AFTER_GEOMETRY_V7_R3_RESUME_PUSH"
+    assert str(namespace["DRIVE_RESULT_DIR"]).endswith(f"/{exact}/r3-exploratory")
 
 
 def test_runner_return_codes_require_a_new_complete_result(tmp_path):
@@ -264,13 +300,17 @@ def test_notebook_and_cli_are_thin_create_only_phase_a_guards():
     for cell in code:
         ast.parse("".join(cell["source"]))
     source = "\n".join("".join(cell["source"]) for cell in code)
-    assert "PENDING_AFTER_GEOMETRY_V7_R3_RESUME_PUSH" in source and "--detach" in source
+    assert "EXECUTION_EXACT = '896571fd17fbc161bbb617f74677328a012ce43a'" in source
+    assert "NOTEBOOK_DELIVERY_EXACT = 'PENDING_AFTER_GEOMETRY_V7_R3_RESUME_PUSH'" in source
+    assert source.count("NOTEBOOK_DELIVERY_EXACT") == 1
+    assert "--detach" in source
     assert source.count("experiments.run_geometry_v7_r3") == 1
     assert "force_remount" not in source and "userdata" not in source
     assert all(name in source for name in ("r1a-f2", "r1b-repair", "r2-selective", "r3-exploratory"))
     assert "copytree" in source and "Drive result conflict" in source
     assert "existing_drive_artifacts_ready" in source
-    assert "inspect_result(DRIVE_RESULT_DIR, APPROVED_EXACT)" in source
+    assert "inspect_result(DRIVE_RESULT_DIR, EXECUTION_EXACT)" in source
+    assert "--expected-exact', EXECUTION_EXACT" in source
     assert "if not RUN_REQUIRED" in source and "if not CHECKOUT_REUSED" in source
     assert "sys.path" not in source and "exec(open" not in source
     completed = subprocess.run(
