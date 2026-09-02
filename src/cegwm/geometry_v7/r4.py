@@ -52,6 +52,19 @@ class R4RuntimeRecord:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class R4DirectRuntimeRecord:
+    """One ordinary-RGB decision with content as the only positive authority."""
+
+    route: str
+    pre_score: float | None
+    post_score: float | None
+    recovered: bool
+    final_positive: bool
+    error: str | None
+    geometry: GeometryEstimate | None
+
+
 def _finite(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("score must be a finite real scalar")
@@ -190,7 +203,74 @@ def detect_refine_and_recover(
         )
 
 
+def _direct_homography(geometry: object):
+    if not isinstance(geometry, GeometryEstimate):
+        raise TypeError("detect_geometry must return GeometryEstimate")
+    if geometry.legal is not True or geometry.error is not None:
+        raise ValueError("geometry must be legal and error-free")
+    matrix = geometry.homography_observed_to_canonical
+    if not isinstance(matrix, (list, tuple)) or len(matrix) != 3:
+        raise ValueError("raw H0 must be finite invertible 3x3")
+    try:
+        parsed = tuple(tuple(_finite(axis) for axis in row) for row in matrix)
+    except (TypeError, ValueError) as error:
+        raise ValueError("raw H0 must be finite invertible 3x3") from error
+    if any(len(row) != 3 for row in parsed):
+        raise ValueError("raw H0 must be finite invertible 3x3")
+    determinant = (
+        parsed[0][0] * (parsed[1][1] * parsed[2][2] - parsed[1][2] * parsed[2][1])
+        - parsed[0][1] * (parsed[1][0] * parsed[2][2] - parsed[1][2] * parsed[2][0])
+        + parsed[0][2] * (parsed[1][0] * parsed[2][1] - parsed[1][1] * parsed[2][0])
+    )
+    if not math.isfinite(determinant) or determinant == 0.0:
+        raise ValueError("raw H0 must be finite invertible 3x3")
+    return parsed
+
+
+def detect_direct_and_recover(
+    image_rgb: Image.Image,
+    *,
+    score_rgb: Callable[[Image.Image], float],
+    detect_geometry: Callable[[Image.Image], GeometryEstimate],
+) -> R4DirectRuntimeRecord:
+    """Run Geometry-V7-Direct on one blind ordinary RGB image.
+
+    Direct content routes short-circuit geometry.  A boundary image may be
+    rectified once by the detector's unmodified finite/invertible raw H0, but
+    only the same bound content scorer may make the post-recovery decision.
+    """
+
+    route = "ERROR"
+    pre = None
+    geometry = None
+    recovery_completed = False
+    try:
+        image = require_ordinary_rgb_image(image_rgb)
+        pre = _finite(score_rgb(image))
+        route = score_route(pre)
+        if route == "DIRECT_POSITIVE":
+            return R4DirectRuntimeRecord(route, pre, None, False, True, None, None)
+        if route == "DIRECT_NEGATIVE":
+            return R4DirectRuntimeRecord(route, pre, None, False, False, None, None)
+        if route != "BOUNDARY":
+            raise ValueError("invalid pre-recovery content score")
+        geometry = detect_geometry(image)
+        raw_h0 = _direct_homography(geometry)
+        recovered_rgb = rectify_attacked_rgb(image, raw_h0)
+        recovery_completed = True
+        post = _finite(score_rgb(recovered_rgb))
+        return R4DirectRuntimeRecord(
+            route, pre, post, True, post > R4_TAU, None, geometry
+        )
+    except Exception as error:
+        return R4DirectRuntimeRecord(
+            route, pre, None, recovery_completed, False,
+            f"{type(error).__name__}: {error}", geometry,
+        )
+
+
 __all__ = [name for name in globals() if name.startswith("R4_") or name in {
     "RefinedGate", "R4RuntimeRecord", "score_route", "refined_gate_from_features",
-    "detect_refine_and_recover",
+    "detect_refine_and_recover", "R4DirectRuntimeRecord",
+    "detect_direct_and_recover",
 }]
