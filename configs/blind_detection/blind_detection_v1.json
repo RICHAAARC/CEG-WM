@@ -4,6 +4,7 @@
   "content_calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
   "content_calibration_asset_sidecar": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
   "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+  "detection_key_binding": "public_key_digest_frozen_in_threshold_asset",
   "development": {
     "denominator": 256,
     "disjoint_from": [
@@ -12,6 +13,7 @@
       "future_paper_test"
     ],
     "geometry_attempts_per_unit": 1,
+    "full_system_replay": "fresh_second_pass_same_roster_current_images_key_and_public_runtime",
     "independence_unit": "base_ordinary_rgb",
     "roster_freeze": "before_any_scoring",
     "source_strata_and_order": "frozen_in_roster_input"
@@ -21,6 +23,7 @@
     "frozen_final_rgb_syncseal"
   ],
   "geometry_role": "coordinates_only_no_positive_vote",
+  "production_geometry_backend": "cegwm.geometry_v7.syncseal.SyncSealTorchScript",
   "method_id": "blind_detection_v1_single_image_geometry_direct",
   "preprocess_id": "ordinary_rgb_then_frozen_content_v9_branch_preprocessing_v1",
   "recovery": {
@@ -30,6 +33,7 @@
     "retry": false,
     "same_scorer_key_preprocess_assets_tau_pre_post": true
   },
+  "test_injection": "explicit_test_only_entry_rejected_by_production_detect_watermark",
   "reliable_ablation": "optional_nonblocking_not_primary_method",
   "scorer_id": "content_v9_weighted_joint_registered_minus_exact16_wrong_max_v1",
   "statistic": "registered weighted_joint - max(exact 16 wrong-key weighted_joint)",

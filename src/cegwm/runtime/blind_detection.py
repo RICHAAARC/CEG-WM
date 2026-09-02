@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
 from typing import Any, Callable
 
@@ -10,10 +11,12 @@ from PIL import Image
 
 from cegwm.geometry_v7.contracts import GeometryEstimate
 from cegwm.geometry_v7.r1b import rectify_attacked_rgb
+from cegwm.geometry_v7.syncseal import SyncSealTorchScript
 from cegwm.method.blind_detection import (
     BLIND_DEV_DENOMINATOR,
     BlindCalibrationRoster,
     BlindCalibrationRow,
+    BlindReplayRow,
     BlindStatistic,
     BlindThresholdAsset,
     statistic_from_weighted_scores,
@@ -36,27 +39,26 @@ class ThresholdUnavailableError(RuntimeError):
     """Raised before scoring when the production N_dev=256 asset is absent."""
 
 
-@dataclass(frozen=True, slots=True)
-class BlindPublicAssets:
-    """Only public scoring, Geometry, and optional threshold state.
+def _validate_content_assets(content: Any, weighted: Any) -> None:
+    if not isinstance(content, ContentCalibrationAssets):
+        raise TypeError("blind detection requires frozen content public assets")
+    if not isinstance(weighted, WeightedJointAsset):
+        raise TypeError("blind detection requires the frozen weighted-joint asset")
 
-    ``geometry_backend`` must expose ``detect_geometry(current_rgb)``.  The
-    official production object is ``SyncSealTorchScript``; tests may inject a
-    local method double without loading a model.
-    """
+
+@dataclass(frozen=True, slots=True)
+class BlindProductionAssets:
+    """Exact production boundary with the real frozen SyncSeal adapter type."""
 
     content_assets: ContentCalibrationAssets
     weighted_joint_asset: WeightedJointAsset
-    geometry_backend: Any
+    geometry_backend: SyncSealTorchScript
     threshold_asset: BlindThresholdAsset | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.content_assets, ContentCalibrationAssets):
-            raise TypeError("blind detection requires frozen content public assets")
-        if not isinstance(self.weighted_joint_asset, WeightedJointAsset):
-            raise TypeError("blind detection requires the frozen weighted-joint asset")
-        if not callable(getattr(self.geometry_backend, "detect_geometry", None)):
-            raise TypeError("blind detection requires a public Geometry detector")
+        _validate_content_assets(self.content_assets, self.weighted_joint_asset)
+        if type(self.geometry_backend) is not SyncSealTorchScript:
+            raise TypeError("production Geometry backend must be SyncSealTorchScript")
         if self.threshold_asset is not None and not isinstance(
             self.threshold_asset, BlindThresholdAsset
         ):
@@ -64,18 +66,32 @@ class BlindPublicAssets:
 
 
 @dataclass(frozen=True, slots=True)
+class BlindTestAssets:
+    """Explicit local-test injection boundary, never accepted by production API."""
+
+    content_assets: ContentCalibrationAssets
+    weighted_joint_asset: WeightedJointAsset
+    geometry_backend: Any
+
+    def __post_init__(self) -> None:
+        _validate_content_assets(self.content_assets, self.weighted_joint_asset)
+        if not callable(getattr(self.geometry_backend, "detect_geometry", None)):
+            raise TypeError("test Geometry backend must expose detect_geometry")
+
+
+@dataclass(frozen=True, slots=True)
 class BlindEmbeddingAssets:
-    """Injected real embedding adapters; content always runs before SyncSeal."""
+    """Injected existing content embed plus strongly typed final-RGB SyncSeal."""
 
     content_backend: Any
-    syncseal_backend: Any
+    syncseal_backend: SyncSealTorchScript
     residual_strength_multiplier: float
 
     def __post_init__(self) -> None:
         if not callable(getattr(self.content_backend, "embed_content", None)):
             raise TypeError("content backend must expose the existing content embed")
-        if not callable(getattr(self.syncseal_backend, "embed_final_rgb", None)):
-            raise TypeError("SyncSeal backend must expose final-RGB embedding")
+        if type(self.syncseal_backend) is not SyncSealTorchScript:
+            raise TypeError("embedding SyncSeal backend must be SyncSealTorchScript")
         value = self.residual_strength_multiplier
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError("SyncSeal residual multiplier must be real")
@@ -93,10 +109,14 @@ class BlindDetectionRecord:
     geometry: GeometryEstimate | None
     tau_blind: float
     key_digest: str
+    method_complete: bool
+    operational_error: str | None
     scorer_id: str = BLIND_SCORER_ID
     preprocess_id: str = BLIND_PREPROCESS_ID
     same_scoring_context: bool = True
-    error: str | None = None
+
+
+BlindScoringAssets = BlindProductionAssets | BlindTestAssets
 
 
 def _finite(value: Any, name: str) -> float:
@@ -108,8 +128,19 @@ def _finite(value: Any, name: str) -> float:
     return scalar
 
 
+def _image_digest(image: Image.Image) -> str:
+    current = require_ordinary_rgb_image(image)
+    framed = (
+        b"CEG-WM/blind-current-rgb/v1\0"
+        + current.width.to_bytes(8, "big")
+        + current.height.to_bytes(8, "big")
+        + current.tobytes()
+    )
+    return hashlib.sha256(framed).hexdigest()
+
+
 def _score_current_rgb(
-    current_rgb: Image.Image, detection_key: bytes, assets: BlindPublicAssets
+    current_rgb: Image.Image, detection_key: bytes, assets: BlindScoringAssets
 ) -> BlindStatistic:
     image = require_ordinary_rgb_image(current_rgb)
     wrong_keys = derive_stability_wrong_keys(detection_key)
@@ -127,11 +158,7 @@ def _score_current_rgb(
     return statistic_from_weighted_scores(branches["weighted_joint"])
 
 
-def _raw_h(geometry: Any) -> tuple[tuple[float, float, float], ...]:
-    if not isinstance(geometry, GeometryEstimate):
-        raise TypeError("Geometry detector must return GeometryEstimate")
-    if geometry.error is not None:
-        raise RuntimeError(f"Geometry detector error: {geometry.error}")
+def _raw_h(geometry: GeometryEstimate) -> tuple[tuple[float, float, float], ...]:
     if geometry.legal is not True:
         raise ValueError("Geometry returned an invalid raw H")
     matrix = geometry.homography_observed_to_canonical
@@ -155,61 +182,137 @@ def _raw_h(geometry: Any) -> tuple[tuple[float, float, float], ...]:
     return parsed
 
 
-def detect_watermark(
+def _record(
+    route: str,
+    positive: bool,
+    pre: BlindStatistic | None,
+    post: BlindStatistic | None,
+    recovered: bool,
+    geometry: GeometryEstimate | None,
+    tau: float,
+    digest: str,
+    *,
+    method_complete: bool,
+    operational_error: str | None = None,
+) -> BlindDetectionRecord:
+    return BlindDetectionRecord(
+        route, positive, pre, post, recovered, geometry, tau, digest,
+        method_complete, operational_error,
+    )
+
+
+def _detect_core(
     image: Any,
     key: str | bytes | bytearray | memoryview,
-    assets: BlindPublicAssets,
+    assets: BlindScoringAssets,
+    tau_blind: float,
 ) -> BlindDetectionRecord:
-    """Detect from exactly one current ordinary RGB, one key, and public assets.
+    """Shared core reached only through production or explicit test/calibration gates."""
 
-    Every finite non-positive pre-threshold result enters Geometry-Direct once.
-    Geometry can provide coordinates but can never create a positive; the same
-    internal content scorer and threshold decide both observations.
-    """
-
-    if not isinstance(assets, BlindPublicAssets):
-        raise TypeError("detect_watermark requires BlindPublicAssets")
-    if assets.threshold_asset is None:
-        raise ThresholdUnavailableError(
-            "BlindDetection-V1 has no frozen N_dev=256 threshold asset; production detection refused"
-        )
     detection_key = normalize_detection_key(key)
     digest = public_key_digest(detection_key)
-    tau = assets.threshold_asset.tau_blind
-    geometry = None
-    pre = None
-    recovered = False
+    tau = _finite(tau_blind, "tau_blind")
     try:
         current = require_ordinary_rgb_image(image)
         pre = _score_current_rgb(current, detection_key, assets)
-        if pre.value > tau:
-            return BlindDetectionRecord(
-                "DIRECT_POSITIVE", True, pre, None, False, None, tau, digest
-            )
-        geometry = assets.geometry_backend.detect_geometry(current)
-        try:
-            matrix = _raw_h(geometry)
-        except LookupError as error:
-            return BlindDetectionRecord(
-                "GEOMETRY_NO_H", False, pre, None, False, geometry, tau, digest,
-                error=str(error),
-            )
-        except (TypeError, ValueError, RuntimeError) as error:
-            return BlindDetectionRecord(
-                "GEOMETRY_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
-                error=f"{type(error).__name__}: {error}",
-            )
-        recovered_rgb = rectify_attacked_rgb(current, matrix)
-        recovered = True
-        post = _score_current_rgb(recovered_rgb, detection_key, assets)
-        return BlindDetectionRecord(
-            "GEOMETRY_RECOVERED", post.value > tau, pre, post, True, geometry, tau, digest
-        )
     except Exception as error:
-        return BlindDetectionRecord(
-            "ERROR_FAIL_CLOSED", False, pre, None, recovered, geometry, tau, digest,
-            error=f"{type(error).__name__}: {error}",
+        return _record(
+            "ERROR_FAIL_CLOSED", False, None, None, False, None, tau, digest,
+            method_complete=False,
+            operational_error=f"content_pre:{type(error).__name__}: {error}",
         )
+    if pre.value > tau:
+        return _record(
+            "DIRECT_POSITIVE", True, pre, None, False, None, tau, digest,
+            method_complete=True,
+        )
+    try:
+        geometry = assets.geometry_backend.detect_geometry(current)
+    except Exception as error:
+        return _record(
+            "ERROR_FAIL_CLOSED", False, pre, None, False, None, tau, digest,
+            method_complete=False,
+            operational_error=f"geometry_runtime:{type(error).__name__}: {error}",
+        )
+    if not isinstance(geometry, GeometryEstimate):
+        return _record(
+            "ERROR_FAIL_CLOSED", False, pre, None, False, None, tau, digest,
+            method_complete=False,
+            operational_error="geometry_runtime:TypeError: detector must return GeometryEstimate",
+        )
+    if geometry.error is not None:
+        return _record(
+            "ERROR_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
+            method_complete=False,
+            operational_error=f"geometry_runtime:{geometry.error}",
+        )
+    try:
+        matrix = _raw_h(geometry)
+    except LookupError:
+        return _record(
+            "GEOMETRY_NO_H", False, pre, None, False, geometry, tau, digest,
+            method_complete=True,
+        )
+    except (TypeError, ValueError):
+        return _record(
+            "GEOMETRY_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
+            method_complete=True,
+        )
+    try:
+        recovered_rgb = rectify_attacked_rgb(current, matrix)
+    except Exception:
+        return _record(
+            "RECTIFICATION_FAIL_CLOSED", False, pre, None, False, geometry, tau, digest,
+            method_complete=True,
+        )
+    try:
+        post = _score_current_rgb(recovered_rgb, detection_key, assets)
+    except Exception as error:
+        return _record(
+            "ERROR_FAIL_CLOSED", False, pre, None, True, geometry, tau, digest,
+            method_complete=False,
+            operational_error=f"content_post:{type(error).__name__}: {error}",
+        )
+    return _record(
+        "GEOMETRY_RECOVERED", post.value > tau, pre, post, True, geometry, tau, digest,
+        method_complete=True,
+    )
+
+
+def detect_watermark(
+    image: Any,
+    key: str | bytes | bytearray | memoryview,
+    assets: BlindProductionAssets,
+) -> BlindDetectionRecord:
+    """Production single-image detection with an exact-bound SyncSeal backend."""
+
+    if type(assets) is not BlindProductionAssets:
+        raise TypeError("production detect_watermark requires BlindProductionAssets")
+    threshold = assets.threshold_asset
+    if threshold is None:
+        raise ThresholdUnavailableError(
+            "BlindDetection-V1 has no frozen N_dev=256 threshold asset; production detection refused"
+        )
+    if threshold.test_only:
+        raise ThresholdUnavailableError("production detection rejects a test-only threshold asset")
+    if threshold.payload["calibration_key_digest"] != public_key_digest(key):
+        raise ValueError("production threshold detection-key identity differs")
+    return _detect_core(image, key, assets, threshold.tau_blind)
+
+
+def detect_watermark_test_only(
+    image: Any,
+    key: str | bytes | bytearray | memoryview,
+    assets: BlindTestAssets,
+    threshold: BlindThresholdAsset,
+) -> BlindDetectionRecord:
+    """Explicit local-test entry; production never accepts this asset/backend pair."""
+
+    if not isinstance(assets, BlindTestAssets):
+        raise TypeError("test-only detection requires BlindTestAssets")
+    if not isinstance(threshold, BlindThresholdAsset) or not threshold.test_only:
+        raise TypeError("test-only detection requires an explicit test-only threshold")
+    return _detect_core(image, key, assets, threshold.tau_blind)
 
 
 def embed_watermark(
@@ -237,96 +340,97 @@ def _calibration_row(
     source_stratum: str,
     image: Any,
     detection_key: bytes,
-    assets: BlindPublicAssets,
+    assets: BlindScoringAssets,
 ) -> BlindCalibrationRow:
     try:
         current = require_ordinary_rgb_image(image)
+        image_digest = _image_digest(current)
         pre = _score_current_rgb(current, detection_key, assets).value
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, None, None, "GEOMETRY_ERROR", False,
-            f"content_pre:{type(error).__name__}: {error}",
+            roster_index, unit_id, source_stratum, None, None, None,
+            "GEOMETRY_ERROR", False, f"content_pre:{type(error).__name__}: {error}",
         )
     try:
         geometry = assets.geometry_backend.detect_geometry(current)
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "GEOMETRY_ERROR", False,
-            f"geometry_model:{type(error).__name__}: {error}",
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "GEOMETRY_ERROR", False, f"geometry_runtime:{type(error).__name__}: {error}",
         )
-    if isinstance(geometry, GeometryEstimate) and geometry.error is not None:
-        normalized_error = geometry.error.lower()
-        if any(
-            marker in normalized_error
-            for marker in ("cuda", "gpu", "out of memory", "checkpoint", "no such file", "i/o")
-        ):
-            return BlindCalibrationRow(
-                roster_index, unit_id, source_stratum, pre, None, "GEOMETRY_ERROR", False,
-                f"geometry_model:{geometry.error}",
-            )
+    if not isinstance(geometry, GeometryEstimate):
+        return BlindCalibrationRow(
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "GEOMETRY_ERROR", False,
+            "geometry_runtime:TypeError: detector must return GeometryEstimate",
+        )
+    if geometry.error is not None:
+        return BlindCalibrationRow(
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "GEOMETRY_ERROR", False, f"geometry_runtime:{geometry.error}",
+        )
     try:
         matrix = _raw_h(geometry)
     except LookupError:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "NO_H", True, None
-        )
-    except RuntimeError:
-        return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "GEOMETRY_ERROR", True, None
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "NO_H", True, None,
         )
     except (TypeError, ValueError):
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "INVALID_H", True, None
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "INVALID_H", True, None,
         )
     try:
         recovered = rectify_attacked_rgb(current, matrix)
     except Exception:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "RECTIFICATION_ERROR", True, None
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "RECTIFICATION_ERROR", True, None,
         )
     try:
         post = _score_current_rgb(recovered, detection_key, assets).value
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, pre, None, "RECOVERED", False,
-            f"content_post:{type(error).__name__}: {error}",
+            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            "RECOVERED", False, f"content_post:{type(error).__name__}: {error}",
         )
     return BlindCalibrationRow(
-        roster_index, unit_id, source_stratum, pre, post, "RECOVERED", True, None
+        roster_index, unit_id, source_stratum, image_digest, pre, post,
+        "RECOVERED", True, None,
     )
+
+
+def _frozen_units(roster: BlindCalibrationRoster) -> tuple[Any, ...]:
+    if not isinstance(roster, BlindCalibrationRoster):
+        raise TypeError("development calibration requires a frozen roster")
+    units = tuple(roster.units)
+    if len(units) != BLIND_DEV_DENOMINATOR:
+        raise RuntimeError("development denominator changed after roster validation")
+    return units
 
 
 def run_development_calibration(
     roster: BlindCalibrationRoster,
     key: str | bytes | bytearray | memoryview,
-    assets: BlindPublicAssets,
+    assets: BlindScoringAssets,
     image_loader: Callable[[str], Any],
 ) -> tuple[BlindCalibrationRow, ...]:
-    """Attempt the frozen N_dev=256 roster once, retaining every row.
+    """First pass: score and attempt Geometry once for every frozen unit."""
 
-    This function prepares the authorized entrypoint but performs work only
-    when explicitly called by a future execution.  The roster tuple is fully
-    validated/frozen before the first image is loaded or scored.
-    """
-
-    if not isinstance(roster, BlindCalibrationRoster):
-        raise TypeError("development calibration requires a frozen roster")
-    if not isinstance(assets, BlindPublicAssets):
-        raise TypeError("development calibration requires BlindPublicAssets")
+    if type(assets) not in (BlindProductionAssets, BlindTestAssets):
+        raise TypeError("development calibration assets differ")
     if not callable(image_loader):
         raise TypeError("development calibration requires an image loader")
     detection_key = normalize_detection_key(key)
-    frozen_units = tuple(roster.units)
-    if len(frozen_units) != BLIND_DEV_DENOMINATOR:
-        raise RuntimeError("development denominator changed after roster validation")
     rows: list[BlindCalibrationRow] = []
-    for index, unit in enumerate(frozen_units):
+    for index, unit in enumerate(_frozen_units(roster)):
         try:
             image = image_loader(unit.image_ref)
         except Exception as error:
             rows.append(
                 BlindCalibrationRow(
-                    index, unit.unit_id, unit.source_stratum, None, None,
+                    index, unit.unit_id, unit.source_stratum, None, None, None,
                     "GEOMETRY_ERROR", False,
                     f"image_io:{type(error).__name__}: {error}",
                 )
@@ -345,8 +449,50 @@ def run_development_calibration(
     return tuple(rows)
 
 
+def run_development_full_system_replay(
+    roster: BlindCalibrationRoster,
+    key: str | bytes | bytearray | memoryview,
+    assets: BlindScoringAssets,
+    image_loader: Callable[[str], Any],
+    tau_blind: float,
+) -> tuple[BlindReplayRow, ...]:
+    """Fresh second pass through the complete pre/route/Geometry/post system."""
+
+    if type(assets) not in (BlindProductionAssets, BlindTestAssets):
+        raise TypeError("development replay assets differ")
+    if not callable(image_loader):
+        raise TypeError("development replay requires an image loader")
+    rows: list[BlindReplayRow] = []
+    for index, unit in enumerate(_frozen_units(roster)):
+        try:
+            current = require_ordinary_rgb_image(image_loader(unit.image_ref))
+            image_digest = _image_digest(current)
+        except Exception as error:
+            rows.append(
+                BlindReplayRow(
+                    index, unit.unit_id, unit.source_stratum, None, None, None,
+                    "ERROR_FAIL_CLOSED", False, False, False,
+                    f"image_io:{type(error).__name__}: {error}",
+                )
+            )
+            continue
+        record = _detect_core(current, key, assets, tau_blind)
+        rows.append(
+            BlindReplayRow(
+                index, unit.unit_id, unit.source_stratum, image_digest,
+                None if record.pre is None else record.pre.value,
+                None if record.post is None else record.post.value,
+                record.route, record.positive, record.recovered,
+                record.method_complete, record.operational_error,
+            )
+        )
+    return tuple(rows)
+
+
 __all__ = [
     "BLIND_PREPROCESS_ID", "BLIND_SCORER_ID", "BlindDetectionRecord",
-    "BlindEmbeddingAssets", "BlindPublicAssets", "ThresholdUnavailableError",
-    "detect_watermark", "embed_watermark", "run_development_calibration",
+    "BlindEmbeddingAssets", "BlindProductionAssets", "BlindTestAssets",
+    "ThresholdUnavailableError", "detect_watermark", "detect_watermark_test_only",
+    "embed_watermark", "run_development_calibration",
+    "run_development_full_system_replay",
 ]

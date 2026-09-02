@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
+from dataclasses import asdict, replace
 import importlib
 import json
 import math
@@ -22,16 +22,19 @@ if str(SRC_ROOT) not in sys.path:
 from cegwm.method.blind_detection import (  # noqa: E402
     BLIND_DEV_DISJOINT_FROM,
     BlindCalibrationRoster,
-    BlindCalibrationRow,
     BlindCalibrationUnit,
     build_threshold_asset,
+    candidate_tau_blind,
     load_threshold_asset,
     stable_json_bytes,
 )
 from cegwm.runtime.blind_detection import (  # noqa: E402
-    BlindPublicAssets,
+    BlindProductionAssets,
     detect_watermark,
+    run_development_calibration,
+    run_development_full_system_replay,
 )
+from cegwm.shared.keys import public_key_digest  # noqa: E402
 
 
 def _read_json(path: str | Path) -> Any:
@@ -47,33 +50,78 @@ def load_roster(path: str | Path) -> BlindCalibrationRoster:
     return BlindCalibrationRoster(units, tuple(payload["disjoint_from"]))
 
 
-def load_rows(path: str | Path) -> tuple[BlindCalibrationRow, ...]:
-    rows: list[BlindCalibrationRow] = []
-    with Path(path).open("r", encoding="utf-8") as source:
-        for line_number, line in enumerate(source, start=1):
-            if not line.strip():
-                raise ValueError(f"blank calibration row at line {line_number}")
-            rows.append(BlindCalibrationRow(**json.loads(line)))
-    return tuple(rows)
+class ThresholdFreezeBlocked(RuntimeError):
+    """Carry every attempted fixed-denominator row when threshold output is blocked."""
+
+    def __init__(self, cause: Exception, calibration_rows, replay_rows) -> None:
+        super().__init__(f"{type(cause).__name__}: {cause}")
+        self.calibration_rows = tuple(calibration_rows)
+        self.replay_rows = tuple(replay_rows)
+        self.status = "METHOD_FAILED" if "0/256" in str(cause) else "OPERATIONAL_BLOCKED"
 
 
-def freeze_threshold(
-    roster_path: str | Path,
-    rows_path: str | Path,
+def freeze_threshold_with_runtime(
+    roster: BlindCalibrationRoster,
+    key: bytes,
+    public_assets: BlindProductionAssets,
+    image_loader,
     output_path: str | Path,
     *,
     producer_exact: str,
 ) -> Path:
-    """Create the production asset only after complete 256-row validation/replay."""
+    """Run fresh calibration and full-system replay before create-only output."""
 
-    roster = load_roster(roster_path)
-    rows = load_rows(rows_path)
-    asset = build_threshold_asset(rows, roster, producer_exact=producer_exact)
+    if type(public_assets) is not BlindProductionAssets:
+        raise TypeError("threshold freeze requires BlindProductionAssets")
+    if public_assets.threshold_asset is not None:
+        raise ValueError("threshold calibration runtime must not contain an earlier threshold")
     output = Path(output_path)
+    if output.exists():
+        raise FileExistsError("blind threshold output is create-only")
+    rows = run_development_calibration(roster, key, public_assets, image_loader)
+    try:
+        tau_blind = candidate_tau_blind(rows, roster)
+    except Exception as error:
+        raise ThresholdFreezeBlocked(error, rows, ()) from error
+    replay = run_development_full_system_replay(
+        roster, key, public_assets, image_loader, tau_blind
+    )
+    try:
+        asset = build_threshold_asset(
+            rows, roster, replay, producer_exact=producer_exact,
+            calibration_key_digest=public_key_digest(key),
+        )
+    except Exception as error:
+        raise ThresholdFreezeBlocked(error, rows, replay) from error
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("xb") as sink:
         sink.write(asset.json_bytes)
     return output
+
+
+def calibrate_and_freeze(
+    roster_path: str | Path,
+    key_path: str | Path,
+    runtime_factory: str,
+    output_path: str | Path,
+    *,
+    producer_exact: str,
+) -> Path:
+    roster = load_roster(roster_path)
+    key = Path(key_path).read_bytes()
+    factory = _load_factory(runtime_factory)
+    public_assets = factory(REPO_ROOT)
+    if type(public_assets) is not BlindProductionAssets:
+        raise TypeError("runtime factory must return BlindProductionAssets")
+
+    def image_loader(image_ref: str) -> Image.Image:
+        with Image.open(image_ref) as opened:
+            return opened.copy()
+
+    return freeze_threshold_with_runtime(
+        roster, key, public_assets, image_loader, output_path,
+        producer_exact=producer_exact,
+    )
 
 
 def _walk_weighted_scores(value: Any) -> Iterable[float]:
@@ -132,7 +180,7 @@ def run_callback(
     threshold_path: str | Path,
     runtime_factory: str,
     output_path: str | Path,
-) -> Path:
+) -> tuple[Path, str, tuple[str, ...]]:
     """Run the fixed image-only N=4 callback once with an injected real runtime."""
 
     manifest = _read_json(manifest_path)
@@ -147,34 +195,74 @@ def run_callback(
         "unwatermarked_geometry_negative",
     }
     labels = {case.get("coverage") for case in cases if isinstance(case, dict)}
-    if not required.issubset(labels):
+    if not required.issubset(labels) or not labels.issubset(required):
         raise ValueError("callback coverage differs")
     threshold = load_threshold_asset(threshold_path)
     factory = _load_factory(runtime_factory)
     public_assets = factory(REPO_ROOT)
-    if not isinstance(public_assets, BlindPublicAssets):
-        raise TypeError("runtime factory must return BlindPublicAssets")
+    if type(public_assets) is not BlindProductionAssets:
+        raise TypeError("runtime factory must return BlindProductionAssets")
+    if public_assets.threshold_asset is not None:
+        raise ValueError("callback runtime factory must not prebind a threshold")
     public_assets = replace(public_assets, threshold_asset=threshold)
     detection_key = Path(key_path).read_bytes()
     records = []
     for index, case in enumerate(cases):
         if not isinstance(case, dict) or set(case) != {"case_id", "coverage", "image_path"}:
             raise ValueError("callback case fields differ")
-        with Image.open(case["image_path"]) as opened:
-            current_rgb = opened.copy()
-        record = detect_watermark(current_rgb, detection_key, public_assets)
-        records.append(
-            {
-                "case_id": case["case_id"],
-                "coverage": case["coverage"],
-                "error": record.error,
-                "positive": record.positive,
-                "post_m": None if record.post is None else record.post.value,
-                "pre_m": None if record.pre is None else record.pre.value,
-                "recovered": record.recovered,
-                "route": record.route,
-            }
-        )
+        try:
+            with Image.open(case["image_path"]) as opened:
+                current_rgb = opened.copy()
+            record = detect_watermark(current_rgb, detection_key, public_assets)
+            records.append(
+                {
+                    "case_id": case["case_id"],
+                    "coverage": case["coverage"],
+                    "method_complete": record.method_complete,
+                    "operational_error": record.operational_error,
+                    "positive": record.positive,
+                    "post_m": None if record.post is None else record.post.value,
+                    "pre_m": None if record.pre is None else record.pre.value,
+                    "recovered": record.recovered,
+                    "route": record.route,
+                }
+            )
+        except Exception as error:
+            records.append(
+                {
+                    "case_id": case["case_id"],
+                    "coverage": case["coverage"],
+                    "method_complete": False,
+                    "operational_error": f"{type(error).__name__}: {error}",
+                    "positive": False,
+                    "post_m": None,
+                    "pre_m": None,
+                    "recovered": False,
+                    "route": "ERROR_FAIL_CLOSED",
+                }
+            )
+    expected = {
+        "direct_positive": ("DIRECT_POSITIVE", True, False),
+        "geometry_recovered_positive": ("GEOMETRY_RECOVERED", True, True),
+        "unwatermarked_geometry_negative": ("GEOMETRY_RECOVERED", False, True),
+    }
+    operational = tuple(
+        case["case_id"]
+        for case, record in zip(cases, records, strict=True)
+        if not record["method_complete"]
+    )
+    mismatches = tuple(
+        case["case_id"]
+        for case, record in zip(cases, records, strict=True)
+        if record["method_complete"]
+        and (record["route"], record["positive"], record["recovered"])
+            != expected[case["coverage"]]
+    )
+    status = (
+        "OPERATIONAL_BLOCKED" if operational
+        else "METHOD_FAILED" if mismatches
+        else "CALLBACK_N4_PASSED"
+    )
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("xb") as sink:
@@ -183,19 +271,23 @@ def run_callback(
                 {
                     "claim_ceiling": "engineering_image_only_callback_n4_science_denominator_0",
                     "denominator": 4,
+                    "mismatched_case_ids": list(mismatches),
+                    "operational_case_ids": list(operational),
                     "records": records,
+                    "status": status,
                 }
             )
         )
-    return output
+    return output, status, mismatches
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
-    freeze = sub.add_parser("freeze-threshold")
+    freeze = sub.add_parser("calibrate-and-freeze")
     freeze.add_argument("--roster", required=True)
-    freeze.add_argument("--rows", required=True)
+    freeze.add_argument("--key-file", required=True)
+    freeze.add_argument("--runtime-factory", required=True)
     freeze.add_argument("--producer-exact", required=True)
     freeze.add_argument("--output", required=True)
     diagnose = sub.add_parser("diagnose-existing")
@@ -211,10 +303,29 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "freeze-threshold":
-        output = freeze_threshold(
-            args.roster, args.rows, args.output, producer_exact=args.producer_exact
-        )
+    if args.command == "calibrate-and-freeze":
+        try:
+            output = calibrate_and_freeze(
+                args.roster,
+                args.key_file,
+                args.runtime_factory,
+                args.output,
+                producer_exact=args.producer_exact,
+            )
+        except ThresholdFreezeBlocked as blocked:
+            print(
+                "CEGWM_BLIND_DETECTION_V1 "
+                + stable_json_bytes(
+                    {
+                        "calibration_rows": [asdict(row) for row in blocked.calibration_rows],
+                        "error": str(blocked),
+                        "replay_rows": [asdict(row) for row in blocked.replay_rows],
+                        "status": blocked.status,
+                        "threshold_written": False,
+                    }
+                ).decode("ascii")
+            )
+            return 2 if blocked.status == "METHOD_FAILED" else 3
         print(
             "CEGWM_BLIND_DETECTION_V1 "
             + stable_json_bytes(
@@ -228,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     if args.command == "callback":
-        output = run_callback(
+        output, status, mismatches = run_callback(
             args.manifest,
             args.key_file,
             args.threshold,
@@ -238,10 +349,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "CEGWM_BLIND_DETECTION_V1 "
             + stable_json_bytes(
-                {"denominator": 4, "output": str(output), "status": "CALLBACK_N4_RECORDED"}
+                {
+                    "denominator": 4,
+                    "mismatched_case_ids": list(mismatches),
+                    "output": str(output),
+                    "status": status,
+                }
             ).decode("ascii")
         )
-        return 0
+        return 0 if status == "CALLBACK_N4_PASSED" else 2 if status == "METHOD_FAILED" else 3
     diagnostic = diagnose_existing_artifacts(args.artifacts)
     print("CEGWM_BLIND_DETECTION_V1 " + stable_json_bytes(diagnostic).decode("ascii"))
     return 0

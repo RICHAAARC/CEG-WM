@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ast
+from dataclasses import fields
 import inspect
 import json
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -11,6 +14,7 @@ from cegwm.method.blind_detection import (
     BlindCalibrationRoster,
     BlindCalibrationRow,
     BlindCalibrationUnit,
+    BlindReplayRow,
     build_test_only_threshold_asset,
     build_threshold_asset,
     decode_binary64,
@@ -40,10 +44,21 @@ def _rows() -> tuple[BlindCalibrationRow, ...]:
             index,
             f"unit-{index:03d}",
             f"source-{index % 4}",
+            f"{index:064x}",
             float(index) / 10.0,
             float(index) / 10.0 + 0.25 if index % 2 else None,
             "RECOVERED" if index % 2 else "NO_H",
             True,
+        )
+        for index in range(256)
+    )
+
+
+def _replay() -> tuple[BlindReplayRow, ...]:
+    return tuple(
+        BlindReplayRow(
+            index, f"unit-{index:03d}", f"source-{index % 4}", f"{index:064x}",
+            0.0, None, "GEOMETRY_NO_H", False, False, True,
         )
         for index in range(256)
     )
@@ -75,7 +90,10 @@ def test_roster_fixed_before_scoring_and_base_images_are_independent() -> None:
 
 def test_threshold_is_exact_binary64_max_z_and_strict_replay_zero(tmp_path: Path) -> None:
     rows = _rows()
-    asset = build_threshold_asset(rows, _roster(), producer_exact="a" * 40)
+    asset = build_threshold_asset(
+        rows, _roster(), _replay(), producer_exact="a" * 40,
+        calibration_key_digest="b" * 64,
+    )
     assert asset.tau_blind == max(row.z for row in rows)
     assert decode_binary64(encode_binary64(asset.tau_blind)) == asset.tau_blind
     assert replay_empirical_false_positives(rows, asset) == 0
@@ -90,11 +108,53 @@ def test_threshold_generation_retains_no_h_but_blocks_missing_or_operational_row
     roster = _roster()
     rows = list(_rows())
     assert rows[0].geometry_outcome == "NO_H" and rows[0].z == rows[0].pre_score
-    rows[1] = BlindCalibrationRow(1, "unit-001", "source-1", 0.1, None, "RECOVERED", False, "content_post:failed")
+    rows[1] = BlindCalibrationRow(
+        1, "unit-001", "source-1", f"{1:064x}", 0.1, None,
+        "RECOVERED", False, "content_post:failed",
+    )
     with pytest.raises(ValueError, match="operational interruption"):
-        build_threshold_asset(rows, roster, producer_exact="b" * 40)
+        build_threshold_asset(
+            rows, roster, _replay(), producer_exact="b" * 40,
+            calibration_key_digest="b" * 64,
+        )
     with pytest.raises(ValueError, match="all fixed 256"):
-        build_threshold_asset(_rows()[:-1], roster, producer_exact="b" * 40)
+        build_threshold_asset(
+            _rows()[:-1], roster, _replay(), producer_exact="b" * 40,
+            calibration_key_digest="b" * 64,
+        )
+
+
+def test_threshold_blocks_replay_failure_false_positive_and_image_drift() -> None:
+    replay = list(_replay())
+    replay[0] = BlindReplayRow(
+        0, "unit-000", "source-0", f"{0:064x}",
+        None, None, "ERROR_FAIL_CLOSED", False, False, False, "content_pre:stopped",
+    )
+    with pytest.raises(ValueError, match="operational interruption"):
+        build_threshold_asset(
+            _rows(), _roster(), replay, producer_exact="d" * 40,
+            calibration_key_digest="b" * 64,
+        )
+    replay = list(_replay())
+    replay[0] = BlindReplayRow(
+        0, "unit-000", "source-0", f"{0:064x}",
+        30.0, None, "DIRECT_POSITIVE", True, False, True,
+    )
+    with pytest.raises(ValueError, match="0/256"):
+        build_threshold_asset(
+            _rows(), _roster(), replay, producer_exact="d" * 40,
+            calibration_key_digest="b" * 64,
+        )
+    replay = list(_replay())
+    replay[0] = BlindReplayRow(
+        0, "unit-000", "source-0", "f" * 64,
+        0.0, None, "GEOMETRY_NO_H", False, False, True,
+    )
+    with pytest.raises(ValueError, match="current-image identity"):
+        build_threshold_asset(
+            _rows(), _roster(), replay, producer_exact="d" * 40,
+            calibration_key_digest="b" * 64,
+        )
 
 
 def test_production_threshold_absence_is_explicit(tmp_path: Path) -> None:
@@ -115,12 +175,33 @@ def test_repository_has_no_placeholder_production_threshold() -> None:
 def test_detection_signature_and_source_have_no_forbidden_runtime_inputs() -> None:
     assert tuple(inspect.signature(runtime.detect_watermark).parameters) == ("image", "key", "assets")
     source = inspect.getsource(runtime.detect_watermark)
+    source += inspect.getsource(runtime._detect_core)
     for forbidden in (
         "paired_null", "original_image", "private_latent", "embed_record",
         "stored_h", "truth", "prompt", "seed",
     ):
         assert forbidden not in source.lower()
     assert "b_low" not in source.lower()
+
+
+def test_production_assets_and_core_call_graph_exclude_hidden_detection_inputs() -> None:
+    assert tuple(field.name for field in fields(runtime.BlindProductionAssets)) == (
+        "content_assets", "weighted_joint_asset", "geometry_backend", "threshold_asset"
+    )
+    assert get_type_hints(runtime.BlindProductionAssets)["geometry_backend"] is runtime.SyncSealTorchScript
+    tree = ast.parse(inspect.getsource(runtime._detect_core))
+    identifiers = {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+    } | {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    assert not identifiers.intersection(
+        {"paired_null", "original", "stored_h", "truth", "prompt", "seed", "outcome"}
+    )
+    assert sum(isinstance(node, (ast.Lambda, ast.FunctionDef)) for node in ast.walk(tree)) == 1
+    production = inspect.getsource(runtime.detect_watermark)
+    assert "type(assets) is not BlindProductionAssets" in production
+    assert "threshold.test_only" in production and "_detect_core(" in production
 
 
 def test_test_only_threshold_can_express_equality_without_default_zero() -> None:
