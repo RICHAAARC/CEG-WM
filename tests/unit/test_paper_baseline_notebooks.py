@@ -13,7 +13,7 @@ BOOKS = (
     "paper_baseline_worker_colab-shallow-diffuse.ipynb",
 )
 
-PRODUCER_EXACT = "490c7133f98270d126c4dfa5ef60fdf55cc79e0a"
+PRODUCER_EXACT = "23862e0c47411d67e66a617cf35dbd54bbdc0435"
 
 
 @pytest.mark.unit

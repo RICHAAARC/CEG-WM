@@ -1,7 +1,7 @@
 # Baseline-V1 formal protocol (user-frozen)
 
 The four formal worker notebooks are bound to producer exact
-`490c7133f98270d126c4dfa5ef60fdf55cc79e0a`.  They remain unexecuted and
+`23862e0c47411d67e66a617cf35dbd54bbdc0435`.  They remain unexecuted and
 require separate user authorization for any Colab, GPU, model, or formal
 denominator run.
 
