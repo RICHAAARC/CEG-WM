@@ -13,6 +13,8 @@ BOOKS = (
     "paper_baseline_worker_colab-shallow-diffuse.ipynb",
 )
 
+PRODUCER_EXACT = "490c7133f98270d126c4dfa5ef60fdf55cc79e0a"
+
 
 @pytest.mark.unit
 def test_formal_baseline_notebooks_are_clean_thin_fixed_entries() -> None:
@@ -21,7 +23,7 @@ def test_formal_baseline_notebooks_are_clean_thin_fixed_entries() -> None:
         code = [cell for cell in payload["cells"] if cell["cell_type"] == "code"]
         assert "".join(code[0]["source"]) == "from google.colab import drive\ndrive.mount('/content/drive')"
         text = "\n".join("".join(cell["source"]) for cell in code)
-        assert "__BASELINE_FORMAL_PRODUCER_EXACT__" in text
+        assert PRODUCER_EXACT in text
         assert "experiments.run_paper_baseline_worker" in text
         assert "--job-id" in text and "--expected-exact" in text
         assert "force_remount" not in text

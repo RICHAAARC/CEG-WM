@@ -1,5 +1,10 @@
 # Baseline-V1 formal protocol (user-frozen)
 
+The four formal worker notebooks are bound to producer exact
+`490c7133f98270d126c4dfa5ef60fdf55cc79e0a`.  They remain unexecuted and
+require separate user authorization for any Colab, GPU, model, or formal
+denominator run.
+
 This protocol covers Tree-Ring, Gaussian Shading, Shallow Diffuse, and T2SMark
 only. It excludes CEG and Geometry-V4 rows, results, thresholds, and attacks.
 It freezes a measurement plan, not a completed scientific result.
