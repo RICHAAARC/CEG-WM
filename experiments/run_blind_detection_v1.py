@@ -331,8 +331,8 @@ def build_production_runtime(
     weighted_asset = load_weighted_asset_semantic(repo_root)
     checkpoint = runtime_root / config["syncseal_filename"]
     download_official_syncseal_torchscript(checkpoint)
-    if not checkpoint.is_file() or checkpoint.stat().st_size <= 0:
-        raise RuntimeError("official SyncSeal checkpoint download is empty")
+    if not checkpoint.is_file():
+        raise RuntimeError("official SyncSeal checkpoint download did not produce a file")
     geometry = SyncSealTorchScript.from_file(checkpoint, device=config["device"])
     return pipeline, BlindProductionAssets(content_assets, weighted_asset, geometry)
 

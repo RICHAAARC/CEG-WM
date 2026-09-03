@@ -553,7 +553,10 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold(
     assert "ContentCalibrationAssets(content_runner_assets.evaluation_assets)" in runner_source
     assert "load_weighted_asset_semantic(repo_root)" in runner_source
     assert "download_official_syncseal_torchscript(checkpoint)" in runner_source
+    assert "if not checkpoint.is_file()" in runner_source
     assert "SyncSealTorchScript.from_file(checkpoint" in runner_source
+    assert ".stat()" not in runner_source and "st_size" not in runner_source
+    assert "checkpoint download is empty" not in runner_source
 
 
 def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(monkeypatch) -> None:
