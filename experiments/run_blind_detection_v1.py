@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, replace
+from collections import Counter
+from dataclasses import replace
+import hashlib
 import importlib
 import json
 import math
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any, Iterable
 
@@ -20,21 +23,34 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cegwm.method.blind_detection import (  # noqa: E402
+    BLIND_DEV_DENOMINATOR,
     BLIND_DEV_DISJOINT_FROM,
+    BLIND_PRODUCTION_RUNTIME_ID,
+    BLIND_STATISTIC_ID,
     BlindCalibrationRoster,
     BlindCalibrationUnit,
     build_threshold_asset,
     candidate_tau_blind,
+    encode_binary64,
     load_threshold_asset,
     stable_json_bytes,
 )
 from cegwm.runtime.blind_detection import (  # noqa: E402
+    BLIND_PREPROCESS_ID,
+    BLIND_SCORER_ID,
     BlindProductionAssets,
     detect_watermark,
     run_development_calibration,
     run_development_full_system_replay,
 )
-from cegwm.shared.keys import public_key_digest  # noqa: E402
+from cegwm.shared.keys import normalize_detection_key, public_key_digest  # noqa: E402
+
+
+CALIBRATION_RESULT_SCHEMA = "cegwm_blind_detection_v1_calibration_result_v1"
+CALIBRATION_CLAIM_CEILING = (
+    "engineering_N_dev_256_threshold_calibration_only; science_denominator=0; "
+    "not_fixed_FPR_production_reliability_or_paper_evidence"
+)
 
 
 def _read_json(path: str | Path) -> Any:
@@ -42,12 +58,35 @@ def _read_json(path: str | Path) -> Any:
         return json.load(source)
 
 
-def load_roster(path: str | Path) -> BlindCalibrationRoster:
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_roster_inputs(
+    path: str | Path,
+) -> tuple[BlindCalibrationRoster, dict[str, str], str]:
+    """Validate and summarize the frozen roster before any scoring occurs."""
+
     payload = _read_json(path)
-    if not isinstance(payload, dict) or set(payload) != {"disjoint_from", "units"}:
+    required = {"disjoint_evidence", "disjoint_from", "units"}
+    if not isinstance(payload, dict) or set(payload) != required:
         raise ValueError("blind development roster fields differ")
+    evidence = payload["disjoint_evidence"]
+    if not isinstance(evidence, dict) or set(evidence) != set(BLIND_DEV_DISJOINT_FROM):
+        raise ValueError("blind development disjointness evidence fields differ")
+    if any(not isinstance(evidence[name], str) or not evidence[name] for name in evidence):
+        raise ValueError("blind development disjointness evidence must be nonempty")
     units = tuple(BlindCalibrationUnit(**unit) for unit in payload["units"])
-    return BlindCalibrationRoster(units, tuple(payload["disjoint_from"]))
+    roster = BlindCalibrationRoster(units, tuple(payload["disjoint_from"]))
+    return roster, dict(evidence), _sha256_file(path)
+
+
+def load_roster(path: str | Path) -> BlindCalibrationRoster:
+    return load_roster_inputs(path)[0]
 
 
 class ThresholdFreezeBlocked(RuntimeError):
@@ -60,24 +99,20 @@ class ThresholdFreezeBlocked(RuntimeError):
         self.status = "METHOD_FAILED" if "0/256" in str(cause) else "OPERATIONAL_BLOCKED"
 
 
-def freeze_threshold_with_runtime(
+def evaluate_threshold_with_runtime(
     roster: BlindCalibrationRoster,
     key: bytes,
     public_assets: BlindProductionAssets,
     image_loader,
-    output_path: str | Path,
     *,
     producer_exact: str,
-) -> Path:
-    """Run fresh calibration and full-system replay before create-only output."""
+):
+    """Evaluate fixed calibration and fresh replay without writing any artifact."""
 
     if type(public_assets) is not BlindProductionAssets:
         raise TypeError("threshold freeze requires BlindProductionAssets")
     if public_assets.threshold_asset is not None:
         raise ValueError("threshold calibration runtime must not contain an earlier threshold")
-    output = Path(output_path)
-    if output.exists():
-        raise FileExistsError("blind threshold output is create-only")
     rows = run_development_calibration(roster, key, public_assets, image_loader)
     try:
         tau_blind = candidate_tau_blind(rows, roster)
@@ -93,10 +128,231 @@ def freeze_threshold_with_runtime(
         )
     except Exception as error:
         raise ThresholdFreezeBlocked(error, rows, replay) from error
+    return tuple(rows), tuple(replay), asset
+
+
+def freeze_threshold_with_runtime(
+    roster: BlindCalibrationRoster,
+    key: bytes,
+    public_assets: BlindProductionAssets,
+    image_loader,
+    output_path: str | Path,
+    *,
+    producer_exact: str,
+) -> Path:
+    """Run fresh calibration and full-system replay before create-only output."""
+
+    output = Path(output_path)
+    if output.exists():
+        raise FileExistsError("blind threshold output is create-only")
+    _, _, asset = evaluate_threshold_with_runtime(
+        roster, key, public_assets, image_loader, producer_exact=producer_exact
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("xb") as sink:
         sink.write(asset.json_bytes)
     return output
+
+
+def _verify_producer_checkout(producer_exact: str) -> None:
+    if not isinstance(producer_exact, str) or len(producer_exact) != 40 or any(
+        character not in "0123456789abcdef" for character in producer_exact
+    ):
+        raise ValueError("producer exact must be lowercase 40-hex")
+    head = subprocess.check_output(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if head != producer_exact:
+        raise RuntimeError("calibration checkout does not match producer exact")
+    status = subprocess.check_output(
+        ["git", "-C", str(REPO_ROOT), "status", "--porcelain=v1"], text=True
+    )
+    if status:
+        raise RuntimeError("calibration checkout must be clean")
+
+
+def _calibration_rows_payload(rows) -> list[dict[str, Any]]:
+    payload = []
+    for row in rows:
+        z_hex = None
+        if row.method_complete and row.pre_score is not None:
+            try:
+                z_hex = encode_binary64(row.z, "z")
+            except (TypeError, ValueError):
+                z_hex = None
+        payload.append(
+            {
+                "geometry_status": row.geometry_outcome,
+                "image_digest": row.image_digest,
+                "method_complete": row.method_complete,
+                "operational_error": row.operational_error,
+                "post_m_be_hex": (
+                    None if row.post_score is None else encode_binary64(row.post_score, "post_m")
+                ),
+                "pre_m_be_hex": (
+                    None if row.pre_score is None else encode_binary64(row.pre_score, "pre_m")
+                ),
+                "roster_index": row.roster_index,
+                "source_stratum": row.source_stratum,
+                "unit_id": row.unit_id,
+                "z_be_hex": z_hex,
+            }
+        )
+    return payload
+
+
+def _replay_rows_payload(rows) -> list[dict[str, Any]]:
+    return [
+        {
+            "image_digest": row.image_digest,
+            "method_complete": row.method_complete,
+            "operational_error": row.operational_error,
+            "positive": row.positive,
+            "post_m_be_hex": (
+                None if row.post_score is None else encode_binary64(row.post_score, "post_m")
+            ),
+            "pre_m_be_hex": (
+                None if row.pre_score is None else encode_binary64(row.pre_score, "pre_m")
+            ),
+            "recovered": row.recovered,
+            "roster_index": row.roster_index,
+            "route": row.route,
+            "source_stratum": row.source_stratum,
+            "unit_id": row.unit_id,
+        }
+        for row in rows
+    ]
+
+
+def _input_summary(
+    roster: BlindCalibrationRoster,
+    evidence: dict[str, str],
+    roster_file_sha256: str,
+    key: bytes,
+) -> dict[str, Any]:
+    return {
+        "calibration_key_digest": public_key_digest(key),
+        "disjoint_evidence_digest": hashlib.sha256(
+            stable_json_bytes(dict(sorted(evidence.items())))
+        ).hexdigest(),
+        "disjoint_from": list(roster.disjoint_from),
+        "roster_digest": roster.digest,
+        "roster_file_sha256": roster_file_sha256,
+        "source_strata": dict(sorted(Counter(unit.source_stratum for unit in roster.units).items())),
+    }
+
+
+def _config_summary(runtime_factory: str) -> dict[str, Any]:
+    return {
+        "automatic_retries": 0,
+        "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+        "geometry_route": "Geometry-Direct_once_per_current_RGB",
+        "preprocess_id": BLIND_PREPROCESS_ID,
+        "production_runtime_id": BLIND_PRODUCTION_RUNTIME_ID,
+        "runtime_factory_spec_digest": hashlib.sha256(runtime_factory.encode("utf-8")).hexdigest(),
+        "scorer_id": BLIND_SCORER_ID,
+        "statistic_id": BLIND_STATISTIC_ID,
+    }
+
+
+def _base_calibration_result(
+    *, producer_exact: str, runtime_factory: str
+) -> dict[str, Any]:
+    return {
+        "calibration_rows": [],
+        "candidate_tau_blind_be_hex": None,
+        "claim_ceiling": CALIBRATION_CLAIM_CEILING,
+        "config_summary": _config_summary(runtime_factory),
+        "denominator": BLIND_DEV_DENOMINATOR,
+        "error": None,
+        "fresh_replay_false_positives": None,
+        "fresh_replay_rows": [],
+        "fresh_replay_zero_of_256": False,
+        "frozen_tau_blind_be_hex": None,
+        "input_summary": None,
+        "producer_exact": producer_exact,
+        "schema_version": CALIBRATION_RESULT_SCHEMA,
+        "science_denominator": 0,
+        "status": "OPERATIONAL_BLOCKED",
+        "threshold_asset_sha256": None,
+        "threshold_written": False,
+    }
+
+
+def calibrate_and_record(
+    roster_path: str | Path,
+    key_path: str | Path,
+    runtime_factory: str,
+    threshold_output_path: str | Path,
+    result_output_path: str | Path,
+    *,
+    producer_exact: str,
+) -> tuple[Path, Path | None, str]:
+    """Run one formal calibration attempt and retain success or failure create-only."""
+
+    threshold_output = Path(threshold_output_path)
+    result_output = Path(result_output_path)
+    if threshold_output.exists():
+        raise FileExistsError("blind threshold output is create-only")
+    if result_output.exists():
+        raise FileExistsError("blind calibration result is create-only")
+    result = _base_calibration_result(
+        producer_exact=producer_exact, runtime_factory=runtime_factory
+    )
+    rows = ()
+    replay = ()
+    try:
+        roster, evidence, roster_file_sha256 = load_roster_inputs(roster_path)
+        key = normalize_detection_key(Path(key_path).read_bytes())
+        result["input_summary"] = _input_summary(
+            roster, evidence, roster_file_sha256, key
+        )
+        _verify_producer_checkout(producer_exact)
+        factory = _load_factory(runtime_factory)
+        public_assets = factory(REPO_ROOT)
+        if type(public_assets) is not BlindProductionAssets:
+            raise TypeError("runtime factory must return BlindProductionAssets")
+
+        def image_loader(image_ref: str) -> Image.Image:
+            with Image.open(image_ref) as opened:
+                return opened.copy()
+
+        rows, replay, asset = evaluate_threshold_with_runtime(
+            roster, key, public_assets, image_loader, producer_exact=producer_exact
+        )
+        result["candidate_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
+        result["frozen_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
+        result["fresh_replay_false_positives"] = 0
+        result["fresh_replay_zero_of_256"] = True
+        result["status"] = "THRESHOLD_FROZEN_AFTER_0_OF_256_FRESH_REPLAY"
+        threshold_output.parent.mkdir(parents=True, exist_ok=True)
+        with threshold_output.open("xb") as sink:
+            sink.write(asset.json_bytes)
+        result["threshold_asset_sha256"] = hashlib.sha256(asset.json_bytes).hexdigest()
+        result["threshold_written"] = True
+    except ThresholdFreezeBlocked as blocked:
+        rows = blocked.calibration_rows
+        replay = blocked.replay_rows
+        result["status"] = blocked.status
+        result["error"] = str(blocked)
+        if rows and all(row.method_complete for row in rows):
+            try:
+                result["candidate_tau_blind_be_hex"] = encode_binary64(
+                    max(row.z for row in rows), "candidate_tau_blind"
+                )
+            except (TypeError, ValueError):
+                pass
+        if replay:
+            result["fresh_replay_false_positives"] = sum(row.positive for row in replay)
+    except Exception as error:
+        result["status"] = "OPERATIONAL_BLOCKED"
+        result["error"] = f"{type(error).__name__}: {error}"
+    result["calibration_rows"] = _calibration_rows_payload(rows)
+    result["fresh_replay_rows"] = _replay_rows_payload(replay)
+    result_output.parent.mkdir(parents=True, exist_ok=True)
+    with result_output.open("xb") as sink:
+        sink.write(stable_json_bytes(result))
+    return result_output, threshold_output if result["threshold_written"] else None, result["status"]
 
 
 def calibrate_and_freeze(
@@ -290,6 +546,7 @@ def _parser() -> argparse.ArgumentParser:
     freeze.add_argument("--runtime-factory", required=True)
     freeze.add_argument("--producer-exact", required=True)
     freeze.add_argument("--output", required=True)
+    freeze.add_argument("--result-output", required=True)
     diagnose = sub.add_parser("diagnose-existing")
     diagnose.add_argument("artifacts", nargs="+")
     callback = sub.add_parser("callback")
@@ -304,40 +561,27 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "calibrate-and-freeze":
-        try:
-            output = calibrate_and_freeze(
-                args.roster,
-                args.key_file,
-                args.runtime_factory,
-                args.output,
-                producer_exact=args.producer_exact,
-            )
-        except ThresholdFreezeBlocked as blocked:
-            print(
-                "CEGWM_BLIND_DETECTION_V1 "
-                + stable_json_bytes(
-                    {
-                        "calibration_rows": [asdict(row) for row in blocked.calibration_rows],
-                        "error": str(blocked),
-                        "replay_rows": [asdict(row) for row in blocked.replay_rows],
-                        "status": blocked.status,
-                        "threshold_written": False,
-                    }
-                ).decode("ascii")
-            )
-            return 2 if blocked.status == "METHOD_FAILED" else 3
+        result, threshold, status = calibrate_and_record(
+            args.roster,
+            args.key_file,
+            args.runtime_factory,
+            args.output,
+            args.result_output,
+            producer_exact=args.producer_exact,
+        )
         print(
             "CEGWM_BLIND_DETECTION_V1 "
             + stable_json_bytes(
                 {
                     "denominator": 256,
                     "disjoint_from": list(BLIND_DEV_DISJOINT_FROM),
-                    "output": str(output),
-                    "status": "THRESHOLD_FROZEN_AFTER_0_OF_256_REPLAY",
+                    "result_output": str(result),
+                    "status": status,
+                    "threshold_output": None if threshold is None else str(threshold),
                 }
             ).decode("ascii")
         )
-        return 0
+        return 0 if threshold is not None else 2 if status == "METHOD_FAILED" else 3
     if args.command == "callback":
         output, status, mismatches = run_callback(
             args.manifest,
