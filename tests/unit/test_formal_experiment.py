@@ -11,6 +11,7 @@ from cegwm.formal_experiment import (
     FormalRunStore,
     OperationalUnitError,
     apply_attack,
+    empty_binary_summary,
     execute_with_frozen_retry,
     expand_rosters,
     freeze_threshold,
@@ -64,6 +65,12 @@ def test_partial_statistics_keep_conditional_interval_and_planned_bounds() -> No
     positive = summarize_binary(rows, truth_positive=True, planned=4)
     assert (positive["planned_tpr_lower"], positive["planned_tpr_upper"]) == (0.25, 0.75)
 
+    unavailable = empty_binary_summary(truth_positive=False, planned=3000)
+    assert unavailable["n_scored"] == unavailable["n_failed"] == 0
+    assert unavailable["n_missing"] == 3000
+    assert unavailable["scored_only_fpr"] is None
+    assert (unavailable["planned_fpr_lower"], unavailable["planned_fpr_upper"]) == (0.0, 1.0)
+
 
 @pytest.mark.unit
 def test_retry_is_same_unit_allowlisted_bounded_and_attempts_retained() -> None:
@@ -107,6 +114,21 @@ def test_store_resumes_prefix_without_lock_hash_or_overwrite(tmp_path: Path) -> 
     assert not list(tmp_path.rglob("*.sha256"))
     with pytest.raises(RuntimeError, match="out of order"):
         resumed.commit({"unit_id": "u2", "terminal_status": "SCORED"})
+
+
+@pytest.mark.unit
+def test_store_rejects_a_noncontiguous_prefix(tmp_path: Path) -> None:
+    identity = {
+        "schema_version": "v1", "job_id": "job", "run_id": "run",
+        "method_id": "tree_ring", "stage": "test", "expected_exact": "a" * 40,
+    }
+    units = tmp_path / "units"
+    units.mkdir(parents=True)
+    (units / "000001.json").write_text(
+        json.dumps({"unit_id": "u2", "terminal_status": "SCORED"}), encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="prefix has a gap"):
+        FormalRunStore(tmp_path, identity, ("u1", "u2")).rows()
 
 
 @pytest.mark.unit

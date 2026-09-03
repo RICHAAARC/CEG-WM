@@ -29,3 +29,11 @@ def test_formal_worker_has_no_canary_lock_force_or_hash_gate() -> None:
     source = Path(worker.__file__).read_text(encoding="utf-8")
     for forbidden in ("RunLock", "force-rerun-all", "sha256_file", "final_manifest.json"):
         assert forbidden not in source
+
+
+@pytest.mark.unit
+def test_unavailable_threshold_keeps_all_planned_evaluation_cells() -> None:
+    summaries = worker._empty_evaluation()
+    assert len(summaries) == 12
+    assert all(summary["n_planned"] == 1000 for summary in summaries.values())
+    assert all(summary["n_missing"] == 1000 for summary in summaries.values())

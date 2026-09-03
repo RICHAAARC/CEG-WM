@@ -303,6 +303,12 @@ def summarize_binary(records: Iterable[Mapping[str, Any]], *, truth_positive: bo
     }
 
 
+def empty_binary_summary(*, truth_positive: bool, planned: int) -> dict[str, Any]:
+    """Return the frozen all-missing summary for a stage that could not start."""
+
+    return summarize_binary((), truth_positive=truth_positive, planned=planned)
+
+
 def apply_attack(image: Image.Image, condition: str) -> Image.Image:
     rgb = image.convert("RGB")
     if condition == "clean_no_attack":
@@ -412,6 +418,7 @@ class FormalRunStore:
         required = ("schema_version", "job_id", "run_id", "method_id", "stage", "expected_exact")
         if any(not isinstance(self.identity.get(name), str) or not self.identity[name] for name in required):
             raise ValueError("formal run identity is incomplete")
+        self._rows_cache: list[dict[str, Any]] | None = None
 
     @property
     def final_path(self) -> Path:
@@ -436,22 +443,27 @@ class FormalRunStore:
         return value
 
     def rows(self) -> tuple[dict[str, Any], ...]:
+        if self._rows_cache is not None:
+            return tuple(self._rows_cache)
         directory = self.root / "units"
         if not directory.exists():
+            self._rows_cache = []
             return ()
+        paths = tuple(sorted(directory.glob("*.json")))
+        if len(paths) > len(self.unit_ids):
+            raise RuntimeError("formal committed unit count exceeds the plan")
         rows: list[dict[str, Any]] = []
-        for index, unit_id in enumerate(self.unit_ids):
-            path = directory / f"{index:06d}.json"
-            if not path.exists():
-                if any(directory.glob(f"{later:06d}.json") for later in range(index + 1, len(self.unit_ids))):
-                    raise RuntimeError("formal committed unit prefix has a gap")
-                break
+        for index, path in enumerate(paths):
+            unit_id = self.unit_ids[index]
+            if path.name != f"{index:06d}.json":
+                raise RuntimeError("formal committed unit prefix has a gap")
             row = _read_json(path)
             if not isinstance(row, dict) or row.get("unit_id") != unit_id:
                 raise RuntimeError("formal unit record identity differs")
             if row.get("terminal_status") not in {"SCORED", "OPERATIONAL_FAILURE"}:
                 raise RuntimeError("formal unit record is not terminal")
             rows.append(row)
+        self._rows_cache = rows
         return tuple(rows)
 
     def commit(self, row: Mapping[str, Any]) -> None:
@@ -459,7 +471,11 @@ class FormalRunStore:
         index = len(existing)
         if index >= len(self.unit_ids) or row.get("unit_id") != self.unit_ids[index]:
             raise RuntimeError("formal unit commit is out of order")
-        _write_json_create_only(self.root / "units" / f"{index:06d}.json", dict(row))
+        committed = dict(row)
+        _write_json_create_only(self.root / "units" / f"{index:06d}.json", committed)
+        if self._rows_cache is None:
+            raise AssertionError("formal row cache was not initialized")
+        self._rows_cache.append(committed)
         self.write_progress("unit_committed")
 
     def _checkpoint_paths(self) -> tuple[Path, ...]:
@@ -544,5 +560,6 @@ __all__ = [
     "FORMAL_CONDITIONS", "FormalRunStore", "FormalUnit", "MAX_UNIT_ATTEMPTS",
     "OperationalUnitError", "RETRYABLE_OPERATIONAL_CODES", "apply_attack",
     "clopper_pearson", "decide", "execute_with_frozen_retry", "expand_rosters",
-    "freeze_threshold", "load_formal_config", "normalized_score", "summarize_binary",
+    "empty_binary_summary", "freeze_threshold", "load_formal_config", "normalized_score",
+    "summarize_binary",
 ]

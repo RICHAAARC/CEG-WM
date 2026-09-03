@@ -28,6 +28,7 @@ from cegwm.formal_experiment import (
     OperationalUnitError,
     apply_attack,
     decide,
+    empty_binary_summary,
     expand_rosters,
     freeze_threshold,
     load_formal_config,
@@ -325,6 +326,9 @@ def _threshold_from_stage(stage: FormalRunStore, output: Path, method: str, exac
     return threshold
 
 
+_LPIPS_MODEL: Any | None = None
+
+
 def _quality(clean: Image.Image, watermarked: Image.Image) -> dict[str, float]:
     import torch
     import lpips
@@ -332,17 +336,29 @@ def _quality(clean: Image.Image, watermarked: Image.Image) -> dict[str, float]:
         peak_signal_noise_ratio,
         structural_similarity_index_measure,
     )
+    global _LPIPS_MODEL
     first = torch.from_numpy(np.asarray(clean, dtype=np.float32)).permute(2, 0, 1).unsqueeze(0) / 255.0
     second = torch.from_numpy(np.asarray(watermarked, dtype=np.float32)).permute(2, 0, 1).unsqueeze(0) / 255.0
     device = torch.device("cuda")
     first, second = first.to(device), second.to(device)
-    perceptual = lpips.LPIPS(net="alex").to(device).eval()
+    if _LPIPS_MODEL is None:
+        _LPIPS_MODEL = lpips.LPIPS(net="alex").to(device).eval()
     with torch.no_grad():
         return {
             "psnr": float(peak_signal_noise_ratio(second, first, data_range=1.0).item()),
             "ssim": float(structural_similarity_index_measure(second, first, data_range=1.0).item()),
-            "lpips": float(perceptual(second * 2.0 - 1.0, first * 2.0 - 1.0).reshape(-1)[0].item()),
+            "lpips": float(_LPIPS_MODEL(second * 2.0 - 1.0, first * 2.0 - 1.0).reshape(-1)[0].item()),
         }
+
+
+def _empty_evaluation() -> dict[str, Any]:
+    return {
+        f"{condition}:{role}": empty_binary_summary(
+            truth_positive=role == "positive", planned=EVALUATION_PAIRS
+        )
+        for condition in FORMAL_CONDITIONS
+        for role in ("negative", "positive")
+    }
 
 
 def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Path, runtime_root: Path) -> int:
@@ -395,11 +411,23 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
             "schema_version": "cegwm_formal_method_result_v1",
             "method_id": method,
             "producer_exact": expected_exact,
+            "threshold": None,
+            "threshold_status": "INCOMPLETE_THRESHOLD",
+            "clean_negative_test": empty_binary_summary(
+                truth_positive=False, planned=CLEAN_TEST_NEGATIVES
+            ),
+            "evaluation": _empty_evaluation(),
             "status": "INCOMPLETE_OPERATIONAL",
             "reason": "paper threshold unavailable after terminal calibration",
+            "fpr_policy": "report_only_nonblocking",
             "result_package_produced": True,
         })
-        return 2
+        print(json.dumps({
+            "method_id": method,
+            "status": "INCOMPLETE_OPERATIONAL",
+            "terminal": True,
+        }, sort_keys=True))
+        return 0
 
     tau = float(threshold["tau"])
     clean_units = rosters["clean_negative_test"]
