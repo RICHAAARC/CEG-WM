@@ -439,10 +439,91 @@ def test_engineering_validation_retains_all_fixed_rows_on_preparation_failure(
     assert all(row["operational_error"].startswith("prepare:") for row in result["negative_rows"])
     assert result["metrics"]["positive"]["operational_incomplete"] == 64
     assert result["metrics"]["negative"]["operational_incomplete"] == 256
+    assert result["metrics"]["positive"]["positive_numerator"] is None
+    assert result["metrics"]["negative"]["false_positive_numerator"] is None
+    assert all(
+        item["positive_numerator"] is None
+        and item["operational_incomplete"] == 16
+        for item in result["metrics"]["positive"]["by_attack_stratum"].values()
+    )
+    assert all(row["positive"] is None for row in result["positive_rows"])
+    assert all(row["positive"] is None for row in result["negative_rows"])
     assert result["success_criteria"] is None and result["science_denominator"] == 0
     assert result["wrong_key_experiment"] == "excluded"
     assert runner.ROOT_KEY_ENV not in runner.os.environ
     assert runner.HF_TOKEN_ENV not in runner.os.environ
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        GeometryEstimate(
+            GeometryStatus.ERROR, 0.0, None, None, None, False, False, "runtime stopped"
+        ),
+        GeometryEstimate(
+            GeometryStatus.RELIABLE, 99.0, None, None, IDENTITY_H, False, True, None
+        ),
+    ],
+)
+def test_engineering_canary_operational_geometry_blocks_before_formal_allocation(
+    monkeypatch, tmp_path: Path, geometry: GeometryEstimate
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    threshold = runner.load_repository_threshold_asset(root)
+    content_assets = _content_assets()
+    object.__setattr__(content_assets, "iss_assets", object())
+    public_assets = runtime.BlindProductionAssets(
+        content_assets, WeightedJointAsset({}, b""), _syncseal(), threshold
+    )
+    key_digest = threshold.payload["calibration_key_digest"]
+
+    class FakeGenerator:
+        def manual_seed(self, seed):
+            return self
+
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, "root-key")
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "hf-token")
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    monkeypatch.setattr(runner, "normalize_detection_key", lambda key: b"detection-key")
+    monkeypatch.setattr(runner, "public_key_digest", lambda key: key_digest)
+    monkeypatch.setattr(runner, "load_runtime_config", lambda root: {"device": "cuda"})
+    monkeypatch.setattr(
+        runner, "build_production_detection_runtime",
+        lambda *args, **kwargs: (object(), public_assets),
+    )
+    monkeypatch.setattr(runner.torch, "Generator", lambda device: FakeGenerator())
+    monkeypatch.setattr(
+        runner, "run_sd35_plain", lambda *args, **kwargs: Image.new("RGB", (512, 512))
+    )
+    monkeypatch.setattr(
+        SyncSealTorchScript, "detect_geometry", lambda self, image: geometry
+    )
+    monkeypatch.setattr(
+        runner, "_prepare_engineering_formal_rosters",
+        lambda *args, **kwargs: pytest.fail("operational canary must block allocation"),
+    )
+    result_path = tmp_path / "result.json"
+    _, status = runner.run_engineering_validation(
+        tmp_path / "runtime",
+        tmp_path / "current",
+        result_path,
+        tmp_path / "positive.json",
+        tmp_path / "negative.json",
+        producer_exact="e" * 40,
+    )
+    result = json.loads(result_path.read_text(encoding="ascii"))
+    assert status == result["status"] == "OPERATIONAL_BLOCKED"
+    assert result["canary"]["method_scoring_performed"] is False
+    assert result["canary"]["method_conclusion"] is None
+    assert result["canary"]["science_denominator"] == 0
+    assert "geometry_runtime:" in result["canary"]["operational_error"]
+    assert result["positive_rows"] == [] and result["negative_rows"] == []
+    assert result["metrics"]["positive"]["unallocated"] == 64
+    assert result["metrics"]["positive"]["operational_incomplete"] == 64
+    assert result["metrics"]["positive"]["positive_numerator"] is None
+    assert result["metrics"]["negative"]["unallocated"] == 256
+    assert result["metrics"]["negative"]["operational_incomplete"] == 256
+    assert result["metrics"]["negative"]["false_positive_numerator"] is None
 
 
 def test_development_full_replay_reinvokes_scorer_and_geometry_before_write(

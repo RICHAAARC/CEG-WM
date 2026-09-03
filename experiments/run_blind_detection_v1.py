@@ -75,6 +75,7 @@ from cegwm.runtime.blind_detection import (  # noqa: E402
     BLIND_SCORER_ID,
     BlindEmbeddingAssets,
     BlindProductionAssets,
+    _geometry_disposition,
     detect_watermark,
     embed_watermark,
     run_development_calibration,
@@ -1595,6 +1596,7 @@ def _engineering_canary(
     """Exercise real generation and Geometry once without method scoring."""
 
     record = {
+        "geometry_disposition": None,
         "geometry_status": None,
         "method_conclusion": None,
         "method_scoring_performed": False,
@@ -1617,6 +1619,10 @@ def _engineering_canary(
         del current_rgb
         if not isinstance(geometry, GeometryEstimate):
             raise TypeError("engineering canary Geometry result must be typed")
+        disposition, geometry_error = _geometry_disposition(geometry)
+        if disposition == "OPERATIONAL":
+            raise RuntimeError(geometry_error or "engineering canary Geometry was operational")
+        record["geometry_disposition"] = disposition
         record["geometry_status"] = geometry.status.value
         record["status"] = "CANARY_PASSED"
     except Exception as error:
@@ -1633,7 +1639,7 @@ def _engineering_empty_row(index: int, unit: EngineeringValidationUnit) -> dict[
         "index": index,
         "method_complete": False,
         "operational_error": None,
-        "positive": False,
+        "positive": None,
         "post_m_be_hex": None,
         "pre_m_be_hex": None,
         "recovered": False,
@@ -1682,6 +1688,47 @@ def _write_engineering_current_rgb(
     return name
 
 
+def _prepare_engineering_formal_rosters(
+    positive_units: tuple[EngineeringValidationUnit, ...],
+    negative_units: tuple[EngineeringValidationUnit, ...],
+    pipeline: Any,
+    detection_key: bytes,
+    public_assets: BlindProductionAssets,
+    image_output: Path,
+    *,
+    device: str,
+    residual_strength_multiplier: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Finish all prompt/seed work in a frame that cannot enter detection."""
+
+    positive_rows = [
+        _engineering_empty_row(index, unit) for index, unit in enumerate(positive_units)
+    ]
+    negative_rows = [
+        _engineering_empty_row(index, unit) for index, unit in enumerate(negative_units)
+    ]
+    embedding_assets = BlindEmbeddingAssets(
+        _CallbackN4ContentBackend(pipeline, public_assets.content_assets.iss_assets),
+        public_assets.geometry_backend,
+        residual_strength_multiplier,
+    )
+    image_output.mkdir(parents=True, exist_ok=False)
+    for units, rows in ((positive_units, positive_rows), (negative_units, negative_rows)):
+        for unit, row in zip(units, rows, strict=True):
+            try:
+                current_rgb = _prepare_engineering_current_rgb(
+                    unit, pipeline, detection_key, embedding_assets, device=device
+                )
+                row["current_rgb_file"] = _write_engineering_current_rgb(
+                    image_output, unit, current_rgb
+                )
+                del current_rgb
+            except Exception as error:
+                row["operational_error"] = f"prepare:{type(error).__name__}: {error}"
+                row["route"] = "ERROR_FAIL_CLOSED"
+    return positive_rows, negative_rows
+
+
 def _apply_engineering_detection_record(row: dict[str, Any], record: Any) -> None:
     row.update(
         {
@@ -1700,31 +1747,71 @@ def _apply_engineering_detection_record(row: dict[str, Any], record: Any) -> Non
     )
 
 
+def _run_engineering_detection_phase(
+    image_output: Path,
+    positive_rows: list[dict[str, Any]],
+    negative_rows: list[dict[str, Any]],
+    detection_key: bytes,
+    public_assets: BlindProductionAssets,
+) -> None:
+    """Reload current candidates in a frame with no prompt/seed-bearing inputs."""
+
+    for row in (*positive_rows, *negative_rows):
+        if row["operational_error"] is not None:
+            continue
+        try:
+            with Image.open(image_output / row["current_rgb_file"]) as source:
+                current_rgb = require_ordinary_rgb_image(source.copy())
+            detection = detect_engineering_current_rgb(current_rgb, detection_key, public_assets)
+            del current_rgb
+            _apply_engineering_detection_record(row, detection)
+        except Exception as error:
+            row["operational_error"] = f"detect:{type(error).__name__}: {error}"
+            row["route"] = "ERROR_FAIL_CLOSED"
+
+
+def _engineering_metric_block(
+    rows: list[dict[str, Any]], denominator: int, numerator_name: str
+) -> dict[str, Any]:
+    unallocated = max(denominator - len(rows), 0)
+    invalid = sum(
+        row.get("method_complete") is not True
+        or row.get("operational_error") is not None
+        or not isinstance(row.get("positive"), bool)
+        for row in rows
+    )
+    cardinality_excess = max(len(rows) - denominator, 0)
+    incomplete = unallocated + invalid + cardinality_excess
+    available = len(rows) == denominator and invalid == 0
+    return {
+        "denominator": denominator,
+        numerator_name: (
+            sum(row["positive"] is True for row in rows) if available else None
+        ),
+        "operational_incomplete": incomplete,
+        "route_counts": dict(sorted(Counter(row["route"] for row in rows).items())),
+        "unallocated": unallocated,
+    }
+
+
 def _engineering_metrics(
     positive_rows: list[dict[str, Any]], negative_rows: list[dict[str, Any]]
 ) -> dict[str, Any]:
     by_stratum = {}
     for stratum, _, _ in ENGINEERING_POSITIVE_STRATA:
         rows = [row for row in positive_rows if row["attack_stratum"] == stratum]
-        by_stratum[stratum] = {
-            "denominator": 16,
-            "operational_incomplete": sum(not row["method_complete"] for row in rows),
-            "positive_numerator": sum(row["positive"] is True for row in rows),
-            "route_counts": dict(sorted(Counter(row["route"] for row in rows).items())),
-        }
+        by_stratum[stratum] = _engineering_metric_block(
+            rows, 16, "positive_numerator"
+        )
     return {
-        "negative": {
-            "denominator": ENGINEERING_NEGATIVE_DENOMINATOR,
-            "false_positive_numerator": sum(row["positive"] is True for row in negative_rows),
-            "operational_incomplete": sum(not row["method_complete"] for row in negative_rows),
-            "route_counts": dict(sorted(Counter(row["route"] for row in negative_rows).items())),
-        },
+        "negative": _engineering_metric_block(
+            negative_rows, ENGINEERING_NEGATIVE_DENOMINATOR, "false_positive_numerator"
+        ),
         "positive": {
+            **_engineering_metric_block(
+                positive_rows, ENGINEERING_POSITIVE_DENOMINATOR, "positive_numerator"
+            ),
             "by_attack_stratum": by_stratum,
-            "denominator": ENGINEERING_POSITIVE_DENOMINATOR,
-            "operational_incomplete": sum(not row["method_complete"] for row in positive_rows),
-            "positive_numerator": sum(row["positive"] is True for row in positive_rows),
-            "route_counts": dict(sorted(Counter(row["route"] for row in positive_rows).items())),
         },
     }
 
@@ -1813,61 +1900,38 @@ def run_engineering_validation(
         if canary_record["status"] != "CANARY_PASSED":
             raise RuntimeError(canary_record["operational_error"])
 
-        positive_rows.extend(
-            _engineering_empty_row(index, unit) for index, unit in enumerate(positive_units)
-        )
-        negative_rows.extend(
-            _engineering_empty_row(index, unit) for index, unit in enumerate(negative_units)
-        )
-        image_output.mkdir(parents=True, exist_ok=False)
-        embedding_assets = BlindEmbeddingAssets(
-            _CallbackN4ContentBackend(pipeline, public_assets.content_assets.iss_assets),
-            public_assets.geometry_backend,
-            config["positive"]["residual_strength_multiplier"],
-        )
         result["stage"] = "candidate_preparation"
-        for units, rows in ((positive_units, positive_rows), (negative_units, negative_rows)):
-            for unit, row in zip(units, rows, strict=True):
-                try:
-                    current_rgb = _prepare_engineering_current_rgb(
-                        unit, pipeline, detection_key, embedding_assets,
-                        device=runtime_config["device"],
-                    )
-                    row["current_rgb_file"] = _write_engineering_current_rgb(
-                        image_output, unit, current_rgb
-                    )
-                    del current_rgb
-                except Exception as error:
-                    row["operational_error"] = f"prepare:{type(error).__name__}: {error}"
-                    row["route"] = "ERROR_FAIL_CLOSED"
-
-        del embedding_assets
+        positive_rows, negative_rows = _prepare_engineering_formal_rosters(
+            positive_units,
+            negative_units,
+            pipeline,
+            detection_key,
+            public_assets,
+            image_output,
+            device=runtime_config["device"],
+            residual_strength_multiplier=config["positive"]["residual_strength_multiplier"],
+        )
+        result["positive_rows"] = positive_rows
+        result["negative_rows"] = negative_rows
+        del canary
+        del canary_record
         del positive_units
         del negative_units
         del pipeline
         del config
         del runtime_config
+        del runtime_work
         result["stage"] = "blind_detection"
-        for row in (*positive_rows, *negative_rows):
-            if row["operational_error"] is not None:
-                continue
-            try:
-                with Image.open(image_output / row["current_rgb_file"]) as source:
-                    current_rgb = require_ordinary_rgb_image(source.copy())
-                detection = detect_engineering_current_rgb(
-                    current_rgb, detection_key, public_assets
-                )
-                del current_rgb
-                _apply_engineering_detection_record(row, detection)
-            except Exception as error:
-                row["operational_error"] = f"detect:{type(error).__name__}: {error}"
-                row["route"] = "ERROR_FAIL_CLOSED"
+        _run_engineering_detection_phase(
+            image_output, positive_rows, negative_rows, detection_key, public_assets
+        )
         result["metrics"] = _engineering_metrics(positive_rows, negative_rows)
-        incomplete = any(
-            not row["method_complete"] for row in (*positive_rows, *negative_rows)
+        complete = (
+            result["metrics"]["positive"]["positive_numerator"] is not None
+            and result["metrics"]["negative"]["false_positive_numerator"] is not None
         )
         result["status"] = (
-            "OPERATIONAL_BLOCKED" if incomplete else "ENGINEERING_VALIDATION_COMPLETE"
+            "ENGINEERING_VALIDATION_COMPLETE" if complete else "OPERATIONAL_BLOCKED"
         )
         result["stage"] = "terminal"
     except Exception as error:

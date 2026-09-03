@@ -224,6 +224,43 @@ def test_engineering_detection_helper_has_only_the_blind_boundary() -> None:
         assert forbidden not in source
 
 
+def test_engineering_detection_phase_has_no_prompt_seed_or_preparation_aliases() -> None:
+    signature = tuple(
+        inspect.signature(runner._run_engineering_detection_phase).parameters
+    )
+    assert signature == (
+        "image_output", "positive_rows", "negative_rows", "detection_key", "public_assets",
+    )
+    tree = ast.parse(inspect.getsource(runner._run_engineering_detection_phase))
+    identifiers = {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+    } | {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    assert not identifiers.intersection(
+        {
+            "prompt", "seed", "canary", "unit", "units", "positive_units",
+            "negative_units", "config", "pipeline", "embedding_assets",
+            "runtime_config", "attack", "primary_null", "original",
+        }
+    )
+    preparation = ast.parse(
+        inspect.getsource(runner._prepare_engineering_formal_rosters)
+    )
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"detect_watermark", "detect_engineering_current_rgb"}
+        for node in ast.walk(preparation)
+    )
+    run_source = inspect.getsource(runner.run_engineering_validation)
+    for name in (
+        "canary", "canary_record", "positive_units", "negative_units",
+        "pipeline", "config", "runtime_config", "runtime_work",
+    ):
+        assert f"del {name}" in run_source
+
+
 def test_detection_signature_and_source_have_no_forbidden_runtime_inputs() -> None:
     assert tuple(inspect.signature(runtime.detect_watermark).parameters) == ("image", "key", "assets")
     source = inspect.getsource(runtime.detect_watermark)
