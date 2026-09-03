@@ -30,7 +30,7 @@ Wrong-key attribution must be run later as an explicitly separate fixed-denomina
 
 ## Dedicated calibration handoff (prepared, not executed)
 
-`notebooks/blind_detection_v1_calibration.ipynb` is a dedicated N_dev=256 handoff and does not reuse the N=4 callback notebook. Its first executable cell is exactly the required two-line Drive mount. It binds detached producer exact `686b21e7e7d0358ca5a7dff78ac781b538087e35`, verifies exact and clean state before and after installation, requires a GPU, and invokes the single formal runner once. GitHub supplies the runner, roster, configuration, and public asset identifiers; Drive is output-only.
+`notebooks/blind_detection_v1_calibration.ipynb` is a dedicated N_dev=256 handoff and does not reuse the N=4 callback notebook. Its first executable cell is exactly the required two-line Drive mount. It binds detached producer exact `686b21ed9bf29ee8acbb29d224d855508aa523a9`, verifies exact and clean state before and after installation, requires a GPU, and invokes the single formal runner once. GitHub supplies the runner, roster, configuration, and public asset identifiers; Drive is output-only.
 
 The committed roster fixes the two prompt-source paths, four seeds, seed-major ordering, exact denominator, eight source strata, Geometry-V7 exclusion sources, and exclusive future-split reservation. The runner validates these logical identities before loading a model and automatically generates each base ordinary RGB exactly once through callback-free `run_sd35_plain`. There is no post-hoc selection, replacement, retry, RGB hash scan, or Drive input.
 
