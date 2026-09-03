@@ -382,6 +382,69 @@ def test_repository_threshold_binds_formal_runtime_and_keeps_equality_negative(
     assert above.method_complete and above.positive and above.route == "DIRECT_POSITIVE"
 
 
+def test_engineering_validation_retains_all_fixed_rows_on_preparation_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    threshold = runner.load_repository_threshold_asset(root)
+    content_assets = _content_assets()
+    object.__setattr__(content_assets, "iss_assets", object())
+    public_assets = runtime.BlindProductionAssets(
+        content_assets, WeightedJointAsset({}, b""), _syncseal(), threshold
+    )
+    key_digest = threshold.payload["calibration_key_digest"]
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, "root-key")
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "hf-token")
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    monkeypatch.setattr(runner, "normalize_detection_key", lambda key: b"detection-key")
+    monkeypatch.setattr(runner, "public_key_digest", lambda key: key_digest)
+    monkeypatch.setattr(runner, "load_runtime_config", lambda root: {"device": "cuda"})
+    monkeypatch.setattr(
+        runner, "build_production_detection_runtime",
+        lambda *args, **kwargs: (object(), public_assets),
+    )
+    monkeypatch.setattr(
+        runner, "_engineering_canary",
+        lambda *args, **kwargs: {
+            "geometry_status": "UNRELIABLE", "method_conclusion": None,
+            "method_scoring_performed": False, "operational_error": None,
+            "science_denominator": 0, "status": "CANARY_PASSED",
+            "unit_id": "blind-eng-canary-001",
+        },
+    )
+    monkeypatch.setattr(
+        runner, "_prepare_engineering_current_rgb",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("prepared failure")),
+    )
+    monkeypatch.setattr(
+        runner, "detect_engineering_current_rgb",
+        lambda *args: pytest.fail("a failed preparation must not reach detection"),
+    )
+    result_path = tmp_path / "result.json"
+    positive_path = tmp_path / "positive.json"
+    negative_path = tmp_path / "negative.json"
+    _, status = runner.run_engineering_validation(
+        tmp_path / "runtime",
+        tmp_path / "current",
+        result_path,
+        positive_path,
+        negative_path,
+        producer_exact="e" * 40,
+    )
+    result = json.loads(result_path.read_text(encoding="ascii"))
+    assert status == result["status"] == "OPERATIONAL_BLOCKED"
+    assert result["positive_denominator"] == len(result["positive_rows"]) == 64
+    assert result["negative_denominator"] == len(result["negative_rows"]) == 256
+    assert all(row["operational_error"].startswith("prepare:") for row in result["positive_rows"])
+    assert all(row["operational_error"].startswith("prepare:") for row in result["negative_rows"])
+    assert result["metrics"]["positive"]["operational_incomplete"] == 64
+    assert result["metrics"]["negative"]["operational_incomplete"] == 256
+    assert result["success_criteria"] is None and result["science_denominator"] == 0
+    assert result["wrong_key_experiment"] == "excluded"
+    assert runner.ROOT_KEY_ENV not in runner.os.environ
+    assert runner.HF_TOKEN_ENV not in runner.os.environ
+
+
 def test_development_full_replay_reinvokes_scorer_and_geometry_before_write(
     monkeypatch, tmp_path: Path
 ) -> None:

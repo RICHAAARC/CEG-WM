@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from dataclasses import fields
 import inspect
 import json
@@ -25,6 +26,7 @@ from cegwm.method.blind_detection import (
     statistic_from_weighted_scores,
 )
 from cegwm.runtime import blind_detection as runtime
+from experiments import run_blind_detection_v1 as runner
 
 pytestmark = pytest.mark.unit
 
@@ -182,6 +184,44 @@ def test_repository_has_frozen_engineering_threshold() -> None:
     assert asset.payload["denominator"] == 256
     assert asset.payload["replay_false_positives"] == 0
     assert len(asset.payload["full_system_replay_rows"]) == 256
+
+
+def test_engineering_validation_rosters_are_frozen_balanced_and_disjoint() -> None:
+    root = Path(__file__).resolve().parents[2]
+    config, canary, positive, negative = runner.load_engineering_validation_config(root)
+    assert len(positive) == 64 and len(negative) == 256
+    assert config["success_criteria"] is None and config["science_denominator"] == 0
+    assert config["threshold_asset"] == str(runner.REPOSITORY_THRESHOLD_REPO_PATH)
+    assert config["tau_blind_be_hex"] == "3ff2201bf0021293"
+    assert tuple((item["stratum_id"], item["seed"]) for item in config["positive"]["attack_strata"]) == tuple(
+        (stratum, seed) for stratum, seed, _ in runner.ENGINEERING_POSITIVE_STRATA
+    )
+    assert config["positive"]["attack_strata"][-1]["condition_chain"] == [
+        "core_rotation_pos15", "core_fixed_canvas_zoom_0_8",
+    ]
+    balance = Counter((unit.attack_stratum, unit.source_id) for unit in positive)
+    assert set(balance.values()) == {8}
+    positive_pairs = {(unit.prompt, unit.seed) for unit in positive}
+    negative_pairs = {(unit.prompt, unit.seed) for unit in negative}
+    assert len(positive_pairs) == 64 and len(negative_pairs) == 256
+    assert not positive_pairs.intersection(negative_pairs)
+    assert (canary.prompt, canary.seed) not in positive_pairs | negative_pairs
+
+
+def test_engineering_detection_helper_has_only_the_blind_boundary() -> None:
+    assert tuple(inspect.signature(runner.detect_engineering_current_rgb).parameters) == (
+        "current_rgb", "detection_key", "public_assets",
+    )
+    tree = ast.parse(inspect.getsource(runner.detect_engineering_current_rgb))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert len(calls) == 1 and isinstance(calls[0].func, ast.Name)
+    assert calls[0].func.id == "detect_watermark"
+    source = inspect.getsource(runner.detect_engineering_current_rgb).lower()
+    for forbidden in (
+        "prompt", "seed", "original", "primary_null", "private_latent",
+        "stored_h", "truth", "attack", "embed_record",
+    ):
+        assert forbidden not in source
 
 
 def test_detection_signature_and_source_have_no_forbidden_runtime_inputs() -> None:

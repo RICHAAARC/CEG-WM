@@ -1,0 +1,88 @@
+{
+  "attack_condition_source": "src/cegwm/geometry_v7/r1a.py:R1A_CORE_CONDITIONS",
+  "canary": {
+    "prompt_source_id": "content_v6_iss_development_v1",
+    "prompt_source_ordinal": 1,
+    "seed": 2026110999
+  },
+  "claim_ceiling": "engineering_observations_only_not_paper_ready_fpr_generalization_or_reliability",
+  "dimensions": {
+    "height": 512,
+    "width": 512
+  },
+  "excluded_pair_sources": [
+    "configs/blind_detection/blind_detection_v1_dev_roster_256.json",
+    "configs/blind_detection/blind_detection_v1_callback_n4.json",
+    "geometry_v7_development_and_evaluation_pairs"
+  ],
+  "negative": {
+    "denominator": 256,
+    "ordering": "seed_major_then_prompt_source_then_source_order",
+    "seeds": [
+      2026112000,
+      2026112001,
+      2026112002,
+      2026112003
+    ],
+    "watermarked": false
+  },
+  "positive": {
+    "attack_strata": [
+      {
+        "condition_chain": [],
+        "seed": 2026111000,
+        "stratum_id": "clean"
+      },
+      {
+        "condition_chain": [
+          "core_rotation_pos15"
+        ],
+        "seed": 2026111001,
+        "stratum_id": "rotation"
+      },
+      {
+        "condition_chain": [
+          "core_fixed_canvas_zoom_0_8"
+        ],
+        "seed": 2026111002,
+        "stratum_id": "scale"
+      },
+      {
+        "condition_chain": [
+          "core_rotation_pos15",
+          "core_fixed_canvas_zoom_0_8"
+        ],
+        "seed": 2026111003,
+        "stratum_id": "rotation_then_scale"
+      }
+    ],
+    "denominator": 64,
+    "ordering": "attack_stratum_then_prompt_source_then_source_order_eight_each",
+    "residual_strength_multiplier": 0.75,
+    "watermarked": true
+  },
+  "prompt_sources": [
+    {
+      "expected_count": 32,
+      "path": "configs/content_chain/content_v6_iss_development_v1.jsonl",
+      "source_id": "content_v6_iss_development_v1"
+    },
+    {
+      "expected_count": 32,
+      "path": "configs/content_chain/content_v9_calibration_v1.jsonl",
+      "source_id": "content_v9_calibration_v1"
+    }
+  ],
+  "reserved_exclusive_from": [
+    "future_paper_calibration",
+    "future_paper_test"
+  ],
+  "retries": 0,
+  "schema_version": "cegwm_blind_detection_v1_engineering_validation_config_v1",
+  "science_denominator": 0,
+  "success_criteria": null,
+  "threshold_asset": "configs/blind_detection/assets/blind_detection_v1_thresholds.json",
+  "tau_blind": 1.1328391433063743,
+  "tau_blind_be_hex": "3ff2201bf0021293",
+  "wrong_key_experiment": "excluded"
+}

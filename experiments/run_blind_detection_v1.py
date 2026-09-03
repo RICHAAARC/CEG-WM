@@ -62,6 +62,7 @@ from cegwm.geometry_v7.syncseal import (  # noqa: E402
     SyncSealTorchScript,
     download_official_syncseal_torchscript,
 )
+from cegwm.geometry_v7.contracts import GeometryEstimate  # noqa: E402
 from cegwm.geometry_v7.r1a import condition_by_id, render_r1a_attack  # noqa: E402
 from cegwm.method.content_weighted_joint import (  # noqa: E402
     HF_SCORER_ID,
@@ -142,6 +143,26 @@ CALLBACK_N4_COVERAGE = (
     "direct_negative",
     "geometry_recovered_negative",
 )
+ENGINEERING_VALIDATION_CONFIG_REPO_PATH = Path(
+    "configs/blind_detection/blind_detection_v1_engineering_validation.json"
+)
+ENGINEERING_VALIDATION_RESULT_SCHEMA = (
+    "cegwm_blind_detection_v1_engineering_validation_result_v1"
+)
+ENGINEERING_POSITIVE_DENOMINATOR = 64
+ENGINEERING_NEGATIVE_DENOMINATOR = 256
+ENGINEERING_POSITIVE_STRATA = (
+    ("clean", 2026111000, ()),
+    ("rotation", 2026111001, ("core_rotation_pos15",)),
+    ("scale", 2026111002, ("core_fixed_canvas_zoom_0_8",)),
+    (
+        "rotation_then_scale",
+        2026111003,
+        ("core_rotation_pos15", "core_fixed_canvas_zoom_0_8"),
+    ),
+)
+ENGINEERING_NEGATIVE_SEEDS = (2026112000, 2026112001, 2026112002, 2026112003)
+ENGINEERING_CANARY_SEED = 2026110999
 
 
 def _read_json(path: str | Path) -> Any:
@@ -179,6 +200,21 @@ class CallbackN4EmbeddingRequest:
     seed: int
     height: int
     width: int
+
+
+@dataclass(frozen=True, slots=True)
+class EngineeringValidationUnit:
+    unit_id: str
+    cohort: str
+    source_id: str
+    source_path: str
+    source_unit_id: str
+    prompt: str
+    seed: int
+    attack_stratum: str
+    condition_chain: tuple[str, ...]
+    height: int = 512
+    width: int = 512
 
 
 def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
@@ -448,6 +484,152 @@ def load_callback_n4_config(
     if len({(unit.prompt, unit.seed) for unit in units}) != 4:
         raise ValueError("callback N=4 prompt-seed units must be distinct")
     return dict(payload), tuple(units)
+
+
+def load_engineering_validation_config(
+    repo_root: str | Path = REPO_ROOT,
+) -> tuple[
+    dict[str, Any],
+    EngineeringValidationUnit,
+    tuple[EngineeringValidationUnit, ...],
+    tuple[EngineeringValidationUnit, ...],
+]:
+    """Expand and validate the committed canary and fixed formal rosters."""
+
+    root = Path(repo_root)
+    payload = _read_json(root / ENGINEERING_VALIDATION_CONFIG_REPO_PATH)
+    required = {
+        "attack_condition_source", "canary", "claim_ceiling", "dimensions",
+        "excluded_pair_sources", "negative", "positive", "prompt_sources",
+        "reserved_exclusive_from", "retries", "schema_version", "science_denominator",
+        "success_criteria", "threshold_asset", "tau_blind", "tau_blind_be_hex",
+        "wrong_key_experiment",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError("engineering validation configuration fields differ")
+    expected_header = {
+        "attack_condition_source": "src/cegwm/geometry_v7/r1a.py:R1A_CORE_CONDITIONS",
+        "claim_ceiling": (
+            "engineering_observations_only_not_paper_ready_fpr_generalization_or_reliability"
+        ),
+        "dimensions": {"height": 512, "width": 512},
+        "excluded_pair_sources": [
+            str(ROSTER_REPO_PATH), str(CALLBACK_N4_CONFIG_REPO_PATH),
+            "geometry_v7_development_and_evaluation_pairs",
+        ],
+        "reserved_exclusive_from": ["future_paper_calibration", "future_paper_test"],
+        "retries": 0,
+        "schema_version": "cegwm_blind_detection_v1_engineering_validation_config_v1",
+        "science_denominator": 0,
+        "success_criteria": None,
+        "threshold_asset": str(REPOSITORY_THRESHOLD_REPO_PATH),
+        "tau_blind": FROZEN_TAU_BLIND,
+        "tau_blind_be_hex": FROZEN_TAU_BLIND_HEX,
+        "wrong_key_experiment": "excluded",
+    }
+    if any(payload.get(name) != value for name, value in expected_header.items()):
+        raise ValueError("engineering validation frozen header differs")
+    if encode_binary64(payload["tau_blind"], "tau_blind") != FROZEN_TAU_BLIND_HEX:
+        raise ValueError("engineering validation frozen tau differs")
+    expected_sources = [
+        {"expected_count": 32, "path": path, "source_id": source_id}
+        for source_id, path in _PROMPT_SOURCES
+    ]
+    if payload["prompt_sources"] != expected_sources:
+        raise ValueError("engineering validation prompt sources or order differ")
+    expected_positive = {
+        "attack_strata": [
+            {"condition_chain": list(chain), "seed": seed, "stratum_id": stratum}
+            for stratum, seed, chain in ENGINEERING_POSITIVE_STRATA
+        ],
+        "denominator": ENGINEERING_POSITIVE_DENOMINATOR,
+        "ordering": "attack_stratum_then_prompt_source_then_source_order_eight_each",
+        "residual_strength_multiplier": 0.75,
+        "watermarked": True,
+    }
+    expected_negative = {
+        "denominator": ENGINEERING_NEGATIVE_DENOMINATOR,
+        "ordering": "seed_major_then_prompt_source_then_source_order",
+        "seeds": list(ENGINEERING_NEGATIVE_SEEDS),
+        "watermarked": False,
+    }
+    expected_canary = {
+        "prompt_source_id": _PROMPT_SOURCES[0][0],
+        "prompt_source_ordinal": 1,
+        "seed": ENGINEERING_CANARY_SEED,
+    }
+    if payload["positive"] != expected_positive or payload["negative"] != expected_negative:
+        raise ValueError("engineering validation formal roster declaration differs")
+    if payload["canary"] != expected_canary:
+        raise ValueError("engineering validation canary declaration differs")
+    for _, _, chain in ENGINEERING_POSITIVE_STRATA:
+        for condition_id in chain:
+            if condition_by_id(condition_id).condition_id != condition_id:
+                raise ValueError("engineering validation attack condition differs")
+
+    sources: list[tuple[str, str, tuple[dict[str, Any], ...]]] = []
+    all_prompt_pairs: list[tuple[str, str, dict[str, Any]]] = []
+    for source_id, source_path in _PROMPT_SOURCES:
+        rows = _read_jsonl(root / source_path)
+        if len(rows) != 32:
+            raise ValueError("engineering validation prompt source count differs")
+        sources.append((source_id, source_path, rows))
+        all_prompt_pairs.extend((source_id, source_path, row) for row in rows)
+
+    positive: list[EngineeringValidationUnit] = []
+    for stratum_index, (stratum, seed, chain) in enumerate(ENGINEERING_POSITIVE_STRATA):
+        for source_id, source_path, rows in sources:
+            for source_ordinal, row in enumerate(
+                rows[stratum_index * 8 : (stratum_index + 1) * 8],
+                stratum_index * 8 + 1,
+            ):
+                positive.append(
+                    EngineeringValidationUnit(
+                        f"blind-eng-pos-{len(positive) + 1:03d}", "positive", source_id,
+                        source_path, row["unit_id"], row["prompt"], seed, stratum, chain,
+                    )
+                )
+    negative: list[EngineeringValidationUnit] = []
+    for seed in ENGINEERING_NEGATIVE_SEEDS:
+        for source_id, source_path, row in all_prompt_pairs:
+            negative.append(
+                EngineeringValidationUnit(
+                    f"blind-eng-neg-{len(negative) + 1:03d}", "negative", source_id,
+                    source_path, row["unit_id"], row["prompt"], seed, "unwatermarked", (),
+                )
+            )
+    first = sources[0][2][0]
+    canary = EngineeringValidationUnit(
+        "blind-eng-canary-001", "canary", sources[0][0], sources[0][1],
+        first["unit_id"], first["prompt"], ENGINEERING_CANARY_SEED, "none", (),
+    )
+    if len(positive) != ENGINEERING_POSITIVE_DENOMINATOR:
+        raise ValueError("engineering validation positive denominator differs")
+    if len(negative) != ENGINEERING_NEGATIVE_DENOMINATOR:
+        raise ValueError("engineering validation negative denominator differs")
+    balances = Counter((unit.attack_stratum, unit.source_id) for unit in positive)
+    if any(balances[(stratum, source_id)] != 8 for stratum, _, _ in ENGINEERING_POSITIVE_STRATA for source_id, _ in _PROMPT_SOURCES):
+        raise ValueError("engineering validation attack/source balance differs")
+
+    _, development, _ = load_roster_inputs(root)
+    _, callback = load_callback_n4_config(root)
+    occupied = {(unit.prompt, unit.seed) for unit in development}
+    occupied.update((unit.prompt, unit.seed) for unit in callback)
+    development_config = _read_json(root / ROSTER_REPO_PATH)
+    for descriptor in development_config["geometry_v7_pair_sources"]:
+        rows = _read_jsonl(root / descriptor["path"])
+        selected = rows[:4] if descriptor["selection"] == "first_4_in_source_order" else rows
+        occupied.update((row["prompt"], row["seed"]) for row in selected)
+    positive_pairs = {(unit.prompt, unit.seed) for unit in positive}
+    negative_pairs = {(unit.prompt, unit.seed) for unit in negative}
+    canary_pair = {(canary.prompt, canary.seed)}
+    if len(positive_pairs) != len(positive) or len(negative_pairs) != len(negative):
+        raise ValueError("engineering validation formal prompt-seed units must be unique")
+    if positive_pairs & negative_pairs or (positive_pairs | negative_pairs) & canary_pair:
+        raise ValueError("engineering validation rosters and canary overlap")
+    if (positive_pairs | negative_pairs | canary_pair) & occupied:
+        raise ValueError("engineering validation overlaps a frozen excluded pair")
+    return dict(payload), canary, tuple(positive), tuple(negative)
 
 
 def load_weighted_asset_semantic(repo_root: str | Path) -> WeightedJointAsset:
@@ -1393,6 +1575,321 @@ def run_callback_n4(
     return result_output, result["status"], tuple(result["mismatched_case_ids"])
 
 
+def detect_engineering_current_rgb(
+    current_rgb: Image.Image,
+    detection_key: bytes,
+    public_assets: BlindProductionAssets,
+):
+    """Strict blind handoff: current RGB, key, and frozen public assets only."""
+
+    return detect_watermark(current_rgb, detection_key, public_assets)
+
+
+def _engineering_canary(
+    unit: EngineeringValidationUnit,
+    pipeline: Any,
+    public_assets: BlindProductionAssets,
+    *,
+    device: str,
+) -> dict[str, Any]:
+    """Exercise real generation and Geometry once without method scoring."""
+
+    record = {
+        "geometry_status": None,
+        "method_conclusion": None,
+        "method_scoring_performed": False,
+        "operational_error": None,
+        "science_denominator": 0,
+        "status": "OPERATIONAL_BLOCKED",
+        "unit_id": unit.unit_id,
+    }
+    try:
+        generator = torch.Generator(device=device).manual_seed(unit.seed)
+        generated = run_sd35_plain(
+            pipeline, unit.prompt, height=unit.height, width=unit.width, generator=generator
+        )
+        current_rgb = require_ordinary_rgb_image(generated).copy()
+        del generated
+        del generator
+        if current_rgb.size != (512, 512):
+            raise ValueError("engineering canary ordinary RGB dimensions differ")
+        geometry = public_assets.geometry_backend.detect_geometry(current_rgb)
+        del current_rgb
+        if not isinstance(geometry, GeometryEstimate):
+            raise TypeError("engineering canary Geometry result must be typed")
+        record["geometry_status"] = geometry.status.value
+        record["status"] = "CANARY_PASSED"
+    except Exception as error:
+        record["operational_error"] = f"{type(error).__name__}: {error}"
+    return record
+
+
+def _engineering_empty_row(index: int, unit: EngineeringValidationUnit) -> dict[str, Any]:
+    return {
+        "attack_stratum": unit.attack_stratum,
+        "cohort": unit.cohort,
+        "condition_chain": list(unit.condition_chain),
+        "current_rgb_file": None,
+        "index": index,
+        "method_complete": False,
+        "operational_error": None,
+        "positive": False,
+        "post_m_be_hex": None,
+        "pre_m_be_hex": None,
+        "recovered": False,
+        "route": "NOT_ATTEMPTED",
+        "source_id": unit.source_id,
+        "unit_id": unit.unit_id,
+    }
+
+
+def _prepare_engineering_current_rgb(
+    unit: EngineeringValidationUnit,
+    pipeline: Any,
+    detection_key: bytes,
+    embedding_assets: BlindEmbeddingAssets,
+    *,
+    device: str,
+) -> Image.Image:
+    if unit.cohort == "positive":
+        request = CallbackN4EmbeddingRequest(unit.prompt, unit.seed, unit.height, unit.width)
+        generated = embed_watermark(request, detection_key, embedding_assets)
+        del request
+    elif unit.cohort == "negative":
+        generator = torch.Generator(device=device).manual_seed(unit.seed)
+        generated = run_sd35_plain(
+            pipeline, unit.prompt, height=unit.height, width=unit.width, generator=generator
+        )
+        del generator
+    else:
+        raise ValueError("formal engineering unit cohort differs")
+    current_rgb = require_ordinary_rgb_image(generated).copy()
+    del generated
+    for condition_id in unit.condition_chain:
+        attacked = render_r1a_attack(current_rgb, condition_by_id(condition_id))
+        del current_rgb
+        current_rgb = require_ordinary_rgb_image(attacked).copy()
+        del attacked
+    return current_rgb
+
+
+def _write_engineering_current_rgb(
+    output_dir: Path, unit: EngineeringValidationUnit, image: Image.Image
+) -> str:
+    name = f"{unit.unit_id}.png"
+    with (output_dir / name).open("xb") as sink:
+        require_ordinary_rgb_image(image).save(sink, format="PNG")
+    return name
+
+
+def _apply_engineering_detection_record(row: dict[str, Any], record: Any) -> None:
+    row.update(
+        {
+            "method_complete": record.method_complete,
+            "operational_error": record.operational_error,
+            "positive": record.positive,
+            "post_m_be_hex": (
+                None if record.post is None else encode_binary64(record.post.value, "post_m")
+            ),
+            "pre_m_be_hex": (
+                None if record.pre is None else encode_binary64(record.pre.value, "pre_m")
+            ),
+            "recovered": record.recovered,
+            "route": record.route,
+        }
+    )
+
+
+def _engineering_metrics(
+    positive_rows: list[dict[str, Any]], negative_rows: list[dict[str, Any]]
+) -> dict[str, Any]:
+    by_stratum = {}
+    for stratum, _, _ in ENGINEERING_POSITIVE_STRATA:
+        rows = [row for row in positive_rows if row["attack_stratum"] == stratum]
+        by_stratum[stratum] = {
+            "denominator": 16,
+            "operational_incomplete": sum(not row["method_complete"] for row in rows),
+            "positive_numerator": sum(row["positive"] is True for row in rows),
+            "route_counts": dict(sorted(Counter(row["route"] for row in rows).items())),
+        }
+    return {
+        "negative": {
+            "denominator": ENGINEERING_NEGATIVE_DENOMINATOR,
+            "false_positive_numerator": sum(row["positive"] is True for row in negative_rows),
+            "operational_incomplete": sum(not row["method_complete"] for row in negative_rows),
+            "route_counts": dict(sorted(Counter(row["route"] for row in negative_rows).items())),
+        },
+        "positive": {
+            "by_attack_stratum": by_stratum,
+            "denominator": ENGINEERING_POSITIVE_DENOMINATOR,
+            "operational_incomplete": sum(not row["method_complete"] for row in positive_rows),
+            "positive_numerator": sum(row["positive"] is True for row in positive_rows),
+            "route_counts": dict(sorted(Counter(row["route"] for row in positive_rows).items())),
+        },
+    }
+
+
+def run_engineering_validation(
+    runtime_root: str | Path,
+    current_rgb_output_dir: str | Path,
+    result_output_path: str | Path,
+    positive_rows_output_path: str | Path,
+    negative_rows_output_path: str | Path,
+    *,
+    producer_exact: str,
+) -> tuple[Path, str]:
+    """Run one canary, then retain every row in the frozen 64+256 rosters."""
+
+    runtime_work = Path(runtime_root)
+    image_output = Path(current_rgb_output_dir)
+    result_output = Path(result_output_path)
+    positive_output = Path(positive_rows_output_path)
+    negative_output = Path(negative_rows_output_path)
+    outputs = (result_output, positive_output, negative_output)
+    if any(path.exists() for path in outputs):
+        raise FileExistsError("engineering validation outputs are create-only")
+    if runtime_work.exists() or image_output.exists():
+        raise FileExistsError("engineering validation work directories are create-only")
+    root_key = os.environ.pop(ROOT_KEY_ENV, "")
+    hf_token = os.environ.pop(HF_TOKEN_ENV, "")
+    detection_key = b""
+    positive_rows: list[dict[str, Any]] = []
+    negative_rows: list[dict[str, Any]] = []
+    canary_record: dict[str, Any] = {
+        "method_conclusion": None, "method_scoring_performed": False,
+        "operational_error": "canary not reached", "science_denominator": 0,
+        "status": "OPERATIONAL_BLOCKED",
+    }
+    result: dict[str, Any] = {
+        "automatic_retries": 0,
+        "canary": canary_record,
+        "claim_ceiling": (
+            "engineering_observations_only_not_paper_ready_fpr_generalization_or_reliability"
+        ),
+        "error": None,
+        "metrics": None,
+        "negative_denominator": ENGINEERING_NEGATIVE_DENOMINATOR,
+        "negative_rows": negative_rows,
+        "positive_denominator": ENGINEERING_POSITIVE_DENOMINATOR,
+        "positive_rows": positive_rows,
+        "producer_exact": producer_exact,
+        "schema_version": ENGINEERING_VALIDATION_RESULT_SCHEMA,
+        "science_denominator": 0,
+        "stage": "preflight",
+        "status": "OPERATIONAL_BLOCKED",
+        "success_criteria": None,
+        "tau_blind_be_hex": FROZEN_TAU_BLIND_HEX,
+        "wrong_key_experiment": "excluded",
+    }
+    try:
+        _verify_producer_checkout(producer_exact)
+        config, canary, positive_units, negative_units = load_engineering_validation_config(
+            REPO_ROOT
+        )
+        if not isinstance(root_key, str) or not root_key.strip():
+            raise RuntimeError("CEG_WM_ROOT_KEY is required")
+        if not isinstance(hf_token, str) or not hf_token.strip():
+            raise RuntimeError("HF_TOKEN is required")
+        detection_key = normalize_detection_key(root_key)
+        root_key = ""
+        if public_key_digest(detection_key) != CONTENT_CHAIN_PUBLIC_KEY_DIGEST:
+            raise RuntimeError("content chain public key identity differs")
+        runtime_work.mkdir(parents=True, exist_ok=False)
+        runtime_config = load_runtime_config(REPO_ROOT)
+        result["stage"] = "runtime_construction"
+        pipeline, public_assets = build_production_detection_runtime(
+            REPO_ROOT, runtime_config, hf_token=hf_token, runtime_root=runtime_work
+        )
+        hf_token = ""
+        if public_assets.threshold_asset.payload["calibration_key_digest"] != public_key_digest(
+            detection_key
+        ):
+            raise RuntimeError("repository threshold detection-key identity differs")
+        result["stage"] = "canary"
+        canary_record = _engineering_canary(
+            canary, pipeline, public_assets, device=runtime_config["device"]
+        )
+        result["canary"] = canary_record
+        if canary_record["status"] != "CANARY_PASSED":
+            raise RuntimeError(canary_record["operational_error"])
+
+        positive_rows.extend(
+            _engineering_empty_row(index, unit) for index, unit in enumerate(positive_units)
+        )
+        negative_rows.extend(
+            _engineering_empty_row(index, unit) for index, unit in enumerate(negative_units)
+        )
+        image_output.mkdir(parents=True, exist_ok=False)
+        embedding_assets = BlindEmbeddingAssets(
+            _CallbackN4ContentBackend(pipeline, public_assets.content_assets.iss_assets),
+            public_assets.geometry_backend,
+            config["positive"]["residual_strength_multiplier"],
+        )
+        result["stage"] = "candidate_preparation"
+        for units, rows in ((positive_units, positive_rows), (negative_units, negative_rows)):
+            for unit, row in zip(units, rows, strict=True):
+                try:
+                    current_rgb = _prepare_engineering_current_rgb(
+                        unit, pipeline, detection_key, embedding_assets,
+                        device=runtime_config["device"],
+                    )
+                    row["current_rgb_file"] = _write_engineering_current_rgb(
+                        image_output, unit, current_rgb
+                    )
+                    del current_rgb
+                except Exception as error:
+                    row["operational_error"] = f"prepare:{type(error).__name__}: {error}"
+                    row["route"] = "ERROR_FAIL_CLOSED"
+
+        del embedding_assets
+        del positive_units
+        del negative_units
+        del pipeline
+        del config
+        del runtime_config
+        result["stage"] = "blind_detection"
+        for row in (*positive_rows, *negative_rows):
+            if row["operational_error"] is not None:
+                continue
+            try:
+                with Image.open(image_output / row["current_rgb_file"]) as source:
+                    current_rgb = require_ordinary_rgb_image(source.copy())
+                detection = detect_engineering_current_rgb(
+                    current_rgb, detection_key, public_assets
+                )
+                del current_rgb
+                _apply_engineering_detection_record(row, detection)
+            except Exception as error:
+                row["operational_error"] = f"detect:{type(error).__name__}: {error}"
+                row["route"] = "ERROR_FAIL_CLOSED"
+        result["metrics"] = _engineering_metrics(positive_rows, negative_rows)
+        incomplete = any(
+            not row["method_complete"] for row in (*positive_rows, *negative_rows)
+        )
+        result["status"] = (
+            "OPERATIONAL_BLOCKED" if incomplete else "ENGINEERING_VALIDATION_COMPLETE"
+        )
+        result["stage"] = "terminal"
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+    finally:
+        root_key = ""
+        hf_token = ""
+        detection_key = b""
+    result["metrics"] = result["metrics"] or _engineering_metrics(
+        positive_rows, negative_rows
+    )
+    for output in outputs:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    with positive_output.open("xb") as sink:
+        sink.write(stable_json_bytes(positive_rows))
+    with negative_output.open("xb") as sink:
+        sink.write(stable_json_bytes(negative_rows))
+    with result_output.open("xb") as sink:
+        sink.write(stable_json_bytes(result))
+    return result_output, result["status"]
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1409,6 +1906,13 @@ def _parser() -> argparse.ArgumentParser:
     callback.add_argument("--runtime-root", required=True)
     callback.add_argument("--current-rgb-output-dir", required=True)
     callback.add_argument("--result-output", required=True)
+    engineering = sub.add_parser("engineering-validate")
+    engineering.add_argument("--producer-exact", required=True)
+    engineering.add_argument("--runtime-root", required=True)
+    engineering.add_argument("--current-rgb-output-dir", required=True)
+    engineering.add_argument("--result-output", required=True)
+    engineering.add_argument("--positive-rows-output", required=True)
+    engineering.add_argument("--negative-rows-output", required=True)
     return parser
 
 
@@ -1454,6 +1958,28 @@ def main(argv: list[str] | None = None) -> int:
             ).decode("ascii")
         )
         return 0 if status == "CALLBACK_N4_PASSED" else 2 if status == "METHOD_FAILED" else 3
+    if args.command == "engineering-validate":
+        output, status = run_engineering_validation(
+            args.runtime_root,
+            args.current_rgb_output_dir,
+            args.result_output,
+            args.positive_rows_output,
+            args.negative_rows_output,
+            producer_exact=args.producer_exact,
+        )
+        print(
+            "CEGWM_BLIND_DETECTION_V1 "
+            + stable_json_bytes(
+                {
+                    "negative_denominator": ENGINEERING_NEGATIVE_DENOMINATOR,
+                    "output": str(output),
+                    "positive_denominator": ENGINEERING_POSITIVE_DENOMINATOR,
+                    "science_denominator": 0,
+                    "status": status,
+                }
+            ).decode("ascii")
+        )
+        return 0 if status == "ENGINEERING_VALIDATION_COMPLETE" else 3
     diagnostic = diagnose_existing_artifacts(args.artifacts)
     print("CEGWM_BLIND_DETECTION_V1 " + stable_json_bytes(diagnostic).decode("ascii"))
     return 0
