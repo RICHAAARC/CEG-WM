@@ -6,8 +6,6 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import dataclass
-from dataclasses import replace
-import importlib
 import json
 import math
 import os
@@ -15,6 +13,7 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any, Iterable
+import zipfile
 
 from PIL import Image
 import torch
@@ -29,8 +28,10 @@ from cegwm.method.blind_detection import (  # noqa: E402
     BLIND_DEV_DISJOINT_FROM,
     BLIND_PRODUCTION_RUNTIME_ID,
     BLIND_STATISTIC_ID,
+    BLIND_THRESHOLD_SCHEMA_ID,
     BlindCalibrationRoster,
     BlindCalibrationUnit,
+    BlindThresholdAsset,
     build_threshold_asset,
     candidate_tau_blind,
     decode_binary64,
@@ -61,6 +62,7 @@ from cegwm.geometry_v7.syncseal import (  # noqa: E402
     SyncSealTorchScript,
     download_official_syncseal_torchscript,
 )
+from cegwm.geometry_v7.r1a import condition_by_id, render_r1a_attack  # noqa: E402
 from cegwm.method.content_weighted_joint import (  # noqa: E402
     HF_SCORER_ID,
     WeightedJointAsset,
@@ -70,13 +72,18 @@ from cegwm.protocol.content_chain import CONTENT_CHAIN_PUBLIC_KEY_DIGEST  # noqa
 from cegwm.runtime.blind_detection import (  # noqa: E402
     BLIND_PREPROCESS_ID,
     BLIND_SCORER_ID,
+    BlindEmbeddingAssets,
     BlindProductionAssets,
     detect_watermark,
+    embed_watermark,
     run_development_calibration,
     run_development_full_system_replay,
 )
 from cegwm.runtime.content_weighted_joint_sd35 import ContentCalibrationAssets  # noqa: E402
-from cegwm.runtime.content_iss_sd35 import ContentISSEvaluationAssets  # noqa: E402
+from cegwm.runtime.content_iss_sd35 import (  # noqa: E402
+    ContentISSEvaluationAssets,
+    run_content_iss_evaluation_pair,
+)
 from cegwm.runtime.diffusers_sd35 import run_sd35_plain  # noqa: E402
 from cegwm.runtime.observation import require_ordinary_rgb_image  # noqa: E402
 from cegwm.shared.keys import normalize_detection_key, public_key_digest  # noqa: E402
@@ -117,6 +124,18 @@ _PROMPT_SOURCES = (
     ),
 )
 _DEVELOPMENT_SEEDS = (2026101000, 2026101001, 2026101002, 2026101003)
+CALLBACK_N4_CONFIG_REPO_PATH = Path(
+    "configs/blind_detection/blind_detection_v1_callback_n4.json"
+)
+CALLBACK_N4_RESULT_SCHEMA = "cegwm_blind_detection_v1_callback_n4_result_v1"
+CALLBACK_N4_TAU = 1.1328391433063743
+CALLBACK_N4_TAU_HEX = "3ff2201bf0021293"
+CALLBACK_N4_COVERAGE = (
+    "direct_positive",
+    "geometry_recovered_positive",
+    "direct_negative",
+    "geometry_recovered_negative",
+)
 
 
 def _read_json(path: str | Path) -> Any:
@@ -127,6 +146,29 @@ def _read_json(path: str | Path) -> Any:
 @dataclass(frozen=True, slots=True)
 class BlindGenerationUnit:
     calibration_unit: BlindCalibrationUnit
+    prompt: str
+    seed: int
+    height: int
+    width: int
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackN4Unit:
+    case_id: str
+    coverage: str
+    source_stratum: str
+    prompt: str
+    prompt_source_path: str
+    prompt_source_unit_id: str
+    seed: int
+    watermarked: bool
+    attacked: bool
+    height: int = 512
+    width: int = 512
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackN4EmbeddingRequest:
     prompt: str
     seed: int
     height: int
@@ -303,6 +345,103 @@ def load_runtime_config(repo_root: str | Path = REPO_ROOT) -> dict[str, str]:
     if payload != expected:
         raise ValueError("blind calibration asset configuration differs")
     return dict(payload)
+
+
+def load_callback_n4_config(
+    repo_root: str | Path = REPO_ROOT,
+) -> tuple[dict[str, Any], tuple[CallbackN4Unit, ...]]:
+    """Load the committed four-case smoke roster before any model or score."""
+
+    root = Path(repo_root)
+    payload = _read_json(root / CALLBACK_N4_CONFIG_REPO_PATH)
+    required = {
+        "attack_condition_id",
+        "attack_condition_source",
+        "cases",
+        "denominator",
+        "residual_strength_multiplier",
+        "schema_version",
+        "science_denominator",
+        "tau_blind_be_hex",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError("callback N=4 configuration fields differ")
+    expected_header = {
+        "attack_condition_id": "core_rotation_pos15",
+        "attack_condition_source": "src/cegwm/geometry_v7/r1a.py:R1A_CORE_CONDITIONS",
+        "denominator": 4,
+        "residual_strength_multiplier": 0.75,
+        "schema_version": "cegwm_blind_detection_v1_callback_n4_config_v1",
+        "science_denominator": 0,
+        "tau_blind_be_hex": CALLBACK_N4_TAU_HEX,
+    }
+    if any(payload.get(name) != value for name, value in expected_header.items()):
+        raise ValueError("callback N=4 frozen configuration differs")
+    if encode_binary64(CALLBACK_N4_TAU, "callback_tau") != CALLBACK_N4_TAU_HEX:
+        raise RuntimeError("callback N=4 frozen tau literal differs")
+    attack_spec = condition_by_id(payload["attack_condition_id"])
+    if attack_spec.condition_id != "core_rotation_pos15":
+        raise ValueError("callback N=4 attack condition differs")
+    raw_cases = payload["cases"]
+    if not isinstance(raw_cases, list) or len(raw_cases) != 4:
+        raise ValueError("callback N=4 requires exactly four committed cases")
+    required_case = {
+        "attacked",
+        "case_id",
+        "coverage",
+        "height",
+        "prompt",
+        "prompt_source_path",
+        "prompt_source_unit_id",
+        "seed",
+        "source_stratum",
+        "watermarked",
+        "width",
+    }
+    units: list[CallbackN4Unit] = []
+    for index, raw in enumerate(raw_cases):
+        if not isinstance(raw, dict) or set(raw) != required_case:
+            raise ValueError(f"callback N=4 case[{index}] fields differ")
+        if raw["coverage"] != CALLBACK_N4_COVERAGE[index]:
+            raise ValueError("callback N=4 coverage order differs")
+        if raw["case_id"] != f"blind-callback-n4-{index + 1:02d}":
+            raise ValueError("callback N=4 case identity differs")
+        if raw["height"] != 512 or raw["width"] != 512:
+            raise ValueError("callback N=4 dimensions differ")
+        if raw["prompt_source_path"] != _PROMPT_SOURCES[0][1]:
+            raise ValueError("callback N=4 prompt source differs")
+        if raw["prompt_source_unit_id"] != f"content-v6-iss-dev-{index + 1:04d}":
+            raise ValueError("callback N=4 prompt-source identity differs")
+        expected_stratum = f"content_v6_iss_development_v1__{raw['coverage']}"
+        if raw["source_stratum"] != expected_stratum:
+            raise ValueError("callback N=4 source stratum differs")
+        expected_flags = (
+            (True, False),
+            (True, True),
+            (False, False),
+            (False, True),
+        )[index]
+        if (raw["watermarked"], raw["attacked"]) != expected_flags:
+            raise ValueError("callback N=4 generation/attack layout differs")
+        if raw["seed"] != _DEVELOPMENT_SEEDS[index]:
+            raise ValueError("callback N=4 seed order differs")
+        units.append(CallbackN4Unit(**raw))
+    frozen_source = {
+        row["unit_id"]: row for row in _read_jsonl(root / _PROMPT_SOURCES[0][1])
+    }
+    for unit in units:
+        source = frozen_source.get(unit.prompt_source_unit_id)
+        if source is None or source.get("prompt") != unit.prompt:
+            raise ValueError("callback N=4 prompt does not match its frozen Git source")
+    if len({unit.case_id for unit in units}) != 4:
+        raise ValueError("callback N=4 case identities must be unique")
+    if len({unit.prompt for unit in units}) != 4:
+        raise ValueError("callback N=4 prompts must be distinct")
+    if len({unit.seed for unit in units}) != 4:
+        raise ValueError("callback N=4 seeds must be distinct")
+    if len({(unit.prompt, unit.seed) for unit in units}) != 4:
+        raise ValueError("callback N=4 prompt-seed units must be distinct")
+    return dict(payload), tuple(units)
 
 
 def load_weighted_asset_semantic(repo_root: str | Path) -> WeightedJointAsset:
@@ -823,121 +962,374 @@ def diagnose_existing_artifacts(paths: Iterable[str | Path]) -> dict[str, Any]:
     }
 
 
-def _load_factory(spec: str):
-    if not isinstance(spec, str) or spec.count(":") != 1:
-        raise ValueError("runtime factory must be module:callable")
-    module_name, attribute = spec.split(":", 1)
-    factory = getattr(importlib.import_module(module_name), attribute, None)
-    if not callable(factory):
-        raise TypeError("runtime factory must resolve to a callable")
-    return factory
+def discover_callback_n4_threshold(
+    calibration_runs_root: str | Path,
+    detection_key: bytes,
+) -> BlindThresholdAsset:
+    """Find the unique successful threshold by ZIP member content semantics."""
+
+    root = Path(calibration_runs_root)
+    if not root.is_dir():
+        raise FileNotFoundError("calibration-runs root is absent")
+    candidates: list[BlindThresholdAsset] = []
+    archives = tuple(sorted(root.glob("*.zip")))
+    if not archives:
+        raise FileNotFoundError("calibration-runs contains no terminal ZIP")
+    for archive_path in archives:
+        with zipfile.ZipFile(archive_path, mode="r") as archive:
+            payloads: list[Any] = []
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                try:
+                    payloads.append(json.loads(archive.read(member)))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+        completed = tuple(
+            payload for payload in payloads
+            if isinstance(payload, dict)
+            and payload.get("status")
+                == "CALIBRATION_COMPLETE_THRESHOLD_CANDIDATE_READY"
+            and payload.get("threshold_candidate_ready") is True
+            and payload.get("denominator") == BLIND_DEV_DENOMINATOR
+            and payload.get("frozen_tau_blind_be_hex") == CALLBACK_N4_TAU_HEX
+        )
+        thresholds = []
+        for payload in payloads:
+            try:
+                thresholds.append(
+                    BlindThresholdAsset(payload, stable_json_bytes(payload))
+                )
+            except (TypeError, ValueError):
+                continue
+        if len(completed) == 1 and len(thresholds) == 1:
+            threshold = thresholds[0]
+            if (
+                threshold.payload["schema_version"] == BLIND_THRESHOLD_SCHEMA_ID
+                and threshold.payload["production_runtime_id"]
+                    == BLIND_PRODUCTION_RUNTIME_ID
+                and threshold.payload["denominator"] == BLIND_DEV_DENOMINATOR
+                and threshold.payload["tau_blind_be_hex"] == CALLBACK_N4_TAU_HEX
+                and threshold.tau_blind == CALLBACK_N4_TAU
+                and threshold.payload["calibration_key_digest"]
+                    == public_key_digest(detection_key)
+            ):
+                candidates.append(threshold)
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "callback N=4 requires exactly one semantically matching completed threshold"
+        )
+    return candidates[0]
 
 
-def run_callback(
-    manifest_path: str | Path,
-    key_path: str | Path,
-    threshold_path: str | Path,
-    runtime_factory: str,
-    output_path: str | Path,
-) -> tuple[Path, str, tuple[str, ...]]:
-    """Run the fixed image-only N=4 callback once with an injected real runtime."""
+class _CallbackN4ContentBackend:
+    """Adapt the accepted paired content runtime to the public embed API."""
 
-    manifest = _read_json(manifest_path)
-    if not isinstance(manifest, dict) or set(manifest) != {"cases", "denominator"}:
-        raise ValueError("callback manifest fields differ")
-    cases = manifest["cases"]
-    if manifest["denominator"] != 4 or not isinstance(cases, list) or len(cases) != 4:
-        raise ValueError("callback requires a fixed N=4 manifest")
-    required = {
-        "direct_positive",
-        "geometry_recovered_positive",
-        "unwatermarked_geometry_negative",
-    }
-    labels = {case.get("coverage") for case in cases if isinstance(case, dict)}
-    if not required.issubset(labels) or not labels.issubset(required):
-        raise ValueError("callback coverage differs")
-    threshold = load_threshold_asset(threshold_path)
-    factory = _load_factory(runtime_factory)
-    public_assets = factory(REPO_ROOT)
-    if type(public_assets) is not BlindProductionAssets:
-        raise TypeError("runtime factory must return BlindProductionAssets")
-    if public_assets.threshold_asset is not None:
-        raise ValueError("callback runtime factory must not prebind a threshold")
-    public_assets = replace(public_assets, threshold_asset=threshold)
-    detection_key = Path(key_path).read_bytes()
-    records = []
-    for index, case in enumerate(cases):
-        if not isinstance(case, dict) or set(case) != {"case_id", "coverage", "image_path"}:
-            raise ValueError("callback case fields differ")
+    def __init__(self, pipeline: Any, assets: ContentISSEvaluationAssets) -> None:
+        self._pipeline = pipeline
+        self._assets = assets
+
+    def embed_content(
+        self, request: CallbackN4EmbeddingRequest, detection_key: bytes
+    ) -> Image.Image:
+        if not isinstance(request, CallbackN4EmbeddingRequest):
+            raise TypeError("callback N=4 content request differs")
+        pair = run_content_iss_evaluation_pair(
+            self._pipeline,
+            request.prompt,
+            detection_key,
+            self._assets,
+            height=request.height,
+            width=request.width,
+            seed=request.seed,
+        )
+        watermarked = require_ordinary_rgb_image(pair.image).copy()
+        primary_null = pair.primary_null
+        del primary_null
+        del pair
+        return watermarked
+
+
+def _prepare_callback_n4_current_rgb(
+    unit: CallbackN4Unit,
+    pipeline: Any,
+    detection_key: bytes,
+    embedding_assets: BlindEmbeddingAssets,
+    *,
+    device: str,
+) -> Image.Image:
+    """Generate one predeclared case exactly once and return only current RGB."""
+
+    if unit.watermarked:
+        request = CallbackN4EmbeddingRequest(
+            unit.prompt, unit.seed, unit.height, unit.width
+        )
         try:
-            with Image.open(case["image_path"]) as opened:
-                current_rgb = opened.copy()
-            record = detect_watermark(current_rgb, detection_key, public_assets)
-            records.append(
-                {
-                    "case_id": case["case_id"],
-                    "coverage": case["coverage"],
-                    "method_complete": record.method_complete,
-                    "operational_error": record.operational_error,
-                    "positive": record.positive,
-                    "post_m": None if record.post is None else record.post.value,
-                    "pre_m": None if record.pre is None else record.pre.value,
-                    "recovered": record.recovered,
-                    "route": record.route,
-                }
+            generated = embed_watermark(request, detection_key, embedding_assets)
+        except Exception as error:
+            raise RuntimeError(f"embed:{type(error).__name__}: {error}") from error
+        del request
+    else:
+        try:
+            generator = torch.Generator(device=device).manual_seed(unit.seed)
+            generated = run_sd35_plain(
+                pipeline,
+                unit.prompt,
+                height=unit.height,
+                width=unit.width,
+                generator=generator,
             )
         except Exception as error:
-            records.append(
-                {
-                    "case_id": case["case_id"],
-                    "coverage": case["coverage"],
-                    "method_complete": False,
-                    "operational_error": f"{type(error).__name__}: {error}",
-                    "positive": False,
-                    "post_m": None,
-                    "pre_m": None,
-                    "recovered": False,
-                    "route": "ERROR_FAIL_CLOSED",
-                }
+            raise RuntimeError(f"generation:{type(error).__name__}: {error}") from error
+        del generator
+    current_rgb = require_ordinary_rgb_image(generated).copy()
+    del generated
+    if unit.attacked:
+        try:
+            attacked = render_r1a_attack(
+                current_rgb, condition_by_id("core_rotation_pos15")
             )
+        except Exception as error:
+            raise RuntimeError(f"attack:{type(error).__name__}: {error}") from error
+        del current_rgb
+        current_rgb = require_ordinary_rgb_image(attacked).copy()
+        del attacked
+    return current_rgb
+
+
+def detect_callback_n4_current_rgb(
+    current_rgb: Image.Image,
+    detection_key: bytes,
+    public_assets: BlindProductionAssets,
+):
+    """Closure-free single-image handoff; no generation context crosses it."""
+
+    return detect_watermark(current_rgb, detection_key, public_assets)
+
+
+def _callback_n4_row_matches(coverage: str, record: Any) -> bool:
+    if not record.method_complete or record.operational_error is not None:
+        return False
+    if coverage == "direct_negative":
+        return record.positive is False
     expected = {
         "direct_positive": ("DIRECT_POSITIVE", True, False),
         "geometry_recovered_positive": ("GEOMETRY_RECOVERED", True, True),
-        "unwatermarked_geometry_negative": ("GEOMETRY_RECOVERED", False, True),
+        "geometry_recovered_negative": ("GEOMETRY_RECOVERED", False, True),
     }
-    operational = tuple(
-        case["case_id"]
-        for case, record in zip(cases, records, strict=True)
-        if not record["method_complete"]
-    )
-    mismatches = tuple(
-        case["case_id"]
-        for case, record in zip(cases, records, strict=True)
-        if record["method_complete"]
-        and (record["route"], record["positive"], record["recovered"])
-            != expected[case["coverage"]]
-    )
-    status = (
-        "OPERATIONAL_BLOCKED" if operational
-        else "METHOD_FAILED" if mismatches
-        else "CALLBACK_N4_PASSED"
-    )
-    output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("xb") as sink:
-        sink.write(
-            stable_json_bytes(
-                {
-                    "claim_ceiling": "engineering_image_only_callback_n4_science_denominator_0",
-                    "denominator": 4,
-                    "mismatched_case_ids": list(mismatches),
-                    "operational_case_ids": list(operational),
-                    "records": records,
-                    "status": status,
-                }
-            )
+    return (record.route, record.positive, record.recovered) == expected[coverage]
+
+
+def _callback_n4_empty_row(index: int, coverage: str) -> dict[str, Any]:
+    return {
+        "case_id": f"blind-callback-n4-{index + 1:02d}",
+        "coverage": coverage,
+        "current_rgb_file": None,
+        "method_complete": False,
+        "operational_error": None,
+        "positive": False,
+        "post_m_be_hex": None,
+        "pre_m_be_hex": None,
+        "recovered": False,
+        "route": "ERROR_FAIL_CLOSED",
+        "source_stratum": None,
+    }
+
+
+def _write_callback_n4_current_rgb(
+    output_dir: Path, index: int, case_id: str, image: Image.Image
+) -> str:
+    name = f"current_rgb_{index + 1:02d}_{case_id}.png"
+    path = output_dir / name
+    with path.open("xb") as sink:
+        require_ordinary_rgb_image(image).save(sink, format="PNG")
+    return name
+
+
+def run_callback_n4(
+    calibration_runs_root: str | Path,
+    runtime_root: str | Path,
+    current_rgb_output_dir: str | Path,
+    result_output_path: str | Path,
+    *,
+    producer_exact: str,
+) -> tuple[Path, str, tuple[str, ...]]:
+    """Run each fixed real N=4 case once and retain every row."""
+
+    result_output = Path(result_output_path)
+    runtime_work = Path(runtime_root)
+    image_output = Path(current_rgb_output_dir)
+    if result_output.exists():
+        raise FileExistsError("callback N=4 result is create-only")
+    root_key = os.environ.pop(ROOT_KEY_ENV, "")
+    hf_token = os.environ.pop(HF_TOKEN_ENV, "")
+    detection_key = b""
+    rows = [
+        _callback_n4_empty_row(index, coverage)
+        for index, coverage in enumerate(CALLBACK_N4_COVERAGE)
+    ]
+    result: dict[str, Any] = {
+        "automatic_retries": 0,
+        "claim_ceiling": "engineering_real_single_image_callback_n4_only",
+        "denominator": 4,
+        "error": None,
+        "mismatched_case_ids": [],
+        "operational_case_ids": [],
+        "producer_exact": producer_exact,
+        "records": rows,
+        "schema_version": CALLBACK_N4_RESULT_SCHEMA,
+        "science_denominator": 0,
+        "stage": "preflight",
+        "status": "OPERATIONAL_BLOCKED",
+        "tau_blind_be_hex": CALLBACK_N4_TAU_HEX,
+    }
+    try:
+        _verify_producer_checkout(producer_exact)
+        if runtime_work.exists():
+            raise FileExistsError("callback N=4 runtime root is create-only")
+        if image_output.exists():
+            raise FileExistsError("callback N=4 current-RGB output is create-only")
+        config, units = load_callback_n4_config(REPO_ROOT)
+        if not isinstance(root_key, str) or not root_key.strip():
+            raise RuntimeError("CEG_WM_ROOT_KEY is required")
+        if not isinstance(hf_token, str) or not hf_token.strip():
+            raise RuntimeError("HF_TOKEN is required")
+        detection_key = normalize_detection_key(root_key)
+        root_key = ""
+        if public_key_digest(detection_key) != CONTENT_CHAIN_PUBLIC_KEY_DIGEST:
+            raise RuntimeError("content chain public key identity differs")
+        result["stage"] = "threshold_selection"
+        threshold = discover_callback_n4_threshold(
+            calibration_runs_root, detection_key
         )
-    return output, status, mismatches
+        result["stage"] = "runtime_construction"
+        runtime_work.mkdir(parents=True, exist_ok=False)
+        runtime_config = load_runtime_config(REPO_ROOT)
+        pipeline, base_assets = build_production_runtime(
+            REPO_ROOT,
+            runtime_config,
+            hf_token=hf_token,
+            runtime_root=runtime_work,
+        )
+        hf_token = ""
+        public_assets = BlindProductionAssets(
+            base_assets.content_assets,
+            base_assets.weighted_joint_asset,
+            base_assets.geometry_backend,
+            threshold,
+        )
+        embedding_assets = BlindEmbeddingAssets(
+            _CallbackN4ContentBackend(
+                pipeline, base_assets.content_assets.iss_assets
+            ),
+            base_assets.geometry_backend,
+            config["residual_strength_multiplier"],
+        )
+        image_output.mkdir(parents=True, exist_ok=False)
+        current_images: list[Image.Image | None] = [None, None, None, None]
+        result["stage"] = "fixed_four_preparation"
+        for index in range(4):
+            unit = units[index]
+            row = rows[index]
+            row["source_stratum"] = unit.source_stratum
+            try:
+                current_rgb = _prepare_callback_n4_current_rgb(
+                    unit,
+                    pipeline,
+                    detection_key,
+                    embedding_assets,
+                    device=runtime_config["device"],
+                )
+                case_id = unit.case_id
+                try:
+                    row["current_rgb_file"] = _write_callback_n4_current_rgb(
+                        image_output, index, case_id, current_rgb
+                    )
+                except Exception as error:
+                    raise RuntimeError(
+                        f"current_rgb_io:{type(error).__name__}: {error}"
+                    ) from error
+                current_images[index] = current_rgb
+            except Exception as error:
+                row["operational_error"] = f"{type(error).__name__}: {error}"
+        del units
+        del config
+        del pipeline
+        del embedding_assets
+        del base_assets
+        del runtime_config
+        del threshold
+        unit = None
+        current_rgb = None
+        case_id = None
+        result["stage"] = "fixed_four_detection"
+        for index in range(4):
+            row = rows[index]
+            current_rgb = current_images[index]
+            if current_rgb is None:
+                continue
+            try:
+                try:
+                    record = detect_callback_n4_current_rgb(
+                        current_rgb, detection_key, public_assets
+                    )
+                except Exception as error:
+                    raise RuntimeError(f"detect:{type(error).__name__}: {error}") from error
+                coverage = row["coverage"]
+                row.update(
+                    {
+                        "method_complete": record.method_complete,
+                        "operational_error": record.operational_error,
+                        "positive": record.positive,
+                        "post_m_be_hex": (
+                            None
+                            if record.post is None
+                            else encode_binary64(record.post.value, "post_m")
+                        ),
+                        "pre_m_be_hex": (
+                            None
+                            if record.pre is None
+                            else encode_binary64(record.pre.value, "pre_m")
+                        ),
+                        "recovered": record.recovered,
+                        "route": record.route,
+                    }
+                )
+                if not _callback_n4_row_matches(coverage, record):
+                    if record.method_complete and record.operational_error is None:
+                        result["mismatched_case_ids"].append(row["case_id"])
+            except Exception as error:
+                row["operational_error"] = f"{type(error).__name__}: {error}"
+            finally:
+                current_images[index] = None
+                del current_rgb
+        operational = [
+            row["case_id"]
+            for row in rows
+            if not row["method_complete"] or row["operational_error"] is not None
+        ]
+        result["operational_case_ids"] = operational
+        result["status"] = (
+            "OPERATIONAL_BLOCKED"
+            if operational
+            else "METHOD_FAILED"
+            if result["mismatched_case_ids"]
+            else "CALLBACK_N4_PASSED"
+        )
+        result["stage"] = "terminal"
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+        result["operational_case_ids"] = [row["case_id"] for row in rows]
+        for row in rows:
+            row["operational_error"] = result["error"]
+    finally:
+        root_key = ""
+        hf_token = ""
+        detection_key = b""
+    result_output.parent.mkdir(parents=True, exist_ok=True)
+    with result_output.open("xb") as sink:
+        sink.write(stable_json_bytes(result))
+    return result_output, result["status"], tuple(result["mismatched_case_ids"])
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -950,12 +1342,12 @@ def _parser() -> argparse.ArgumentParser:
     freeze.add_argument("--result-output", required=True)
     diagnose = sub.add_parser("diagnose-existing")
     diagnose.add_argument("artifacts", nargs="+")
-    callback = sub.add_parser("callback")
-    callback.add_argument("--manifest", required=True)
-    callback.add_argument("--key-file", required=True)
-    callback.add_argument("--threshold", required=True)
-    callback.add_argument("--runtime-factory", required=True)
-    callback.add_argument("--output", required=True)
+    callback = sub.add_parser("callback-n4")
+    callback.add_argument("--producer-exact", required=True)
+    callback.add_argument("--calibration-runs-root", required=True)
+    callback.add_argument("--runtime-root", required=True)
+    callback.add_argument("--current-rgb-output-dir", required=True)
+    callback.add_argument("--result-output", required=True)
     return parser
 
 
@@ -981,13 +1373,13 @@ def main(argv: list[str] | None = None) -> int:
             ).decode("ascii")
         )
         return 0 if threshold is not None else 2 if status == "METHOD_FAILED" else 3
-    if args.command == "callback":
-        output, status, mismatches = run_callback(
-            args.manifest,
-            args.key_file,
-            args.threshold,
-            args.runtime_factory,
-            args.output,
+    if args.command == "callback-n4":
+        output, status, mismatches = run_callback_n4(
+            args.calibration_runs_root,
+            args.runtime_root,
+            args.current_rgb_output_dir,
+            args.result_output,
+            producer_exact=args.producer_exact,
         )
         print(
             "CEGWM_BLIND_DETECTION_V1 "

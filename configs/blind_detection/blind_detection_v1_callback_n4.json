@@ -1,0 +1,63 @@
+{
+  "attack_condition_id": "core_rotation_pos15",
+  "attack_condition_source": "src/cegwm/geometry_v7/r1a.py:R1A_CORE_CONDITIONS",
+  "cases": [
+    {
+      "attacked": false,
+      "case_id": "blind-callback-n4-01",
+      "coverage": "direct_positive",
+      "height": 512,
+      "prompt": "A watchmaker sorting steel springs beneath a magnifying lamp",
+      "prompt_source_path": "configs/content_chain/content_v6_iss_development_v1.jsonl",
+      "prompt_source_unit_id": "content-v6-iss-dev-0001",
+      "seed": 2026101000,
+      "source_stratum": "content_v6_iss_development_v1__direct_positive",
+      "watermarked": true,
+      "width": 512
+    },
+    {
+      "attacked": true,
+      "case_id": "blind-callback-n4-02",
+      "coverage": "geometry_recovered_positive",
+      "height": 512,
+      "prompt": "A botanist pressing alpine flowers inside a field notebook",
+      "prompt_source_path": "configs/content_chain/content_v6_iss_development_v1.jsonl",
+      "prompt_source_unit_id": "content-v6-iss-dev-0002",
+      "seed": 2026101001,
+      "source_stratum": "content_v6_iss_development_v1__geometry_recovered_positive",
+      "watermarked": true,
+      "width": 512
+    },
+    {
+      "attacked": false,
+      "case_id": "blind-callback-n4-03",
+      "coverage": "direct_negative",
+      "height": 512,
+      "prompt": "A glassblower shaping a clear vessel beside a glowing furnace",
+      "prompt_source_path": "configs/content_chain/content_v6_iss_development_v1.jsonl",
+      "prompt_source_unit_id": "content-v6-iss-dev-0003",
+      "seed": 2026101002,
+      "source_stratum": "content_v6_iss_development_v1__direct_negative",
+      "watermarked": false,
+      "width": 512
+    },
+    {
+      "attacked": true,
+      "case_id": "blind-callback-n4-04",
+      "coverage": "geometry_recovered_negative",
+      "height": 512,
+      "prompt": "A cartographer annotating river deltas on a broad paper map",
+      "prompt_source_path": "configs/content_chain/content_v6_iss_development_v1.jsonl",
+      "prompt_source_unit_id": "content-v6-iss-dev-0004",
+      "seed": 2026101003,
+      "source_stratum": "content_v6_iss_development_v1__geometry_recovered_negative",
+      "watermarked": false,
+      "width": 512
+    }
+  ],
+  "denominator": 4,
+  "residual_strength_multiplier": 0.75,
+  "schema_version": "cegwm_blind_detection_v1_callback_n4_config_v1",
+  "science_denominator": 0,
+  "tau_blind_be_hex": "3ff2201bf0021293"
+}

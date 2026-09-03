@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import ast
 import builtins
+import inspect
 import json
 from pathlib import Path
 import subprocess
 import symtable
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 from PIL import Image
@@ -612,68 +614,189 @@ def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(mo
     assert [call[0] for call in calls] == ["content", "syncseal"]
 
 
-def test_callback_validates_actual_route_and_retains_method_failure(monkeypatch, tmp_path: Path) -> None:
-    image_paths = []
-    cases = []
-    coverage = (
-        "direct_positive", "geometry_recovered_positive",
-        "unwatermarked_geometry_negative", "direct_positive",
+def _fixed_n4_threshold(detection_key: bytes):
+    rows = tuple(
+        BlindCalibrationRow(
+            index,
+            f"u-{index}",
+            f"s-{index % 2}",
+            runner.CALLBACK_N4_TAU if index == 255 else 0.0,
+            None,
+            "NO_H",
+            True,
+            None,
+        )
+        for index in range(256)
     )
-    for index, label in enumerate(coverage):
-        path = tmp_path / f"{index}.png"
-        Image.new("RGB", (512, 512)).save(path)
-        image_paths.append(path)
-        cases.append({"case_id": f"c{index}", "coverage": label, "image_path": str(path)})
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"cases": cases, "denominator": 4}), encoding="utf-8")
-    key_path = tmp_path / "key.bin"
-    key_path.write_bytes(KEY.encode())
-    threshold_path = tmp_path / "threshold.json"
-    threshold_path.write_text("ignored", encoding="ascii")
-    monkeypatch.setattr(runner, "load_threshold_asset", lambda path: build_test_only_threshold_asset(1.0))
-    monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda root: _production_assets())
-    results = iter(
-        (
-            SimpleNamespace(route="DIRECT_POSITIVE", positive=True, recovered=False, method_complete=True, operational_error=None, pre=None, post=None),
-            SimpleNamespace(route="GEOMETRY_RECOVERED", positive=False, recovered=True, method_complete=True, operational_error=None, pre=None, post=None),
-            SimpleNamespace(route="GEOMETRY_RECOVERED", positive=False, recovered=True, method_complete=True, operational_error=None, pre=None, post=None),
-            SimpleNamespace(route="DIRECT_POSITIVE", positive=True, recovered=False, method_complete=True, operational_error=None, pre=None, post=None),
+    replay = tuple(
+        BlindReplayRow(
+            index, f"u-{index}", f"s-{index % 2}", 0.0, None,
+            "GEOMETRY_NO_H", False, False, True, None,
+        )
+        for index in range(256)
+    )
+    roster = BlindCalibrationRoster(
+        tuple(
+            BlindCalibrationUnit(f"u-{index}", f"s-{index % 2}", f"r-{index}", f"b-{index}")
+            for index in range(256)
         )
     )
-    monkeypatch.setattr(runner, "detect_watermark", lambda image, key, assets: next(results))
-    output = tmp_path / "result.json"
-    _, status, mismatches = runner.run_callback(
-        manifest, key_path, threshold_path, "fake:factory", output
+    return runner.build_threshold_asset(
+        rows,
+        roster,
+        replay,
+        producer_exact="a" * 40,
+        calibration_key_digest=runner.public_key_digest(detection_key),
     )
-    assert status == "METHOD_FAILED" and mismatches == ("c1",) and output.is_file()
-    stored = json.loads(output.read_text(encoding="ascii"))
-    assert stored["status"] == "METHOD_FAILED" and stored["mismatched_case_ids"] == ["c1"]
+
+
+def test_callback_n4_discovers_threshold_by_zip_content_semantics(tmp_path: Path) -> None:
+    detection_key = runner.normalize_detection_key(KEY)
+    threshold = _fixed_n4_threshold(detection_key)
+    terminal = tmp_path / "opaque-terminal.zip"
+    with zipfile.ZipFile(terminal, mode="x") as archive:
+        archive.writestr("arbitrary-result-member", runner.stable_json_bytes({
+            "denominator": 256,
+            "frozen_tau_blind_be_hex": "3ff2201bf0021293",
+            "status": "CALIBRATION_COMPLETE_THRESHOLD_CANDIDATE_READY",
+            "threshold_candidate_ready": True,
+        }))
+        archive.writestr("arbitrary-threshold-member", threshold.json_bytes)
+        archive.writestr("runner-output", "completed")
+    discovered = runner.discover_callback_n4_threshold(tmp_path, detection_key)
+    assert discovered.tau_blind == runner.CALLBACK_N4_TAU
+    assert discovered.payload["tau_blind_be_hex"] == "3ff2201bf0021293"
+    with pytest.raises(RuntimeError, match="exactly one semantically matching"):
+        runner.discover_callback_n4_threshold(tmp_path, b"different-key")
+
+
+def test_callback_n4_fixed_four_retains_mismatch_and_all_current_rgb(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config, units = runner.load_callback_n4_config(Path(__file__).resolve().parents[2])
+    assert config["tau_blind_be_hex"] == "3ff2201bf0021293"
+    assert tuple(unit.coverage for unit in units) == runner.CALLBACK_N4_COVERAGE
+    assert len({unit.prompt for unit in units}) == len({unit.seed for unit in units}) == 4
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
     monkeypatch.setattr(
-        runner, "run_callback", lambda *args: (output, "METHOD_FAILED", ("c1",))
+        runner, "public_key_digest", lambda key: runner.CONTENT_CHAIN_PUBLIC_KEY_DIGEST,
     )
-    assert runner.main([
-        "callback", "--manifest", str(manifest), "--key-file", str(key_path),
-        "--threshold", str(threshold_path), "--runtime-factory", "fake:factory",
-        "--output", str(tmp_path / "other.json"),
-    ]) == 2
+    monkeypatch.setattr(
+        runner,
+        "discover_callback_n4_threshold",
+        lambda root, key: build_test_only_threshold_asset(runner.CALLBACK_N4_TAU),
+    )
+    base_assets = _production_assets()
+    object.__setattr__(base_assets.content_assets, "iss_assets", object())
+    monkeypatch.setattr(
+        runner,
+        "build_production_runtime",
+        lambda *args, **kwargs: (object(), base_assets),
+    )
+    monkeypatch.setattr(runner, "BlindEmbeddingAssets", lambda *args: object())
+    prepared = []
+
+    def prepare(unit, *args, **kwargs):
+        prepared.append(unit.case_id)
+        return Image.new("RGB", (512, 512), "white")
+
+    monkeypatch.setattr(runner, "_prepare_callback_n4_current_rgb", prepare)
+    results = iter((
+        SimpleNamespace(route="DIRECT_POSITIVE", positive=True, recovered=False, method_complete=True, operational_error=None, pre=None, post=None),
+        SimpleNamespace(route="GEOMETRY_RECOVERED", positive=False, recovered=True, method_complete=True, operational_error=None, pre=None, post=None),
+        SimpleNamespace(route="GEOMETRY_FAIL_CLOSED", positive=False, recovered=False, method_complete=True, operational_error=None, pre=None, post=None),
+        SimpleNamespace(route="GEOMETRY_RECOVERED", positive=False, recovered=True, method_complete=True, operational_error=None, pre=None, post=None),
+    ))
+    monkeypatch.setattr(
+        runner, "detect_callback_n4_current_rgb", lambda *args: next(results)
+    )
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, KEY)
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "test-token")
+    result_path = tmp_path / "result.json"
+    _, status, mismatches = runner.run_callback_n4(
+        tmp_path / "calibration-runs",
+        tmp_path / "runtime",
+        tmp_path / "current-rgb",
+        result_path,
+        producer_exact="e" * 40,
+    )
+    assert status == "METHOD_FAILED"
+    assert mismatches == ("blind-callback-n4-02",)
+    stored = json.loads(result_path.read_text(encoding="ascii"))
+    assert stored["denominator"] == 4 and stored["science_denominator"] == 0
+    assert len(stored["records"]) == len(prepared) == 4
+    assert len(tuple((tmp_path / "current-rgb").glob("*.png"))) == 4
+    assert stored["records"][2]["route"] == "GEOMETRY_FAIL_CLOSED"
+    assert stored["records"][2]["case_id"] not in stored["mismatched_case_ids"]
+    assert stored["automatic_retries"] == 0
+    assert runner.ROOT_KEY_ENV not in runner.os.environ
+    assert runner.HF_TOKEN_ENV not in runner.os.environ
+
+    monkeypatch.setattr(
+        runner,
+        "load_callback_n4_config",
+        lambda root: (_ for _ in ()).throw(ValueError("frozen roster stopped")),
+    )
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, KEY)
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "test-token")
+    blocked_path = tmp_path / "blocked.json"
+    _, blocked_status, _ = runner.run_callback_n4(
+        tmp_path / "other-calibration-runs",
+        tmp_path / "other-runtime",
+        tmp_path / "other-current-rgb",
+        blocked_path,
+        producer_exact="e" * 40,
+    )
+    blocked = json.loads(blocked_path.read_text(encoding="ascii"))
+    assert blocked_status == "OPERATIONAL_BLOCKED"
+    assert len(blocked["records"]) == 4
+    assert all("frozen roster stopped" in row["operational_error"] for row in blocked["records"])
 
 
-def test_notebook_first_executable_cell_and_static_callback_contract() -> None:
+def test_callback_n4_detection_handoff_is_closure_free_and_single_image_only() -> None:
+    signature = tuple(inspect.signature(runner.detect_callback_n4_current_rgb).parameters)
+    assert signature == ("current_rgb", "detection_key", "public_assets")
     root = Path(__file__).resolve().parents[2]
-    notebook = json.loads((root / "notebooks/blind_detection_v1_callback.ipynb").read_text())
-    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
-    assert code_cells[0]["source"] == [
-        "from google.colab import drive\n", "drive.mount('/content/drive')\n",
-    ]
-    source = "".join("".join(cell["source"]) for cell in code_cells)
-    assert "force_remount" not in source and "N_CALLBACK = 4" in source
-    assert "--detach" in source and "torch.cuda.is_available()" in source
-    assert "if 'RUNNER_CALLS' not in globals()" in source
-    assert source.count("RUNNER_CALLS = 0") == 1 and "RUNNER_CALLS += 1" in source
-    assert "METHOD_FAILED" in source and "OPERATIONAL_BLOCKED" in source
-    runner_source = (root / "experiments/run_blind_detection_v1.py").read_text()
-    assert runner_source.count("detect_watermark(current_rgb, detection_key, public_assets)") == 1
-    assert 'output.open("xb")' in runner_source
+    source = (root / "experiments/run_blind_detection_v1.py").read_text()
+    tree = ast.parse(source)
+    helper = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "detect_callback_n4_current_rgb"
+    )
+    identifiers = {
+        node.id for node in ast.walk(helper) if isinstance(node, ast.Name)
+    } | {
+        node.attr for node in ast.walk(helper) if isinstance(node, ast.Attribute)
+    }
+    assert not identifiers.intersection({
+        "original", "u", "g", "paired_null", "prompt", "seed", "embed_record",
+        "private_latent", "attack", "truth", "outcome", "stored_h",
+    })
+    assert source.count(
+        "detect_watermark(current_rgb, detection_key, public_assets)"
+    ) == 1
+    assert sum(
+        isinstance(node, (ast.FunctionDef, ast.Lambda)) for node in ast.walk(helper)
+    ) == 1
+    assert "primary_null = pair.primary_null" in source and "del primary_null" in source
+    handoff = source.index("record = detect_callback_n4_current_rgb(")
+    for released in (
+        "del units", "del config", "del pipeline", "del embedding_assets",
+        "del base_assets", "del runtime_config", "del threshold",
+    ):
+        assert source.index(released) < handoff
+    assert 'sub.add_parser("callback-n4")' in source
+    assert "--key-file" not in source and "--runtime-factory" not in source
+    args = runner._parser().parse_args([
+        "callback-n4",
+        "--producer-exact", "f" * 40,
+        "--calibration-runs-root", "/tmp/calibration-runs",
+        "--runtime-root", "/tmp/runtime",
+        "--current-rgb-output-dir", "/tmp/current-rgb",
+        "--result-output", "/tmp/result.json",
+    ])
+    assert args.command == "callback-n4"
 
 
 def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_once() -> None:
