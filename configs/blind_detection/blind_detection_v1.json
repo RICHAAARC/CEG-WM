@@ -2,7 +2,7 @@
   "base_exact": "3d0ebe699c4319fb2435e9eacca7e943096e9abd",
   "calibration_assets": "configs/blind_detection/blind_detection_v1_colab_assets.json",
   "calibration_entrypoint": "experiments/run_blind_detection_v1.py calibrate-and-freeze",
-  "claim_ceiling": "BlindDetection-V1 implementation authorized; engineering single-image closure only; N_dev=256; science_denominator=0",
+  "claim_ceiling": "BlindDetection-V1 engineering threshold frozen from N_dev=256 with replay 0/256; fixed N4 smoke passed; science_denominator=0",
   "content_calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
   "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
   "detection_key_binding": "public_key_digest_frozen_in_threshold_asset",
@@ -41,6 +41,7 @@
   "scorer_id": "content_v9_weighted_joint_registered_minus_exact16_wrong_max_v1",
   "statistic": "registered weighted_joint - max(exact 16 wrong-key weighted_joint)",
   "threshold_asset": "configs/blind_detection/assets/blind_detection_v1_thresholds.json",
-  "threshold_asset_state": "ABSENT_UNTIL_AUTHORIZED_COMPLETE_N_DEV_256_AND_ZERO_OF_256_REPLAY",
+  "threshold_asset_state": "FROZEN_ENGINEERING_N_DEV_256_ZERO_OF_256_REPLAY",
+  "threshold_calibration_producer_exact": "920561bd264075628d52dcb70deef842284b6a75",
   "wrong_key_attribution": "separate_experiment_separate_fixed_denominator"
 }

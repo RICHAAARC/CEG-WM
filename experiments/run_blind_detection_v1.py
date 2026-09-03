@@ -110,7 +110,13 @@ WHITENING_ASSET_REPO_PATH = Path(
 ISS_ASSET_REPO_PATH = Path(
     "configs/content_chain/assets/content_v6_iss_gain_target_v1.json"
 )
+REPOSITORY_THRESHOLD_REPO_PATH = Path(
+    "configs/blind_detection/assets/blind_detection_v1_thresholds.json"
+)
 WEIGHTED_ASSET_PRODUCER_EXACT = "c38522dcab6cb173cedf8415cee2fd30998222ba"
+THRESHOLD_CALIBRATION_PRODUCER_EXACT = "920561bd264075628d52dcb70deef842284b6a75"
+FROZEN_TAU_BLIND = 1.1328391433063743
+FROZEN_TAU_BLIND_HEX = "3ff2201bf0021293"
 ROOT_KEY_ENV = "CEG_WM_ROOT_KEY"
 HF_TOKEN_ENV = "HF_TOKEN"
 _PROMPT_SOURCES = (
@@ -560,6 +566,61 @@ def build_production_runtime(
         raise RuntimeError("official SyncSeal checkpoint download did not produce a file")
     geometry = SyncSealTorchScript.from_file(checkpoint, device=config["device"])
     return pipeline, BlindProductionAssets(content_assets, weighted_asset, geometry)
+
+
+def load_repository_threshold_asset(
+    repo_root: str | Path = REPO_ROOT,
+) -> BlindThresholdAsset:
+    """Load the landed engineering threshold by repository path and semantics."""
+
+    asset = load_threshold_asset(Path(repo_root) / REPOSITORY_THRESHOLD_REPO_PATH)
+    expected = {
+        "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+        "denominator": BLIND_DEV_DENOMINATOR,
+        "producer_exact": THRESHOLD_CALIBRATION_PRODUCER_EXACT,
+        "production_runtime_id": BLIND_PRODUCTION_RUNTIME_ID,
+        "replay_false_positives": 0,
+        "replay_kind": "fresh_full_system_pre_geometry_post_same_roster_images_key_runtime",
+        "schema_version": BLIND_THRESHOLD_SCHEMA_ID,
+        "statistic_id": BLIND_STATISTIC_ID,
+        "tau_blind_be_hex": FROZEN_TAU_BLIND_HEX,
+    }
+    if any(asset.payload.get(name) != value for name, value in expected.items()):
+        raise ValueError("repository blind threshold method semantics differ")
+    if asset.tau_blind != FROZEN_TAU_BLIND:
+        raise ValueError("repository blind threshold binary64 value differs")
+    replay = asset.payload["full_system_replay_rows"]
+    if any(
+        not isinstance(row, dict)
+        or row.get("roster_index") != index
+        or row.get("method_complete") is not True
+        or row.get("operational_error") is not None
+        or row.get("positive") is not False
+        for index, row in enumerate(replay)
+    ):
+        raise ValueError("repository blind threshold replay semantics differ")
+    return asset
+
+
+def build_production_detection_runtime(
+    repo_root: Path,
+    config: dict[str, str],
+    *,
+    hf_token: str,
+    runtime_root: Path,
+) -> tuple[Any, BlindProductionAssets]:
+    """Build the real production runtime with the landed repository threshold."""
+
+    pipeline, base_assets = build_production_runtime(
+        repo_root, config, hf_token=hf_token, runtime_root=runtime_root
+    )
+    threshold = load_repository_threshold_asset(repo_root)
+    return pipeline, BlindProductionAssets(
+        base_assets.content_assets,
+        base_assets.weighted_joint_asset,
+        base_assets.geometry_backend,
+        threshold,
+    )
 
 
 class GenerationBlocked(RuntimeError):

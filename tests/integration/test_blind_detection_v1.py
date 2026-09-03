@@ -343,6 +343,45 @@ def test_production_boundary_rejects_arbitrary_backend_and_test_threshold(monkey
         )
 
 
+def test_repository_threshold_binds_formal_runtime_and_keeps_equality_negative(
+    monkeypatch, tmp_path: Path
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    threshold = runner.load_repository_threshold_asset(root)
+    assert threshold.tau_blind == 1.1328391433063743
+    assert threshold.payload["tau_blind_be_hex"] == "3ff2201bf0021293"
+    assert threshold.payload["denominator"] == 256
+    assert threshold.payload["replay_false_positives"] == 0
+    assert len(threshold.payload["full_system_replay_rows"]) == 256
+
+    base_assets = _production_assets()
+    pipeline = object()
+    monkeypatch.setattr(
+        runner, "build_production_runtime", lambda *args, **kwargs: (pipeline, base_assets)
+    )
+    built_pipeline, detection_assets = runner.build_production_detection_runtime(
+        root, {}, hf_token="test-token", runtime_root=tmp_path
+    )
+    assert built_pipeline is pipeline
+    assert detection_assets.threshold_asset.payload == threshold.payload
+    assert base_assets.threshold_asset is None
+
+    monkeypatch.setattr(
+        runtime, "public_key_digest", lambda key: threshold.payload["calibration_key_digest"]
+    )
+    monkeypatch.setattr(
+        SyncSealTorchScript, "detect_geometry", lambda self, image: _geometry(h=None, legal=True)
+    )
+    _install_scores(monkeypatch, [threshold.tau_blind, threshold.tau_blind + 1e-12])
+    equality = runtime.detect_watermark(
+        Image.new("RGB", (512, 512)), KEY, detection_assets
+    )
+    above = runtime.detect_watermark(Image.new("RGB", (512, 512)), KEY, detection_assets)
+    assert equality.method_complete and not equality.positive
+    assert equality.route == "GEOMETRY_NO_H"
+    assert above.method_complete and above.positive and above.route == "DIRECT_POSITIVE"
+
+
 def test_development_full_replay_reinvokes_scorer_and_geometry_before_write(
     monkeypatch, tmp_path: Path
 ) -> None:

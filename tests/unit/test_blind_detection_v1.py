@@ -169,14 +169,19 @@ def test_production_threshold_absence_is_explicit(tmp_path: Path) -> None:
         load_threshold_asset(tmp_path / "missing.json")
 
 
-def test_repository_has_no_placeholder_production_threshold() -> None:
+def test_repository_has_frozen_engineering_threshold() -> None:
     root = Path(__file__).resolve().parents[2]
     config = json.loads(
         (root / "configs/blind_detection/blind_detection_v1.json").read_text(encoding="utf-8")
     )
-    assert config["threshold_asset_state"].startswith("ABSENT_UNTIL_AUTHORIZED")
+    assert config["threshold_asset_state"] == "FROZEN_ENGINEERING_N_DEV_256_ZERO_OF_256_REPLAY"
     assert "tau_blind" not in config
-    assert not (root / config["threshold_asset"]).exists()
+    asset = load_threshold_asset(root / config["threshold_asset"])
+    assert asset.tau_blind == 1.1328391433063743
+    assert asset.payload["tau_blind_be_hex"] == "3ff2201bf0021293"
+    assert asset.payload["denominator"] == 256
+    assert asset.payload["replay_false_positives"] == 0
+    assert len(asset.payload["full_system_replay_rows"]) == 256
 
 
 def test_detection_signature_and_source_have_no_forbidden_runtime_inputs() -> None:
