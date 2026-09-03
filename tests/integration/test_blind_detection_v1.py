@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -547,32 +548,6 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold(
     assert payload["threshold_candidate_ready"] is True
     assert len(payload["generation_records"]) == 256
     assert "threshold_candidate_sha256" not in payload
-    runner_source = (
-        Path(__file__).resolve().parents[2] / "experiments/run_blind_detection_v1.py"
-    ).read_text()
-    assert "content_unweighted_engine._load_pipeline_and_assets(" in runner_source
-    assert "load_whitening_asset_semantic(repo_root)" in runner_source
-    assert "FrozenContentWhiteningLFPublicAssets(" in runner_source
-    assert "ContentISSEvaluationAssets(" in runner_source
-    assert "load_iss_asset_semantic(repo_root)" in runner_source
-    assert "ContentCalibrationAssets(evaluation_assets)" in runner_source
-    assert "load_weighted_asset_semantic(repo_root)" in runner_source
-    assert "download_official_syncseal_torchscript(checkpoint)" in runner_source
-    assert "if not checkpoint.is_file()" in runner_source
-    assert "SyncSealTorchScript.from_file(checkpoint" in runner_source
-    assert ".stat()" not in runner_source and "st_size" not in runner_source
-    assert "checkpoint download is empty" not in runner_source
-    for forbidden in (
-        "content_iss_engine", "content_whitening_engine",
-        "load_frozen_content_iss_asset", "load_frozen_content_whitening_asset",
-        "load_calibration_asset", "sha256", "hashlib", "hexdigest", "getsize",
-    ):
-        assert forbidden not in runner_source
-    threshold_source = (
-        Path(__file__).resolve().parents[2] / "src/cegwm/method/blind_detection.py"
-    ).read_text()
-    assert "stable_json_bytes(payload) != raw" not in threshold_source
-    assert "json_bytes != stable_json_bytes" not in threshold_source
 
 
 def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(monkeypatch) -> None:
@@ -671,7 +646,9 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
     assert "force_remount" not in source
-    assert "650657a85b37ae5d6b7a6d6eb0ef0846700f1043" in source
+    producer_exact = "54b4dbcab108b553de902a6fbc64328c8f4037be"
+    assert source.count(producer_exact) == 1
+    assert f"PRODUCER_EXACT = '{producer_exact}'" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
     assert "status', '--porcelain=v1'" in source
     assert "r.load_roster_inputs(r.REPO_ROOT); r.load_runtime_config(r.REPO_ROOT)" in source
@@ -702,3 +679,41 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     final_source = "".join(code_cells[-1]["source"])
     assert "mode='r'" in final_source and "archive.read('calibration_result.json')" in final_source
     assert "subprocess" not in final_source and "archive.write" not in final_source
+    runner_source = subprocess.check_output(
+        [
+            "git", "-C", str(root), "show",
+            f"{producer_exact}:experiments/run_blind_detection_v1.py",
+        ],
+        text=True,
+    )
+    threshold_source = subprocess.check_output(
+        [
+            "git", "-C", str(root), "show",
+            f"{producer_exact}:src/cegwm/method/blind_detection.py",
+        ],
+        text=True,
+    )
+    for required in (
+        "content_unweighted_engine._load_pipeline_and_assets(",
+        "load_whitening_asset_semantic(repo_root)",
+        "FrozenContentWhiteningLFPublicAssets(",
+        "load_iss_asset_semantic(repo_root)",
+        "ContentISSEvaluationAssets(",
+        "ContentCalibrationAssets(evaluation_assets)",
+        "load_weighted_asset_semantic(repo_root)",
+        "download_official_syncseal_torchscript(checkpoint)",
+        "if not checkpoint.is_file()",
+        "SyncSealTorchScript.from_file(checkpoint",
+    ):
+        assert required in runner_source
+    for forbidden in (
+        "content_iss_engine", "content_whitening_engine",
+        "load_frozen_content_iss_asset", "load_frozen_content_whitening_asset",
+        "load_calibration_asset", "sha256", "hashlib", "hexdigest", "getsize",
+        "st_size", ".stat()",
+    ):
+        assert forbidden not in runner_source
+    assert "stable_json_bytes(payload) != raw" not in threshold_source
+    assert "json_bytes != stable_json_bytes" not in threshold_source
+    assert "public_key_digest" in runner_source
+    assert "calibration_key_digest" in threshold_source
