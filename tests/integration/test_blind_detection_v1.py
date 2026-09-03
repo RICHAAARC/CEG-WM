@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
 import json
 from pathlib import Path
 import subprocess
+import symtable
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +30,38 @@ pytestmark = pytest.mark.integration
 
 KEY = "blind-detection-test-key"
 IDENTITY_H = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def test_full_runner_has_no_unresolved_global_references() -> None:
+    root = Path(__file__).resolve().parents[2]
+    path = root / "experiments/run_blind_detection_v1.py"
+    table = symtable.symtable(path.read_text(encoding="utf-8"), str(path), "exec")
+    module_definitions = {
+        symbol.get_name()
+        for symbol in table.get_symbols()
+        if symbol.is_assigned() or symbol.is_imported() or symbol.is_namespace()
+    }
+    implicit_globals = {
+        "__builtins__", "__cached__", "__file__", "__loader__",
+        "__name__", "__package__", "__spec__",
+    }
+    unresolved = []
+
+    def visit(current) -> None:
+        unresolved.extend(
+            (current.get_name(), symbol.get_name())
+            for symbol in current.get_symbols()
+            if symbol.is_referenced()
+            and symbol.is_global()
+            and symbol.get_name() not in module_definitions
+            and symbol.get_name() not in vars(builtins)
+            and symbol.get_name() not in implicit_globals
+        )
+        for child in current.get_children():
+            visit(child)
+
+    visit(table)
+    assert unresolved == []
 
 
 def _geometry(*, h=IDENTITY_H, legal=True, error=None) -> GeometryEstimate:

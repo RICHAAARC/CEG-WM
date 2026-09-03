@@ -33,6 +33,7 @@ from cegwm.method.blind_detection import (  # noqa: E402
     BlindCalibrationUnit,
     build_threshold_asset,
     candidate_tau_blind,
+    decode_binary64,
     encode_binary64,
     load_threshold_asset,
     stable_json_bytes,
