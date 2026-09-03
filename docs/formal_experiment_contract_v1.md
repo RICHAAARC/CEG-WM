@@ -2,11 +2,14 @@
 
 ## Status and authority
 
-After the producer exacts are bound in all seven notebooks and the local static
-and CPU suite passes, this contract state is
-`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_READY / EXECUTION_NOT_AUTHORIZED`.
-`EXECUTION_READY` is not permission to run a model, GPU, Colab, Drive job, or a
-formal denominator.  A separate user authorization is required.
+The frozen local state is
+`FORMAL_EXPERIMENT_CONTRACT_FROZEN / LOCAL_IMPLEMENTATION_VALIDATED /
+EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` is intentionally not claimed while
+the notebook-bound producer exacts exist only in local branches and cannot yet
+be fetched by the notebooks' remote clone step. Publishing those already-bound
+exacts requires separate push authorization; it does not authorize a model,
+GPU, Colab, Drive job, or formal denominator. Formal execution itself also
+requires a separate user authorization.
 
 The proposed method is defined only by the frozen PaperFPR producer descended
 from `main@e12c7eae91cc36edc5d1a1d96249780a3925eccb`. Baselines remain on
