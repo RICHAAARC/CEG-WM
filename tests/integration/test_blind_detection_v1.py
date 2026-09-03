@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import builtins
 import json
 from pathlib import Path
@@ -32,10 +33,8 @@ KEY = "blind-detection-test-key"
 IDENTITY_H = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 
 
-def test_full_runner_has_no_unresolved_global_references() -> None:
-    root = Path(__file__).resolve().parents[2]
-    path = root / "experiments/run_blind_detection_v1.py"
-    table = symtable.symtable(path.read_text(encoding="utf-8"), str(path), "exec")
+def _unresolved_global_references(source: str, filename: str) -> list[tuple[str, str]]:
+    table = symtable.symtable(source, filename, "exec")
     module_definitions = {
         symbol.get_name()
         for symbol in table.get_symbols()
@@ -61,7 +60,15 @@ def test_full_runner_has_no_unresolved_global_references() -> None:
             visit(child)
 
     visit(table)
-    assert unresolved == []
+    return unresolved
+
+
+def test_full_runner_has_no_unresolved_global_references() -> None:
+    root = Path(__file__).resolve().parents[2]
+    path = root / "experiments/run_blind_detection_v1.py"
+    assert _unresolved_global_references(
+        path.read_text(encoding="utf-8"), str(path)
+    ) == []
 
 
 def _geometry(*, h=IDENTITY_H, legal=True, error=None) -> GeometryEstimate:
@@ -680,7 +687,7 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
     assert "force_remount" not in source
-    producer_exact = "54b4dbcab108b553de902a6fbc64328c8f4037be"
+    producer_exact = "920561bd264075628d52dcb70deef842284b6a75"
     assert source.count(producer_exact) == 1
     assert f"PRODUCER_EXACT = '{producer_exact}'" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
@@ -753,3 +760,19 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     assert "json_bytes != stable_json_bytes" not in threshold_source
     assert "public_key_digest" in runner_source
     assert "calibration_key_digest" in threshold_source
+    runner_tree = ast.parse(runner_source, filename=f"{producer_exact}:runner")
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "cegwm.method.blind_detection"
+        and any(alias.name == "decode_binary64" for alias in node.names)
+        for node in runner_tree.body
+    )
+    assert sum(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "decode_binary64"
+        for node in ast.walk(runner_tree)
+    ) == 4
+    assert _unresolved_global_references(
+        runner_source, f"{producer_exact}:experiments/run_blind_detection_v1.py"
+    ) == []
