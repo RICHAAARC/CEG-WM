@@ -123,6 +123,15 @@ def _roster_json() -> dict:
     }
 
 
+def _runtime_config_json() -> dict:
+    return {
+        "content_model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "device": "cuda",
+        "syncseal_checkpoint": "/content/drive/MyDrive/CEG-WM/public/syncmodel.jit.pt",
+        "syncseal_checkpoint_sha256": "c" * 64,
+    }
+
+
 def test_direct_positive_strictly_exceeds_tau_and_short_circuits_geometry(monkeypatch) -> None:
     backend = GeometryBackend(_geometry())
     seen = _install_scores(monkeypatch, [1.01])
@@ -383,18 +392,48 @@ def test_replay_time_operational_failure_and_false_positive_block_asset(
     assert not output.exists()
 
 
-def test_calibration_roster_freezes_disjoint_evidence_before_scoring(tmp_path: Path) -> None:
+def test_calibration_roster_freezes_physical_identity_and_retains_preflight_failure(
+    monkeypatch, tmp_path: Path
+) -> None:
     roster_path = tmp_path / "roster.json"
     roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
     roster, evidence, file_digest = runner.load_roster_inputs(roster_path)
     assert len(roster.units) == 256 and tuple(evidence) == BLIND_DEV_DISJOINT_FROM
     assert len(file_digest) == 64
+    with pytest.raises(ValueError, match="physical RGB is duplicated"):
+        runner.validate_unique_current_images(
+            roster, lambda image_ref: Image.new("RGB", (512, 512), "white")
+        )
 
     invalid = _roster_json()
-    invalid["disjoint_evidence"].pop("future_paper_test")
+    invalid["units"][1]["image_ref"] = invalid["units"][0]["image_ref"]
     roster_path.write_text(json.dumps(invalid), encoding="utf-8")
-    with pytest.raises(ValueError, match="evidence fields differ"):
+    with pytest.raises(ValueError, match="image references must be unique"):
         runner.load_roster_inputs(roster_path)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
+    key_path = tmp_path / "key.bin"
+    key_path.write_bytes(KEY.encode())
+    result_path = tmp_path / "duplicate-result.json"
+    _, candidate, status = runner.calibrate_and_record(
+        roster_path, key_path, config_path, tmp_path / "candidate.json", result_path,
+        producer_exact="d" * 40,
+    )
+    assert candidate is None and status == "OPERATIONAL_BLOCKED"
+    assert "image references must be unique" in json.loads(
+        result_path.read_text(encoding="ascii")
+    )["error"]
+
+    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    result_path = tmp_path / "io-result.json"
+    _, candidate, status = runner.calibrate_and_record(
+        roster_path, key_path, config_path, tmp_path / "io-candidate.json", result_path,
+        producer_exact="d" * 40,
+    )
+    retained = json.loads(result_path.read_text(encoding="ascii"))
+    assert candidate is None and status == "OPERATIONAL_BLOCKED"
+    assert "roster_image_validation[0]" in retained["error"]
 
 
 def test_formal_calibration_retains_complete_method_failure_without_threshold(
@@ -404,6 +443,8 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
     roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
     key_path = tmp_path / "key.bin"
     key_path.write_bytes(KEY.encode())
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
     rows = tuple(
         BlindCalibrationRow(
             index, f"u-{index}", f"s-{index % 2}", "a" * 64,
@@ -421,7 +462,16 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
         for index in range(256)
     )
     monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
-    monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda root: _production_assets())
+    monkeypatch.setattr(
+        runner, "validate_unique_current_images",
+        lambda roster, loader: {
+            unit.image_ref: Image.new("RGB", (512, 512)) for unit in roster.units
+        },
+    )
+    monkeypatch.setattr(
+        runner, "build_production_runtime",
+        lambda root, config, hf_token: _production_assets(),
+    )
 
     def fail(*args, **kwargs):
         raise runner.ThresholdFreezeBlocked(
@@ -434,7 +484,7 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
     result_path = tmp_path / "calibration_result.json"
     threshold_path = tmp_path / "threshold.json"
     result, threshold, status = runner.calibrate_and_record(
-        roster_path, key_path, "fake:factory", threshold_path, result_path,
+        roster_path, key_path, config_path, threshold_path, result_path,
         producer_exact="f" * 40,
     )
     assert result == result_path and threshold is None and status == "METHOD_FAILED"
@@ -446,10 +496,10 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
     assert payload["fresh_replay_false_positives"] == 1
     assert payload["candidate_tau_blind_be_hex"] is not None
     assert payload["frozen_tau_blind_be_hex"] is None
-    assert payload["threshold_written"] is False
+    assert payload["threshold_candidate_ready"] is False
     with pytest.raises(FileExistsError, match="result is create-only"):
         runner.calibrate_and_record(
-            roster_path, key_path, "fake:factory", threshold_path, result_path,
+            roster_path, key_path, config_path, threshold_path, result_path,
             producer_exact="f" * 40,
         )
 
@@ -461,6 +511,8 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
     roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
     key_path = tmp_path / "key.bin"
     key_path.write_bytes(KEY.encode())
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
     rows = tuple(
         BlindCalibrationRow(
             index, f"u-{index}", f"s-{index % 2}", "b" * 64,
@@ -480,7 +532,16 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
         json_bytes=b'{"threshold":"test-double"}',
     )
     monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
-    monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda root: _production_assets())
+    monkeypatch.setattr(
+        runner, "validate_unique_current_images",
+        lambda roster, loader: {
+            unit.image_ref: Image.new("RGB", (512, 512)) for unit in roster.units
+        },
+    )
+    monkeypatch.setattr(
+        runner, "build_production_runtime",
+        lambda root, config, hf_token: _production_assets(),
+    )
     monkeypatch.setattr(
         runner, "evaluate_threshold_with_runtime",
         lambda *args, **kwargs: (rows, replay, asset),
@@ -488,19 +549,25 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
     result_path = tmp_path / "calibration_result.json"
     threshold_path = tmp_path / "threshold.json"
     result, threshold, status = runner.calibrate_and_record(
-        roster_path, key_path, "fake:factory", threshold_path, result_path,
+        roster_path, key_path, config_path, threshold_path, result_path,
         producer_exact="e" * 40,
     )
     assert (result, threshold) == (result_path, threshold_path)
-    assert status == "THRESHOLD_FROZEN_AFTER_0_OF_256_FRESH_REPLAY"
+    assert status == "CALIBRATION_COMPLETE_THRESHOLD_CANDIDATE_READY"
     payload = json.loads(result_path.read_text(encoding="ascii"))
     assert payload["fresh_replay_zero_of_256"] is True
     assert payload["fresh_replay_false_positives"] == 0
     assert payload["candidate_tau_blind_be_hex"] == payload["frozen_tau_blind_be_hex"]
-    assert payload["threshold_written"] is True
-    assert payload["threshold_asset_sha256"] == runner.hashlib.sha256(
+    assert payload["threshold_candidate_ready"] is True
+    assert payload["threshold_candidate_sha256"] == runner.hashlib.sha256(
         threshold_path.read_bytes()
     ).hexdigest()
+    runner_source = (
+        Path(__file__).resolve().parents[2] / "experiments/run_blind_detection_v1.py"
+    ).read_text()
+    assert "ContentCalibrationAssets(content_runner_assets.evaluation_assets)" in runner_source
+    assert "load_calibration_asset(weighted_path, weighted_sidecar)" in runner_source
+    assert "SyncSealTorchScript.from_file(checkpoint" in runner_source
 
 
 def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(monkeypatch) -> None:
@@ -599,17 +666,25 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
     assert "force_remount" not in source
-    assert "0ce90f2f11669c4ab6e492cb196404bf2ff0401b" in source
+    assert "6b08bc8cff5158c8cfced7668249d01e9892e043" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
     assert "status', '--porcelain=v1'" in source
     assert "development-roster-256.json" in source
     assert "load_roster_inputs(ROSTER)" in source
-    assert "disjoint_evidence_digest" in source and "key_public_digest" in source
+    assert "config_file_sha256" in source and "key_public_digest" in source
     assert "CALIBRATION_RUNNER_CALLS += 1" in source
     assert source.count("'calibrate-and-freeze'") == 1
-    assert "'--result-output', str(RESULT)" in source
+    assert "'--runtime-config', str(CONFIG_FILE)" in source
+    assert "runtime_factory" not in source
+    assert "'--result-output', str(LOCAL_RESULT)" in source
     assert "artifact_manifest.json" in source and "runner.stdout.txt" in source
     assert "fresh_replay_zero_of_256" in source
+    assert "notebook_status.json" not in source
+    assert "'input_hashes': dict(INPUT_HASHES)" in source
+    assert "SyncSeal checkpoint identity differs" in source
+    assert source.index("publish_create_only(LOCAL_STDERR, DRIVE_STDERR)") < source.index(
+        "status='CALIBRATION_COMPLETE_THRESHOLD_PENDING_LAST'"
+    ) < source.index("pending.replace(DRIVE_THRESHOLD)")
     assert "blind_detection_v1_callback.ipynb" not in source
     assert "N_CALLBACK" not in source and "--manifest" not in source
     for forbidden in ("paired_null", "stored_h", "proxy_rgb", "truth_label"):
