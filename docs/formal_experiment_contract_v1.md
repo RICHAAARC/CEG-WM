@@ -14,6 +14,10 @@ Baseline-V1 and enter only through their result files. The existing
 BlindDetection-V1 N_dev=256 max-score threshold and N=4 smoke remain engineering
 evidence with science_denominator=0; neither is a paper threshold or FPR result.
 
+The notebook-executed producer exacts are
+`PaperFPR-V1@e0deb60d3796a59891cd669fe6f071589897885d` and
+`Baseline-V1@23862e0c47411d67e66a617cf35dbd54bbdc0435`.
+
 ## Shared population contract
 
 All five methods use the same ordered logical roster defined by
