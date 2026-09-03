@@ -1,9 +1,9 @@
 # Baseline-V1 formal protocol (user-frozen)
 
-The four formal worker notebooks are bound to producer exact
-`23862e0c47411d67e66a617cf35dbd54bbdc0435`.  They remain unexecuted and
-require separate user authorization for any Colab, GPU, model, or formal
-denominator run.
+The four formal worker notebooks will be rebound to the revised producer exact
+after local validation. They remain unauthorized for formal Colab, GPU, model,
+or denominator execution; their default notebook mode is an independent
+engineering canary with `science_denominator=0`.
 
 This protocol covers Tree-Ring, Gaussian Shading, Shallow Diffuse, and T2SMark
 only. It excludes CEG and Geometry-V4 rows, results, thresholds, and attacks.
@@ -72,11 +72,11 @@ environments without those records.
 
 Per method: 2,000 threshold-freeze detections + 3,000 clean-confirmation
 detections + 12,000 evaluation detections = **17,000 detections**. Planned
-artifacts are 7,000 source-generation images, 10,000 non-clean attack
-derivatives, and 6,000 paired quality comparisons. Across four methods this is
-68,000 detections. Every observation has a 20-minute wall-clock cap; failures
-and timeouts are retained in the planned physical denominator without retry or
-replacement and reported per method/condition.
+artifacts are 2,000 source-generation images and 1,000 paired quality
+comparisons. Across four methods this is 68,000 detections. Failures and
+timeouts are retained in the planned physical denominator; only frozen typed
+CUDA-OOM or model-runtime transient errors retry the same unit once. There is
+no replacement, and every attempt is reported per method/condition.
 
 Wrong-key remains an optional diagnostic only. It is excluded from threshold
 calibration, confirmation, and the main-table FPR.
@@ -113,8 +113,15 @@ the analogous TP bounds. The status is `INCOMPLETE_OPERATIONAL`, but valid rows
 remain usable. Failures are never converted to TN/FN, deleted, or removed from
 the planned denominator. Wrong-key remains supplementary. Quality is exactly
 PSNR, SSIM, and LPIPS on the existing clean pairs and is not a gate.
+Each metric reports valid, failed, and missing counts plus the valid-only mean
+and effective denominator in both method and unified results.
 
 ## Recovery and publication
+
+Before formal unit state is initialized, the worker constructs its exact model
+runtime and runs a fixed engineering-only generation, detection, and quality
+probe. Preflight failures publish `PREFLIGHT_FAILED_RECOVERABLE` only at job
+level with `science_denominator=0`; they consume no formal roster unit.
 
 Formal work uses stable JOB_ID/RUN_ID, create-only per-unit terminal records,
 append-only numbered checkpoints at every 25-unit shard end and at least every
@@ -124,3 +131,10 @@ failures may retry the identical unit once, for two total attempts; all attempts
 remain in the unit record. There is no lock, lease, heartbeat, force-rerun-all,
 replacement unit, alternate RUN_ID, checksum, receipt, signature, or byte-size
 gate. One runtime per JOB_ID is an operator constraint.
+
+An uncommitted pair with only one persisted arm is recovered by regenerating
+the same prompt and seed, preserving the existing arm, and creating only the
+missing arm. A committed unit is never rerun. Each notebook's independent
+engineering-canary mode verifies real generation, detection, checkpoint
+publication, and resume under a non-formal Drive path; those results cannot be
+used as paper evidence.

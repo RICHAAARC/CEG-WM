@@ -43,6 +43,7 @@ RETRYABLE_OPERATIONAL_CODES = frozenset({
     "CUDA_OOM_TRANSIENT",
     "MODEL_RUNTIME_TRANSIENT",
 })
+QUALITY_METRICS = ("psnr", "ssim", "lpips")
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +68,14 @@ class OperationalUnitError(RuntimeError):
         self.stage = stage
         self.detail = detail
         super().__init__(f"{code}:{stage}:{detail}")
+
+
+class PreflightFailed(RuntimeError):
+    """Job-level recoverable preflight failure that consumes no formal unit."""
+
+    def __init__(self, state: Mapping[str, Any]) -> None:
+        self.state = dict(state)
+        super().__init__(str(self.state.get("error", "formal worker preflight failed")))
 
 
 def _read_json(path: Path) -> Any:
@@ -99,6 +108,80 @@ def _write_json_replaceable(path: Path, value: Any) -> None:
             os.unlink(temporary)
 
 
+def classify_operational_exception(error: BaseException, stage: str) -> OperationalUnitError | None:
+    """Map only recognizable transient runtime failures to frozen retry codes."""
+
+    if isinstance(error, OperationalUnitError):
+        return error
+    detail = f"{type(error).__name__}: {error}"
+    lowered = detail.lower()
+    if type(error).__name__ == "OutOfMemoryError" or any(token in lowered for token in (
+        "cuda out of memory", "cuda error: out of memory", "cublas_status_alloc_failed",
+    )):
+        return OperationalUnitError("CUDA_OOM_TRANSIENT", stage, detail)
+    if isinstance(error, (TimeoutError, ConnectionError)) or any(token in lowered for token in (
+        "timed out", "read timeout", "connect timeout", "temporary failure",
+        "temporarily unavailable", "service unavailable", "connection error",
+        "connection reset", "connection aborted",
+        "cuda error", "cudnn_status", "cublas_status", "nccl error",
+    )):
+        return OperationalUnitError("MODEL_RUNTIME_TRANSIENT", stage, detail)
+    return None
+
+
+def raise_classified_operational(error: BaseException, stage: str) -> None:
+    mapped = classify_operational_exception(error, stage)
+    if mapped is not None:
+        raise mapped from error
+    raise error
+
+
+def publish_job_state(
+    root: str | Path,
+    identity: Mapping[str, Any],
+    status: str,
+    **details: Any,
+) -> dict[str, Any]:
+    """Publish replaceable non-statistical job state outside formal unit records."""
+
+    if not isinstance(status, str) or not status:
+        raise ValueError("job state status must be nonempty text")
+    payload = {
+        "schema_version": "cegwm_formal_job_state_v1",
+        "identity": dict(identity),
+        "status": status,
+        "science_denominator": 0,
+        "updated_at_unix_seconds": time.time(),
+        **details,
+    }
+    _write_json_replaceable(Path(root) / "job_state.json", payload)
+    return payload
+
+
+def execute_job_preflight(
+    root: str | Path,
+    identity: Mapping[str, Any],
+    callback: Callable[[], Any],
+) -> Any:
+    """Build and probe a runtime before any formal stage is initialized."""
+
+    publish_job_state(root, identity, "PREFLIGHT_RUNNING")
+    try:
+        result = callback()
+    except Exception as error:
+        mapped = classify_operational_exception(error, "preflight")
+        state = publish_job_state(
+            root,
+            identity,
+            "PREFLIGHT_FAILED_RECOVERABLE",
+            error_code=mapped.code if mapped is not None else "PREFLIGHT_ERROR",
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise PreflightFailed(state) from error
+    publish_job_state(root, identity, "PREFLIGHT_READY")
+    return result
+
+
 def load_formal_config(path: str | Path) -> dict[str, Any]:
     config = _read_json(Path(path))
     if not isinstance(config, dict) or config.get("schema_version") != "cegwm_formal_experiment_v1":
@@ -120,6 +203,25 @@ def load_formal_config(path: str | Path) -> dict[str, Any]:
         raise ValueError("rotation+scale must not enter the formal matrix")
     if frozenset(config.get("retryable_operational_codes", ())) != RETRYABLE_OPERATIONAL_CODES:
         raise ValueError("formal retry allowlist differs")
+    if config.get("preflight") != {
+        "before_formal_unit_state": True,
+        "seed": 2027000000,
+        "science_denominator": 0,
+        "failure_status": "PREFLIGHT_FAILED_RECOVERABLE",
+    }:
+        raise ValueError("formal preflight contract differs")
+    if config.get("engineering_canary") != {
+        "science_denominator": 0,
+        "drive_tree": "PaperFormal-V1-EngineeringCanary",
+        "required_evidence": ["generation", "detection", "checkpoint", "resume"],
+    }:
+        raise ValueError("engineering canary contract differs")
+    if config.get("finalization") != {
+        "reconstruction_missing_prerequisite": "WAITING_FOR_PREREQUISITE",
+        "missing_required_results": "WAITING_FOR_REQUIRED_RESULTS",
+        "incomplete_close_requires_explicit_flag": True,
+    }:
+        raise ValueError("formal finalization contract differs")
     return config
 
 
@@ -309,6 +411,78 @@ def empty_binary_summary(*, truth_positive: bool, planned: int) -> dict[str, Any
     return summarize_binary((), truth_positive=truth_positive, planned=planned)
 
 
+def summarize_quality(records: Iterable[Mapping[str, Any]], *, planned: int) -> dict[str, Any]:
+    """Summarize the frozen PSNR/SSIM/LPIPS set without dropping failed pairs."""
+
+    rows = tuple(records)
+    if planned <= 0 or len(rows) > planned:
+        raise ValueError("quality planned denominator is invalid")
+    missing = planned - len(rows)
+    metrics: dict[str, dict[str, Any]] = {}
+    pair_valid = 0
+    for row in rows:
+        quality = row.get("quality")
+        if row.get("terminal_status") == "SCORED" and isinstance(quality, Mapping) and all(
+            isinstance(quality.get(metric), (int, float))
+            and not isinstance(quality.get(metric), bool)
+            and math.isfinite(float(quality[metric]))
+            for metric in QUALITY_METRICS
+        ):
+            pair_valid += 1
+    for metric in QUALITY_METRICS:
+        values = [
+            float(row["quality"][metric])
+            for row in rows
+            if row.get("terminal_status") == "SCORED"
+            and isinstance(row.get("quality"), Mapping)
+            and isinstance(row["quality"].get(metric), (int, float))
+            and not isinstance(row["quality"].get(metric), bool)
+            and math.isfinite(float(row["quality"][metric]))
+        ]
+        metrics[metric] = {
+            "n_valid": len(values),
+            "n_failed": len(rows) - len(values),
+            "n_missing": missing,
+            "mean": math.fsum(values) / len(values) if values else None,
+        }
+    return {
+        "n_planned_pairs": planned,
+        "n_valid_pairs": pair_valid,
+        "n_failed_pairs": len(rows) - pair_valid,
+        "n_missing_pairs": missing,
+        "metrics": metrics,
+        "status": "COMPLETE" if pair_valid == planned else "INCOMPLETE_OPERATIONAL",
+    }
+
+
+def load_or_recover_pair(
+    clean_path: str | Path,
+    watermarked_path: str | Path,
+    generate: Callable[[], tuple[Any, Any]],
+    load: Callable[[Path], Any],
+    write: Callable[[Path, Any], None],
+) -> tuple[Any, Any, str]:
+    """Recover a deterministic one-file pair residue without replacing either arm."""
+
+    clean_file, watermarked_file = Path(clean_path), Path(watermarked_path)
+    clean_exists, watermarked_exists = clean_file.exists(), watermarked_file.exists()
+    if clean_exists and watermarked_exists:
+        return load(clean_file), load(watermarked_file), "PAIR_REUSED"
+    generated_clean, generated_watermarked = generate()
+    if clean_exists:
+        clean = load(clean_file)
+    else:
+        write(clean_file, generated_clean)
+        clean = load(clean_file)
+    if watermarked_exists:
+        watermarked = load(watermarked_file)
+    else:
+        write(watermarked_file, generated_watermarked)
+        watermarked = load(watermarked_file)
+    mode = "PAIR_PARTIAL_RECOVERED" if clean_exists or watermarked_exists else "PAIR_CREATED"
+    return clean, watermarked, mode
+
+
 def apply_attack(image: Image.Image, condition: str) -> Image.Image:
     rgb = image.convert("RGB")
     if condition == "clean_no_attack":
@@ -367,7 +541,29 @@ def execute_with_frozen_retry(
                 "attempts": attempts,
                 **payload,
             }
-        except OperationalUnitError as error:
+        except Exception as raw_error:
+            error = (
+                raw_error
+                if isinstance(raw_error, OperationalUnitError)
+                else classify_operational_exception(raw_error, "unit_callback")
+            )
+            if error is None:
+                attempts.append({
+                    "attempt": attempt_number,
+                    "status": "OPERATIONAL_FAILURE",
+                    "failure_code": "UNCLASSIFIED_OPERATIONAL",
+                    "failure_stage": "unit_callback",
+                    "error": f"{type(raw_error).__name__}: {raw_error}",
+                    "retryable_by_contract": False,
+                })
+                return {
+                    "unit_id": unit_id,
+                    "terminal_status": "OPERATIONAL_FAILURE",
+                    "attempts": attempts,
+                    "failure_code": "UNCLASSIFIED_OPERATIONAL",
+                    "failure_stage": "unit_callback",
+                    "error": f"{type(raw_error).__name__}: {raw_error}",
+                }
             retryable = error.code in RETRYABLE_OPERATIONAL_CODES
             attempts.append({
                 "attempt": attempt_number,
@@ -386,23 +582,6 @@ def execute_with_frozen_retry(
                     "failure_stage": error.stage,
                     "error": error.detail,
                 }
-        except Exception as error:
-            attempts.append({
-                "attempt": attempt_number,
-                "status": "OPERATIONAL_FAILURE",
-                "failure_code": "UNCLASSIFIED_OPERATIONAL",
-                "failure_stage": "unit_callback",
-                "error": f"{type(error).__name__}: {error}",
-                "retryable_by_contract": False,
-            })
-            return {
-                "unit_id": unit_id,
-                "terminal_status": "OPERATIONAL_FAILURE",
-                "attempts": attempts,
-                "failure_code": "UNCLASSIFIED_OPERATIONAL",
-                "failure_stage": "unit_callback",
-                "error": f"{type(error).__name__}: {error}",
-            }
     raise AssertionError("frozen retry loop did not terminate")
 
 
@@ -558,8 +737,11 @@ __all__ = [
     "ALPHA", "CALIBRATION_NEGATIVES", "CHECKPOINT_INTERVAL_SECONDS",
     "CHECKPOINT_SHARD_SIZE", "CLEAN_TEST_NEGATIVES", "EVALUATION_PAIRS",
     "FORMAL_CONDITIONS", "FormalRunStore", "FormalUnit", "MAX_UNIT_ATTEMPTS",
-    "OperationalUnitError", "RETRYABLE_OPERATIONAL_CODES", "apply_attack",
-    "clopper_pearson", "decide", "execute_with_frozen_retry", "expand_rosters",
-    "empty_binary_summary", "freeze_threshold", "load_formal_config", "normalized_score",
-    "summarize_binary",
+    "OperationalUnitError", "PreflightFailed", "QUALITY_METRICS",
+    "RETRYABLE_OPERATIONAL_CODES", "apply_attack", "classify_operational_exception",
+    "clopper_pearson", "decide", "empty_binary_summary", "execute_job_preflight",
+    "execute_with_frozen_retry", "expand_rosters", "freeze_threshold",
+    "load_formal_config", "load_or_recover_pair", "normalized_score",
+    "publish_job_state", "raise_classified_operational", "summarize_binary",
+    "summarize_quality",
 ]

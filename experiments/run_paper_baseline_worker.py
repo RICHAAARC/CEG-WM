@@ -26,13 +26,18 @@ from cegwm.formal_experiment import (
     FORMAL_CONDITIONS,
     FormalRunStore,
     OperationalUnitError,
+    PreflightFailed,
     apply_attack,
     decide,
     empty_binary_summary,
+    execute_job_preflight,
     expand_rosters,
     freeze_threshold,
+    load_or_recover_pair,
     load_formal_config,
+    publish_job_state,
     summarize_binary,
+    summarize_quality,
 )
 
 
@@ -40,6 +45,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "configs/paper_experiment/formal_experiment_v1.json"
 MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
+PREFLIGHT_PROMPT = "A neutral geometric still life for an engineering preflight."
+PREFLIGHT_SEED = 2027000000
 
 METHOD_SPECS: dict[str, dict[str, Any]] = {
     "tree_ring": {
@@ -361,6 +368,19 @@ def _empty_evaluation() -> dict[str, Any]:
     }
 
 
+def _prepare_runtime(method: str, runtime_root: Path, token: str) -> Any:
+    if not token:
+        raise RuntimeError("HF_TOKEN is required")
+    runtime = _build_runtime(method, runtime_root, token)
+    if not hasattr(runtime, "method"):
+        runtime.method = "t2smark"
+    clean, watermarked = runtime.pair(PREFLIGHT_PROMPT, PREFLIGHT_SEED)
+    _score_payload(runtime, clean)
+    _score_payload(runtime, watermarked, 0.0)
+    _quality(clean, watermarked)
+    return runtime
+
+
 def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Path, runtime_root: Path) -> int:
     verify_expected_exact(expected_exact)
     config = load_formal_config(CONFIG_PATH)
@@ -374,6 +394,21 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
         print(json.dumps({"status": final["status"], "method_id": method, "terminal": True}, sort_keys=True))
         return 0
 
+    token = os.environ.get("HF_TOKEN", "")
+    try:
+        runtime = execute_job_preflight(
+            job_root,
+            _identity(job_id, method, "preflight", expected_exact),
+            lambda: _prepare_runtime(method, runtime_root, token),
+        )
+    except PreflightFailed as error:
+        print(json.dumps({
+            "method_id": method,
+            "status": error.state["status"],
+            "science_denominator": 0,
+        }, sort_keys=True))
+        return 3
+
     calibration_units = rosters["threshold_calibration"]
     calibration = FormalRunStore(
         job_root / "threshold_calibration",
@@ -382,17 +417,7 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
     )
     threshold_path = job_root / "threshold.json"
     threshold = _threshold_from_stage(calibration, threshold_path, method, expected_exact)
-    runtime: Any | None = None
-
     def get_runtime() -> Any:
-        nonlocal runtime
-        if runtime is None:
-            token = os.environ.get("HF_TOKEN", "")
-            if not token:
-                raise RuntimeError("HF_TOKEN is required")
-            runtime = _build_runtime(method, runtime_root, token)
-            if not hasattr(runtime, "method"):
-                runtime.method = "t2smark"
         return runtime
 
     if threshold is None and not calibration.completed_result():
@@ -417,6 +442,7 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
                 truth_positive=False, planned=CLEAN_TEST_NEGATIVES
             ),
             "evaluation": _empty_evaluation(),
+            "quality": summarize_quality((), planned=EVALUATION_PAIRS),
             "status": "INCOMPLETE_OPERATIONAL",
             "reason": "paper threshold unavailable after terminal calibration",
             "fpr_policy": "report_only_nonblocking",
@@ -427,6 +453,10 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
             "status": "INCOMPLETE_OPERATIONAL",
             "terminal": True,
         }, sort_keys=True))
+        publish_job_state(
+            job_root, _identity(job_id, method, "method_terminal", expected_exact),
+            "TERMINAL_INCOMPLETE", reason="threshold unavailable",
+        )
         return 0
 
     tau = float(threshold["tau"])
@@ -459,16 +489,18 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
             unit = by_id[unit_id]
             clean_path = image_root / f"{unit.roster_index:04d}" / "clean.png"
             watermarked_path = image_root / f"{unit.roster_index:04d}" / "watermarked.png"
-            if clean_path.exists() or watermarked_path.exists():
-                clean, watermarked = _load_rgb(clean_path), _load_rgb(watermarked_path)
-            else:
-                clean, watermarked = get_runtime().pair(unit.prompt, unit.seed)
-                _atomic_png_create_only(clean_path, clean)
-                _atomic_png_create_only(watermarked_path, watermarked)
+            clean, watermarked, pair_state = load_or_recover_pair(
+                clean_path,
+                watermarked_path,
+                lambda: get_runtime().pair(unit.prompt, unit.seed),
+                _load_rgb,
+                _atomic_png_create_only,
+            )
             return {
                 "artifact_status": "GENERATED",
                 "clean_image": str(clean_path.relative_to(job_root)),
                 "watermarked_image": str(watermarked_path.relative_to(job_root)),
+                "pair_state": pair_state,
                 "quality": _quality(clean, watermarked),
             }
 
@@ -520,7 +552,8 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
 
     clean_result = json.loads(clean_stage.final_path.read_text(encoding="utf-8"))
     eval_result = json.loads(detection_stage.final_path.read_text(encoding="utf-8"))
-    statuses = (clean_result["status"], eval_result["status"])
+    quality = summarize_quality(generation_stage.rows(), planned=EVALUATION_PAIRS)
+    statuses = (clean_result["status"], eval_result["status"], quality["status"])
     _write_json_create_only(final_path, {
         "schema_version": "cegwm_formal_method_result_v1",
         "method_id": method,
@@ -528,13 +561,134 @@ def run_worker(*, method: str, job_id: str, expected_exact: str, drive_root: Pat
         "threshold": threshold,
         "clean_negative_test": clean_result["summary"],
         "evaluation": eval_result["summaries"],
+        "quality": quality,
         "quality_source": "evaluation_generation_clean_pairs",
         "status": "COMPLETE" if all(value == "COMPLETE" for value in statuses) else "INCOMPLETE_OPERATIONAL",
         "fpr_policy": "report_only_nonblocking",
         "result_package_produced": True,
     })
+    publish_job_state(
+        job_root, _identity(job_id, method, "method_terminal", expected_exact),
+        "TERMINAL_COMPLETE" if all(value == "COMPLETE" for value in statuses) else "TERMINAL_INCOMPLETE",
+    )
     print(json.dumps({"status": statuses, "method_id": method, "terminal": True}, sort_keys=True))
     return 0
+
+
+def run_engineering_canary(
+    *, method: str, job_id: str, expected_exact: str, drive_root: Path,
+    runtime_root: Path,
+) -> int:
+    """Exercise one real baseline pair, detection, checkpoint, and resume at N=0 science."""
+
+    verify_expected_exact(expected_exact)
+    load_formal_config(CONFIG_PATH)
+    root = drive_root / job_id
+    final_path = root / "canary_final.json"
+    if final_path.exists():
+        value = json.loads(final_path.read_text(encoding="utf-8"))
+        if (
+            value.get("method_id") != method
+            or value.get("producer_exact") != expected_exact
+            or value.get("science_denominator") != 0
+        ):
+            raise RuntimeError("baseline canary final identity differs")
+        print(json.dumps({"status": value["status"], "terminal": True}, sort_keys=True))
+        return 0 if value["status"] == "ENGINEERING_CANARY_COMPLETE" else 4
+    token = os.environ.get("HF_TOKEN", "")
+    try:
+        runtime = execute_job_preflight(
+            root,
+            _identity(job_id, method, "engineering_canary_preflight", expected_exact),
+            lambda: _prepare_runtime(method, runtime_root, token),
+        )
+    except PreflightFailed as error:
+        print(json.dumps({"status": error.state["status"], "science_denominator": 0}, sort_keys=True))
+        return 3
+
+    clean_path = root / "images" / "clean.png"
+    marked_path = root / "images" / "watermarked.png"
+    generation_identity = _identity(job_id, method, "engineering_canary_generation", expected_exact)
+    generation = FormalRunStore(root / "generation", generation_identity, ("engineering-canary-pair",))
+
+    def generate(unit_id: str, attempt: int) -> dict[str, Any]:
+        del unit_id, attempt
+        clean, marked, pair_state = load_or_recover_pair(
+            clean_path, marked_path,
+            lambda: runtime.pair(PREFLIGHT_PROMPT, PREFLIGHT_SEED),
+            _load_rgb, _atomic_png_create_only,
+        )
+        return {
+            "artifact_status": "GENERATED", "pair_state": pair_state,
+            "quality": _quality(clean, marked),
+        }
+
+    generation.run(generate)
+    generation_status = (
+        "COMPLETE"
+        if all(row["terminal_status"] == "SCORED" for row in generation.rows())
+        else "INCOMPLETE_OPERATIONAL"
+    )
+    generation.finalize({"status": generation_status, "science_denominator": 0})
+    FormalRunStore(
+        root / "generation", generation_identity, ("engineering-canary-pair",)
+    ).run(lambda unit_id, attempt: (_ for _ in ()).throw(
+        AssertionError("scored canary generation unit reran")
+    ))
+
+    detection_identity = _identity(job_id, method, "engineering_canary_detection", expected_exact)
+    detection = FormalRunStore(
+        root / "detection", detection_identity,
+        ("engineering-canary-negative", "engineering-canary-positive"),
+    )
+
+    def detect(unit_id: str, attempt: int) -> dict[str, Any]:
+        del attempt
+        role = "negative" if unit_id.endswith("negative") else "positive"
+        image = clean_path if role == "negative" else marked_path
+        return {**_score_payload(runtime, _load_rgb(image), 0.0), "truth_role": role}
+
+    detection.run(detect)
+    detection_status = (
+        "COMPLETE"
+        if all(row["terminal_status"] == "SCORED" for row in detection.rows())
+        else "INCOMPLETE_OPERATIONAL"
+    )
+    detection.finalize({"status": detection_status, "science_denominator": 0})
+    FormalRunStore(
+        root / "detection", detection_identity,
+        ("engineering-canary-negative", "engineering-canary-positive"),
+    ).run(lambda unit_id, attempt: (_ for _ in ()).throw(
+        AssertionError("scored canary detection unit reran")
+    ))
+    checkpoint_count = sum(
+        len(tuple((root / stage / "checkpoints").glob("checkpoint-*.json")))
+        for stage in ("generation", "detection")
+    )
+    if checkpoint_count < 2:
+        raise RuntimeError("baseline canary did not publish both stage checkpoints")
+    canary_status = (
+        "ENGINEERING_CANARY_COMPLETE"
+        if generation_status == detection_status == "COMPLETE"
+        else "ENGINEERING_CANARY_INCOMPLETE"
+    )
+    _write_json_create_only(final_path, {
+        "schema_version": "cegwm_engineering_canary_result_v1",
+        "method_id": method,
+        "producer_exact": expected_exact,
+        "status": canary_status,
+        "science_denominator": 0,
+        "generation_verified": generation_status == "COMPLETE",
+        "detection_verified": detection_status == "COMPLETE",
+        "checkpoint_count": checkpoint_count,
+        "resume_verified": True,
+    })
+    publish_job_state(
+        root, _identity(job_id, method, "engineering_canary_terminal", expected_exact),
+        canary_status,
+    )
+    print(json.dumps({"status": canary_status, "terminal": True}, sort_keys=True))
+    return 0 if canary_status == "ENGINEERING_CANARY_COMPLETE" else 4
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -544,7 +698,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-exact", required=True)
     parser.add_argument("--drive-root", required=True)
     parser.add_argument("--runtime-root", required=True)
-    parser.add_argument("--validate-only", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--validate-only", action="store_true")
+    mode.add_argument("--engineering-canary", action="store_true")
     return parser
 
 
@@ -561,6 +717,11 @@ def main(argv: list[str] | None = None) -> int:
             "model_execution": False,
         }, sort_keys=True))
         return 0
+    if args.engineering_canary:
+        return run_engineering_canary(
+            method=args.method, job_id=args.job_id, expected_exact=args.expected_exact,
+            drive_root=Path(args.drive_root), runtime_root=Path(args.runtime_root),
+        )
     return run_worker(
         method=args.method,
         job_id=args.job_id,
