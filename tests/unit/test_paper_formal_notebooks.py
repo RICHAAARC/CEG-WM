@@ -11,8 +11,8 @@ BOOKS = (
     "paper_reconstruction_worker_colab.ipynb",
     "paper_results_finalize_colab.ipynb",
 )
-PAPER_PRODUCER_EXACT = "e0deb60d3796a59891cd669fe6f071589897885d"
-BASELINE_PRODUCER_EXACT = "23862e0c47411d67e66a617cf35dbd54bbdc0435"
+PAPER_PRODUCER_EXACT = "93fc45a03ed3c15b1fde768316ba8db9dcff25e5"
+BASELINE_PRODUCER_EXACT = "004b73dd1ebcceae73f05adb76159788414fb43f"
 
 
 @pytest.mark.unit
@@ -23,6 +23,11 @@ def test_formal_notebooks_are_clean_thin_fixed_entries() -> None:
         assert "".join(code[0]["source"]) == "from google.colab import drive\ndrive.mount('/content/drive')"
         text = "\n".join("".join(cell["source"]) for cell in code)
         assert PAPER_PRODUCER_EXACT in text
+        assert "--engineering-canary" in text
+        assert "PaperFormal-V1-EngineeringCanary" in text
+        assert "canary_final.json" in text
+        assert "'PYTHONPATH'" in text
+        assert "'pip','install','-e'" not in text
         if name == "paper_results_finalize_colab.ipynb":
             assert BASELINE_PRODUCER_EXACT in text
         assert "force_remount" not in text
