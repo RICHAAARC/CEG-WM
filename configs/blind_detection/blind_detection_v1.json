@@ -1,0 +1,47 @@
+{
+  "base_exact": "3d0ebe699c4319fb2435e9eacca7e943096e9abd",
+  "calibration_assets": "configs/blind_detection/blind_detection_v1_colab_assets.json",
+  "calibration_entrypoint": "experiments/run_blind_detection_v1.py calibrate-and-freeze",
+  "claim_ceiling": "BlindDetection-V1 engineering threshold frozen from N_dev=256 with replay 0/256; fixed N4 smoke passed; science_denominator=0",
+  "content_calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+  "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+  "detection_key_binding": "public_key_digest_frozen_in_threshold_asset",
+  "development": {
+    "denominator": 256,
+    "disjoint_from": [
+      "geometry_v7_development",
+      "future_paper_calibration",
+      "future_paper_test"
+    ],
+    "geometry_attempts_per_unit": 1,
+    "full_system_replay": "fresh_second_pass_same_roster_current_images_key_and_public_runtime",
+    "independence_unit": "base_ordinary_rgb",
+    "roster_freeze": "before_any_scoring",
+    "source_strata_and_order": "frozen_in_roster_input"
+  },
+  "development_roster": "configs/blind_detection/blind_detection_v1_dev_roster_256.json",
+  "embedding_order": [
+    "existing_content_embed",
+    "frozen_final_rgb_syncseal"
+  ],
+  "geometry_role": "coordinates_only_no_positive_vote",
+  "production_geometry_backend": "cegwm.geometry_v7.syncseal.SyncSealTorchScript",
+  "root_key_env": "CEG_WM_ROOT_KEY",
+  "method_id": "blind_detection_v1_single_image_geometry_direct",
+  "preprocess_id": "ordinary_rgb_then_frozen_content_v9_branch_preprocessing_v1",
+  "recovery": {
+    "b_low_blind": false,
+    "fallback": false,
+    "raw_h_rectification_attempts": 1,
+    "retry": false,
+    "same_scorer_key_preprocess_assets_tau_pre_post": true
+  },
+  "test_injection": "explicit_test_only_entry_rejected_by_production_detect_watermark",
+  "reliable_ablation": "optional_nonblocking_not_primary_method",
+  "scorer_id": "content_v9_weighted_joint_registered_minus_exact16_wrong_max_v1",
+  "statistic": "registered weighted_joint - max(exact 16 wrong-key weighted_joint)",
+  "threshold_asset": "configs/blind_detection/assets/blind_detection_v1_thresholds.json",
+  "threshold_asset_state": "FROZEN_ENGINEERING_N_DEV_256_ZERO_OF_256_REPLAY",
+  "threshold_calibration_producer_exact": "920561bd264075628d52dcb70deef842284b6a75",
+  "wrong_key_attribution": "separate_experiment_separate_fixed_denominator"
+}
