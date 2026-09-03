@@ -1,8 +1,9 @@
 {
   "base_exact": "3d0ebe699c4319fb2435e9eacca7e943096e9abd",
+  "calibration_assets": "configs/blind_detection/blind_detection_v1_colab_assets.json",
+  "calibration_entrypoint": "experiments/run_blind_detection_v1.py calibrate-and-freeze",
   "claim_ceiling": "BlindDetection-V1 implementation authorized; engineering single-image closure only; N_dev=256; science_denominator=0",
   "content_calibration_asset": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
-  "content_calibration_asset_sidecar": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256",
   "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
   "detection_key_binding": "public_key_digest_frozen_in_threshold_asset",
   "development": {
@@ -18,12 +19,14 @@
     "roster_freeze": "before_any_scoring",
     "source_strata_and_order": "frozen_in_roster_input"
   },
+  "development_roster": "configs/blind_detection/blind_detection_v1_dev_roster_256.json",
   "embedding_order": [
     "existing_content_embed",
     "frozen_final_rgb_syncseal"
   ],
   "geometry_role": "coordinates_only_no_positive_vote",
   "production_geometry_backend": "cegwm.geometry_v7.syncseal.SyncSealTorchScript",
+  "root_key_env": "CEG_WM_ROOT_KEY",
   "method_id": "blind_detection_v1_single_image_geometry_direct",
   "preprocess_id": "ordinary_rgb_then_frozen_content_v9_branch_preprocessing_v1",
   "recovery": {

@@ -1,0 +1,8 @@
+{
+  "content_model_id": "stabilityai/stable-diffusion-3.5-medium",
+  "device": "cuda",
+  "syncseal_filename": "syncmodel.jit.pt",
+  "syncseal_url": "https://dl.fbaipublicfiles.com/wmar/syncseal/paper/syncmodel.jit.pt",
+  "weighted_joint_asset_path": "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json",
+  "weighted_joint_asset_producer_exact": "c38522dcab6cb173cedf8415cee2fd30998222ba"
+}

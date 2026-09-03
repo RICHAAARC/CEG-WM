@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from dataclasses import replace
-import hashlib
 import importlib
 import json
 import math
@@ -17,6 +17,7 @@ import sys
 from typing import Any, Iterable
 
 from PIL import Image
+import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -36,8 +37,17 @@ from cegwm.method.blind_detection import (  # noqa: E402
     load_threshold_asset,
     stable_json_bytes,
 )
-from cegwm.geometry_v7.syncseal import SyncSealTorchScript  # noqa: E402
-from cegwm.method.content_weighted_joint import load_calibration_asset  # noqa: E402
+from cegwm.geometry_v7.syncseal import (  # noqa: E402
+    SYNCSEAL_TORCHSCRIPT_URL,
+    SyncSealTorchScript,
+    download_official_syncseal_torchscript,
+)
+from cegwm.method.content_weighted_joint import (  # noqa: E402
+    HF_SCORER_ID,
+    WeightedJointAsset,
+    stable_json_bytes as weighted_stable_json_bytes,
+)
+from cegwm.protocol.content_chain import CONTENT_CHAIN_PUBLIC_KEY_DIGEST  # noqa: E402
 from cegwm.runtime.blind_detection import (  # noqa: E402
     BLIND_PREPROCESS_ID,
     BLIND_SCORER_ID,
@@ -47,22 +57,40 @@ from cegwm.runtime.blind_detection import (  # noqa: E402
     run_development_full_system_replay,
 )
 from cegwm.runtime.content_weighted_joint_sd35 import ContentCalibrationAssets  # noqa: E402
+from cegwm.runtime.diffusers_sd35 import run_sd35_plain  # noqa: E402
 from cegwm.runtime.observation import require_ordinary_rgb_image  # noqa: E402
 from cegwm.shared.keys import normalize_detection_key, public_key_digest  # noqa: E402
 
 
-CALIBRATION_RESULT_SCHEMA = "cegwm_blind_detection_v1_calibration_result_v1"
+CALIBRATION_RESULT_SCHEMA = "cegwm_blind_detection_v1_calibration_result_v2"
 CALIBRATION_CLAIM_CEILING = (
     "engineering_N_dev_256_threshold_calibration_only; science_denominator=0; "
     "not_fixed_FPR_production_reliability_or_paper_evidence"
 )
 CONTENT_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+ROSTER_REPO_PATH = Path(
+    "configs/blind_detection/blind_detection_v1_dev_roster_256.json"
+)
+COLAB_ASSETS_REPO_PATH = Path(
+    "configs/blind_detection/blind_detection_v1_colab_assets.json"
+)
 WEIGHTED_ASSET_REPO_PATH = Path(
     "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
 )
-WEIGHTED_ASSET_SIDECAR_REPO_PATH = Path(
-    "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256"
+WEIGHTED_ASSET_PRODUCER_EXACT = "c38522dcab6cb173cedf8415cee2fd30998222ba"
+ROOT_KEY_ENV = "CEG_WM_ROOT_KEY"
+HF_TOKEN_ENV = "HF_TOKEN"
+_PROMPT_SOURCES = (
+    (
+        "content_v6_iss_development_v1",
+        "configs/content_chain/content_v6_iss_development_v1.jsonl",
+    ),
+    (
+        "content_v9_calibration_v1",
+        "configs/content_chain/content_v9_calibration_v1.jsonl",
+    ),
 )
+_DEVELOPMENT_SEEDS = (2026101000, 2026101001, 2026101002, 2026101003)
 
 
 def _read_json(path: str | Path) -> Any:
@@ -70,123 +98,292 @@ def _read_json(path: str | Path) -> Any:
         return json.load(source)
 
 
-def _sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+@dataclass(frozen=True, slots=True)
+class BlindGenerationUnit:
+    calibration_unit: BlindCalibrationUnit
+    prompt: str
+    seed: int
+    height: int
+    width: int
+
+
+def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
+    rows = []
+    with path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(source, 1):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"prompt source line {line_number} is not JSON") from error
+            if not isinstance(row, dict):
+                raise ValueError(f"prompt source line {line_number} must be an object")
+            rows.append(row)
+    return tuple(rows)
 
 
 def load_roster_inputs(
-    path: str | Path,
-) -> tuple[BlindCalibrationRoster, dict[str, str], str]:
-    """Validate and summarize the frozen roster before any scoring occurs."""
+    repo_root: str | Path = REPO_ROOT,
+) -> tuple[BlindCalibrationRoster, tuple[BlindGenerationUnit, ...], dict[str, Any]]:
+    """Expand the committed seed-major 64-prompt by four-seed roster."""
 
-    payload = _read_json(path)
-    required = {"disjoint_evidence", "disjoint_from", "units"}
-    if not isinstance(payload, dict) or set(payload) != required:
-        raise ValueError("blind development roster fields differ")
-    evidence = payload["disjoint_evidence"]
-    if not isinstance(evidence, dict) or set(evidence) != set(BLIND_DEV_DISJOINT_FROM):
-        raise ValueError("blind development disjointness evidence fields differ")
-    if any(not isinstance(evidence[name], str) or not evidence[name] for name in evidence):
-        raise ValueError("blind development disjointness evidence must be nonempty")
-    units = tuple(BlindCalibrationUnit(**unit) for unit in payload["units"])
-    roster = BlindCalibrationRoster(units, tuple(payload["disjoint_from"]))
-    if len({unit.image_ref for unit in roster.units}) != BLIND_DEV_DENOMINATOR:
-        raise ValueError("blind development image references must be unique")
-    return roster, dict(evidence), _sha256_file(path)
-
-
-def load_roster(path: str | Path) -> BlindCalibrationRoster:
-    return load_roster_inputs(path)[0]
-
-
-def _current_rgb_digest(image: Image.Image) -> str:
-    current = require_ordinary_rgb_image(image)
-    framed = (
-        b"CEG-WM/blind-current-rgb/v1\0"
-        + current.width.to_bytes(8, "big")
-        + current.height.to_bytes(8, "big")
-        + current.tobytes()
-    )
-    return hashlib.sha256(framed).hexdigest()
-
-
-def validate_unique_current_images(
-    roster: BlindCalibrationRoster, image_loader
-) -> dict[str, Image.Image]:
-    """Load and validate all 256 physical RGBs before the first score."""
-
-    if not callable(image_loader):
-        raise TypeError("roster image loader must be callable")
-    cached: dict[str, Image.Image] = {}
-    digest_owner: dict[str, str] = {}
-    for index, unit in enumerate(roster.units):
-        try:
-            current = require_ordinary_rgb_image(image_loader(unit.image_ref))
-        except Exception as error:
-            raise RuntimeError(
-                f"roster_image_validation[{index}]:{type(error).__name__}: {error}"
-            ) from error
-        digest = _current_rgb_digest(current)
-        if digest in digest_owner:
-            raise ValueError(
-                "blind development physical RGB is duplicated: "
-                f"unit {unit.unit_id} matches {digest_owner[digest]}"
-            )
-        digest_owner[digest] = unit.unit_id
-        cached[unit.image_ref] = current.copy()
-    if len(cached) != BLIND_DEV_DENOMINATOR:
-        raise RuntimeError("blind development physical image cache denominator differs")
-    return cached
-
-
-def load_runtime_config(path: str | Path) -> tuple[dict[str, str], str]:
-    payload = _read_json(path)
+    root = Path(repo_root)
+    payload = _read_json(root / ROSTER_REPO_PATH)
     required = {
-        "content_model_id", "device", "syncseal_checkpoint",
-        "syncseal_checkpoint_sha256",
+        "denominator",
+        "dimensions",
+        "disjoint_from",
+        "exclusive_reservation",
+        "geometry_v7_pair_sources",
+        "ordering",
+        "prompt_sources",
+        "seeds",
     }
     if not isinstance(payload, dict) or set(payload) != required:
-        raise ValueError("blind calibration runtime config fields differ")
-    if payload["content_model_id"] != CONTENT_MODEL_ID or payload["device"] != "cuda":
-        raise ValueError("blind calibration frozen model or device identity differs")
-    checkpoint = payload["syncseal_checkpoint"]
-    checkpoint_sha256 = payload["syncseal_checkpoint_sha256"]
-    if not isinstance(checkpoint, str) or not checkpoint or not Path(checkpoint).is_absolute():
-        raise ValueError("SyncSeal checkpoint path must be absolute and nonempty")
-    if (
-        not isinstance(checkpoint_sha256, str)
-        or len(checkpoint_sha256) != 64
-        or any(character not in "0123456789abcdef" for character in checkpoint_sha256)
-    ):
-        raise ValueError("SyncSeal checkpoint SHA-256 must be lowercase 64-hex")
-    return dict(payload), _sha256_file(path)
+        raise ValueError("blind development roster fields differ")
+    if payload["denominator"] != BLIND_DEV_DENOMINATOR:
+        raise ValueError("blind development denominator differs")
+    if payload["dimensions"] != {"height": 512, "width": 512}:
+        raise ValueError("blind development dimensions differ")
+    if tuple(payload["disjoint_from"]) != BLIND_DEV_DISJOINT_FROM:
+        raise ValueError("blind development disjointness declaration differs")
+    if payload["exclusive_reservation"] != "blind_detection_v1_development_only":
+        raise ValueError("blind development exclusive reservation differs")
+    expected_geometry_sources = (
+        {
+            "path": "configs/content_chain/content_adaptive_dual_branch_v2_clean.jsonl",
+            "selection": "first_4_in_source_order",
+        },
+        {
+            "path": "configs/content_chain/content_v6_iss_clean.jsonl",
+            "selection": "all_in_source_order",
+        },
+    )
+    if tuple(payload["geometry_v7_pair_sources"]) != expected_geometry_sources:
+        raise ValueError("blind development Geometry-V7 exclusions differ")
+    if payload["ordering"] != "seed_major_then_prompt_source_then_source_order":
+        raise ValueError("blind development ordering differs")
+    if tuple(payload["seeds"]) != _DEVELOPMENT_SEEDS:
+        raise ValueError("blind development seed set differs")
+    expected_sources = tuple(
+        {"expected_count": 32, "source_id": source_id, "path": path}
+        for source_id, path in _PROMPT_SOURCES
+    )
+    if tuple(payload["prompt_sources"]) != expected_sources:
+        raise ValueError("blind development prompt sources differ")
+
+    prompt_rows: list[tuple[str, int, dict[str, Any]]] = []
+    prompt_identities: set[tuple[str, str]] = set()
+    prompt_texts: set[str] = set()
+    for source_id, relative_path in _PROMPT_SOURCES:
+        rows = _read_jsonl(root / relative_path)
+        if len(rows) != 32:
+            raise ValueError(f"blind prompt source {source_id} must contain exactly 32 rows")
+        for ordinal, row in enumerate(rows, 1):
+            required_row = {"height", "prompt", "seed", "source_id", "split", "unit_id", "width"}
+            if set(row) != required_row:
+                raise ValueError(f"blind prompt source {source_id} row fields differ")
+            if (
+                not isinstance(row["prompt"], str)
+                or not row["prompt"].strip()
+                or not isinstance(row["source_id"], str)
+                or not row["source_id"]
+                or row["height"] != 512
+                or row["width"] != 512
+            ):
+                raise ValueError(f"blind prompt source {source_id} row {ordinal} differs")
+            identity = (source_id, row["source_id"])
+            if identity in prompt_identities or row["prompt"] in prompt_texts:
+                raise ValueError("blind development prompt identities must be unique")
+            prompt_identities.add(identity)
+            prompt_texts.add(row["prompt"])
+            prompt_rows.append((source_id, ordinal, row))
+
+    expanded: list[BlindGenerationUnit] = []
+    for seed_index, seed in enumerate(_DEVELOPMENT_SEEDS, 1):
+        for source_id, source_ordinal, row in prompt_rows:
+            stratum = f"seed_{seed_index:02d}__{source_id}"
+            base_id = f"{source_id}:{row['source_id']}:seed={seed}"
+            unit_id = f"blind-dev-{seed_index:02d}-{source_id}-{source_ordinal:04d}"
+            image_ref = f"generated://{base_id}"
+            expanded.append(
+                BlindGenerationUnit(
+                    BlindCalibrationUnit(unit_id, stratum, image_ref, base_id),
+                    row["prompt"], seed, 512, 512,
+                )
+            )
+    roster = BlindCalibrationRoster(
+        tuple(unit.calibration_unit for unit in expanded),
+        tuple(payload["disjoint_from"]),
+    )
+    if len(expanded) != BLIND_DEV_DENOMINATOR:
+        raise RuntimeError("blind development roster expansion differs")
+    if len({unit.calibration_unit.image_ref for unit in expanded}) != BLIND_DEV_DENOMINATOR:
+        raise ValueError("blind development logical image references must be unique")
+    occupied_geometry_pairs: set[tuple[str, int]] = set()
+    for descriptor in expected_geometry_sources:
+        rows = _read_jsonl(root / descriptor["path"])
+        selected = rows[:4] if descriptor["selection"] == "first_4_in_source_order" else rows
+        for row in selected:
+            prompt = row.get("prompt")
+            seed = row.get("seed")
+            if not isinstance(prompt, str) or not isinstance(seed, int) or isinstance(seed, bool):
+                raise ValueError("Geometry-V7 exclusion pair fields differ")
+            occupied_geometry_pairs.add((prompt, seed))
+    development_pairs = {(unit.prompt, unit.seed) for unit in expanded}
+    if len(development_pairs) != BLIND_DEV_DENOMINATOR:
+        raise ValueError("blind development prompt-seed pairs must be unique")
+    if development_pairs & occupied_geometry_pairs:
+        raise ValueError("blind development overlaps Geometry-V7 prompt-seed pairs")
+    summary = {
+        "denominator": BLIND_DEV_DENOMINATOR,
+        "dimensions": dict(payload["dimensions"]),
+        "disjoint_from": list(payload["disjoint_from"]),
+        "exclusive_reservation": payload["exclusive_reservation"],
+        "geometry_v7_excluded_pair_count": len(occupied_geometry_pairs),
+        "ordering": payload["ordering"],
+        "prompt_sources": list(payload["prompt_sources"]),
+        "seeds": list(payload["seeds"]),
+        "source_strata": dict(
+            sorted(Counter(unit.calibration_unit.source_stratum for unit in expanded).items())
+        ),
+    }
+    return roster, tuple(expanded), summary
+
+
+def load_roster(repo_root: str | Path = REPO_ROOT) -> BlindCalibrationRoster:
+    return load_roster_inputs(repo_root)[0]
+
+
+def load_runtime_config(repo_root: str | Path = REPO_ROOT) -> dict[str, str]:
+    payload = _read_json(Path(repo_root) / COLAB_ASSETS_REPO_PATH)
+    required = {
+        "content_model_id",
+        "device",
+        "syncseal_filename",
+        "syncseal_url",
+        "weighted_joint_asset_path",
+        "weighted_joint_asset_producer_exact",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError("blind calibration asset configuration fields differ")
+    expected = {
+        "content_model_id": CONTENT_MODEL_ID,
+        "device": "cuda",
+        "syncseal_filename": "syncmodel.jit.pt",
+        "syncseal_url": SYNCSEAL_TORCHSCRIPT_URL,
+        "weighted_joint_asset_path": str(WEIGHTED_ASSET_REPO_PATH),
+        "weighted_joint_asset_producer_exact": WEIGHTED_ASSET_PRODUCER_EXACT,
+    }
+    if payload != expected:
+        raise ValueError("blind calibration asset configuration differs")
+    return dict(payload)
+
+
+def load_weighted_asset_semantic(repo_root: str | Path) -> WeightedJointAsset:
+    """Load the Git-bound weighted asset without a sidecar/hash integrity gate."""
+
+    payload = _read_json(Path(repo_root) / WEIGHTED_ASSET_REPO_PATH)
+    if not isinstance(payload, dict):
+        raise ValueError("weighted-joint asset must be a JSON object")
+    expected_semantics = {
+        "asset_role_id": "content_v9_calibrated_weighted_joint_v1",
+        "hf_scorer_id": HF_SCORER_ID,
+        "hf_weight_be_hex": "3fe8000000000000",
+        "joint_formula": (
+            "J=(0.25*z_lf+0.75*z_hf)/sqrt(0.25^2+0.75^2+2*0.25*0.75*rho)"
+        ),
+        "lf_scorer_id": "content_v4_whitened_lf_dct_matched_cosine_v1",
+        "lf_weight_be_hex": "3fd0000000000000",
+        "method_id": "content_v9_v6_calibrated_weighted_joint_v1",
+        "producer_exact": WEIGHTED_ASSET_PRODUCER_EXACT,
+        "schema_version": "cegwm_content_v9_calibrated_weighted_joint_asset_v1",
+        "statistic_id": "binary64_fsum_mean_ddof1_std_pearson_rho_v1",
+        "value_dtype": "IEEE-754_binary64_big_endian_hex",
+    }
+    if any(payload.get(name) != value for name, value in expected_semantics.items()):
+        raise ValueError("weighted-joint semantic identity differs")
+    asset = WeightedJointAsset(dict(payload), weighted_stable_json_bytes(payload))
+    fit = asset.fit
+    if not all(math.isfinite(value) for value in (
+        fit.mu_lf, fit.sigma_lf, fit.mu_hf, fit.sigma_hf, fit.rho,
+    )) or fit.sigma_lf <= 0.0 or fit.sigma_hf <= 0.0 or not -1.0 <= fit.rho <= 1.0:
+        raise ValueError("weighted-joint calibration fit differs")
+    return asset
 
 
 def build_production_runtime(
-    repo_root: Path, config: dict[str, str], *, hf_token: str
-) -> BlindProductionAssets:
-    """Construct the real typed detector through existing repository loaders."""
+    repo_root: Path,
+    config: dict[str, str],
+    *,
+    hf_token: str,
+    runtime_root: Path,
+) -> tuple[Any, BlindProductionAssets]:
+    """Construct the real typed detector and fresh official SyncSeal download."""
 
     if not isinstance(hf_token, str) or not hf_token.strip():
-        raise RuntimeError("HF_TOKEN is required to load frozen public content assets")
+        raise RuntimeError("HF_TOKEN is required to load public content assets")
     from experiments import content_iss_engine
 
-    _, content_runner_assets = content_iss_engine._load_pipeline_and_assets(
+    pipeline, content_runner_assets = content_iss_engine._load_pipeline_and_assets(
         config["content_model_id"], hf_token
     )
     content_assets = ContentCalibrationAssets(content_runner_assets.evaluation_assets)
-    weighted_path = repo_root / WEIGHTED_ASSET_REPO_PATH
-    weighted_sidecar = repo_root / WEIGHTED_ASSET_SIDECAR_REPO_PATH
-    weighted_asset = load_calibration_asset(weighted_path, weighted_sidecar)
-    checkpoint = Path(config["syncseal_checkpoint"])
-    if _sha256_file(checkpoint) != config["syncseal_checkpoint_sha256"]:
-        raise ValueError("SyncSeal checkpoint SHA-256 differs")
+    weighted_asset = load_weighted_asset_semantic(repo_root)
+    checkpoint = runtime_root / config["syncseal_filename"]
+    download_official_syncseal_torchscript(checkpoint)
+    if not checkpoint.is_file() or checkpoint.stat().st_size <= 0:
+        raise RuntimeError("official SyncSeal checkpoint download is empty")
     geometry = SyncSealTorchScript.from_file(checkpoint, device=config["device"])
-    return BlindProductionAssets(content_assets, weighted_asset, geometry)
+    return pipeline, BlindProductionAssets(content_assets, weighted_asset, geometry)
+
+
+class GenerationBlocked(RuntimeError):
+    def __init__(self, records: Iterable[dict[str, Any]]) -> None:
+        self.records = tuple(records)
+        failures = sum(record["status"] != "GENERATED" for record in self.records)
+        super().__init__(f"{failures}/256 ordinary RGB generations failed")
+
+
+def generate_development_images(
+    generation_units: Iterable[BlindGenerationUnit],
+    pipeline: Any,
+    *,
+    device: str,
+) -> tuple[dict[str, Image.Image], tuple[dict[str, Any], ...]]:
+    """Generate every fixed unit once through callback-free ``run_sd35_plain``."""
+
+    images: dict[str, Image.Image] = {}
+    records: list[dict[str, Any]] = []
+    units = tuple(generation_units)
+    if len(units) != BLIND_DEV_DENOMINATOR:
+        raise ValueError("blind generation requires exactly 256 fixed units")
+    for index, unit in enumerate(units):
+        record = {
+            "error": None,
+            "roster_index": index,
+            "source_stratum": unit.calibration_unit.source_stratum,
+            "status": "OPERATIONAL_BLOCKED",
+            "unit_id": unit.calibration_unit.unit_id,
+        }
+        try:
+            generator = torch.Generator(device=device).manual_seed(unit.seed)
+            image = require_ordinary_rgb_image(
+                run_sd35_plain(
+                    pipeline,
+                    unit.prompt,
+                    height=unit.height,
+                    width=unit.width,
+                    generator=generator,
+                )
+            )
+            images[unit.calibration_unit.image_ref] = image.copy()
+            record["status"] = "GENERATED"
+        except Exception as error:
+            record["error"] = f"{type(error).__name__}: {error}"
+        records.append(record)
+    if len(images) != BLIND_DEV_DENOMINATOR:
+        raise GenerationBlocked(records)
+    return images, tuple(records)
 
 
 class ThresholdFreezeBlocked(RuntimeError):
@@ -288,7 +485,6 @@ def _calibration_rows_payload(rows) -> list[dict[str, Any]]:
         payload.append(
             {
                 "geometry_status": row.geometry_outcome,
-                "image_digest": row.image_digest,
                 "method_complete": row.method_complete,
                 "operational_error": row.operational_error,
                 "post_m_be_hex": (
@@ -309,7 +505,6 @@ def _calibration_rows_payload(rows) -> list[dict[str, Any]]:
 def _replay_rows_payload(rows) -> list[dict[str, Any]]:
     return [
         {
-            "image_digest": row.image_digest,
             "method_complete": row.method_complete,
             "operational_error": row.operational_error,
             "positive": row.positive,
@@ -331,21 +526,18 @@ def _replay_rows_payload(rows) -> list[dict[str, Any]]:
 
 def _input_summary(
     roster: BlindCalibrationRoster,
-    evidence: dict[str, str],
-    roster_file_sha256: str,
-    runtime_config_file_sha256: str,
+    roster_summary: dict[str, Any],
     key: bytes,
 ) -> dict[str, Any]:
     return {
         "calibration_key_digest": public_key_digest(key),
-        "disjoint_evidence_digest": hashlib.sha256(
-            stable_json_bytes(dict(sorted(evidence.items())))
-        ).hexdigest(),
         "disjoint_from": list(roster.disjoint_from),
-        "roster_digest": roster.digest,
-        "roster_file_sha256": roster_file_sha256,
-        "runtime_config_file_sha256": runtime_config_file_sha256,
-        "source_strata": dict(sorted(Counter(unit.source_stratum for unit in roster.units).items())),
+        "exclusive_reservation": roster_summary["exclusive_reservation"],
+        "ordering": roster_summary["ordering"],
+        "prompt_sources": roster_summary["prompt_sources"],
+        "roster_repo_path": str(ROSTER_REPO_PATH),
+        "seeds": roster_summary["seeds"],
+        "source_strata": roster_summary["source_strata"],
     }
 
 
@@ -360,14 +552,10 @@ def _config_summary(config: dict[str, str]) -> dict[str, Any]:
         "production_runtime_id": BLIND_PRODUCTION_RUNTIME_ID,
         "scorer_id": BLIND_SCORER_ID,
         "statistic_id": BLIND_STATISTIC_ID,
-        "syncseal_checkpoint": config["syncseal_checkpoint"],
-        "syncseal_checkpoint_sha256": config["syncseal_checkpoint_sha256"],
+        "syncseal_filename": config["syncseal_filename"],
+        "syncseal_url": config["syncseal_url"],
         "weighted_asset_repo_path": str(WEIGHTED_ASSET_REPO_PATH),
-        "weighted_asset_sha256": _sha256_file(REPO_ROOT / WEIGHTED_ASSET_REPO_PATH),
-        "weighted_asset_sidecar_repo_path": str(WEIGHTED_ASSET_SIDECAR_REPO_PATH),
-        "weighted_asset_sidecar_sha256": _sha256_file(
-            REPO_ROOT / WEIGHTED_ASSET_SIDECAR_REPO_PATH
-        ),
+        "weighted_asset_producer_exact": WEIGHTED_ASSET_PRODUCER_EXACT,
     }
 
 
@@ -383,20 +571,19 @@ def _base_calibration_result(*, producer_exact: str) -> dict[str, Any]:
         "fresh_replay_rows": [],
         "fresh_replay_zero_of_256": False,
         "frozen_tau_blind_be_hex": None,
+        "generation_records": [],
         "input_summary": None,
         "producer_exact": producer_exact,
         "schema_version": CALIBRATION_RESULT_SCHEMA,
         "science_denominator": 0,
+        "stage": "preflight",
         "status": "OPERATIONAL_BLOCKED",
         "threshold_candidate_ready": False,
-        "threshold_candidate_sha256": None,
     }
 
 
 def calibrate_and_record(
-    roster_path: str | Path,
-    key_path: str | Path,
-    runtime_config_path: str | Path,
+    runtime_root: str | Path,
     threshold_candidate_path: str | Path,
     result_output_path: str | Path,
     *,
@@ -410,51 +597,72 @@ def calibrate_and_record(
         raise FileExistsError("blind threshold candidate is create-only")
     if result_output.exists():
         raise FileExistsError("blind calibration result is create-only")
+    runtime_work = Path(runtime_root)
+    if runtime_work.exists():
+        raise FileExistsError("blind calibration runtime root is create-only")
     result = _base_calibration_result(producer_exact=producer_exact)
     rows = ()
     replay = ()
+    generation_records = ()
+    root_key = os.environ.pop(ROOT_KEY_ENV, "")
+    hf_token = os.environ.pop(HF_TOKEN_ENV, "")
+    key = b""
     try:
-        config, runtime_config_file_sha256 = load_runtime_config(runtime_config_path)
-        result["config_summary"] = _config_summary(config)
-        roster, evidence, roster_file_sha256 = load_roster_inputs(roster_path)
-        key = normalize_detection_key(Path(key_path).read_bytes())
-        result["input_summary"] = _input_summary(
-            roster, evidence, roster_file_sha256, runtime_config_file_sha256, key
-        )
         _verify_producer_checkout(producer_exact)
-
-        def disk_image_loader(image_ref: str) -> Image.Image:
-            with Image.open(image_ref) as opened:
-                return opened.copy()
-
-        cached_images = validate_unique_current_images(roster, disk_image_loader)
-        public_assets = build_production_runtime(
-            REPO_ROOT, config, hf_token=os.environ.get("HF_TOKEN", "")
+        result["stage"] = "committed_inputs"
+        config = load_runtime_config(REPO_ROOT)
+        result["config_summary"] = _config_summary(config)
+        roster, generation_units, roster_summary = load_roster_inputs(REPO_ROOT)
+        result["stage"] = "secret_binding"
+        if not isinstance(root_key, str) or not root_key.strip():
+            raise RuntimeError("CEG_WM_ROOT_KEY is required")
+        if not isinstance(hf_token, str) or not hf_token.strip():
+            raise RuntimeError("HF_TOKEN is required")
+        key = normalize_detection_key(root_key)
+        root_key = ""
+        if public_key_digest(key) != CONTENT_CHAIN_PUBLIC_KEY_DIGEST:
+            raise RuntimeError("content chain public key identity differs")
+        result["input_summary"] = _input_summary(roster, roster_summary, key)
+        result["stage"] = "runtime_construction"
+        runtime_work.mkdir(parents=True, exist_ok=False)
+        pipeline, public_assets = build_production_runtime(
+            REPO_ROOT,
+            config,
+            hf_token=hf_token,
+            runtime_root=runtime_work,
+        )
+        hf_token = ""
+        result["stage"] = "ordinary_rgb_generation"
+        cached_images, generation_records = generate_development_images(
+            generation_units, pipeline, device=config["device"]
         )
 
         def calibration_image_loader(image_ref: str) -> Image.Image:
             return cached_images[image_ref].copy()
 
+        result["stage"] = "calibration_and_replay"
         rows, replay, asset = evaluate_threshold_with_runtime(
             roster,
             key,
             public_assets,
             calibration_image_loader,
             producer_exact=producer_exact,
-            replay_image_loader=disk_image_loader,
         )
         result["candidate_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
         result["frozen_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
         result["fresh_replay_false_positives"] = 0
         result["fresh_replay_zero_of_256"] = True
+        result["stage"] = "threshold_candidate_write"
         threshold_candidate.parent.mkdir(parents=True, exist_ok=True)
         with threshold_candidate.open("xb") as sink:
             sink.write(asset.json_bytes)
-        if _sha256_file(threshold_candidate) != hashlib.sha256(asset.json_bytes).hexdigest():
-            raise RuntimeError("threshold candidate durable readback differs")
         result["status"] = "CALIBRATION_COMPLETE_THRESHOLD_CANDIDATE_READY"
-        result["threshold_candidate_sha256"] = hashlib.sha256(asset.json_bytes).hexdigest()
+        result["stage"] = "terminal"
         result["threshold_candidate_ready"] = True
+    except GenerationBlocked as blocked:
+        generation_records = blocked.records
+        result["status"] = "OPERATIONAL_BLOCKED"
+        result["error"] = str(blocked)
     except ThresholdFreezeBlocked as blocked:
         rows = blocked.calibration_rows
         replay = blocked.replay_rows
@@ -472,8 +680,13 @@ def calibrate_and_record(
     except Exception as error:
         result["status"] = "OPERATIONAL_BLOCKED"
         result["error"] = f"{type(error).__name__}: {error}"
+    finally:
+        root_key = ""
+        hf_token = ""
+        key = b""
     result["calibration_rows"] = _calibration_rows_payload(rows)
     result["fresh_replay_rows"] = _replay_rows_payload(replay)
+    result["generation_records"] = list(generation_records)
     result_output.parent.mkdir(parents=True, exist_ok=True)
     with result_output.open("xb") as sink:
         sink.write(stable_json_bytes(result))
@@ -645,10 +858,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     freeze = sub.add_parser("calibrate-and-freeze")
-    freeze.add_argument("--roster", required=True)
-    freeze.add_argument("--key-file", required=True)
-    freeze.add_argument("--runtime-config", required=True)
     freeze.add_argument("--producer-exact", required=True)
+    freeze.add_argument("--runtime-root", required=True)
     freeze.add_argument("--candidate-output", required=True)
     freeze.add_argument("--result-output", required=True)
     diagnose = sub.add_parser("diagnose-existing")
@@ -666,9 +877,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "calibrate-and-freeze":
         result, threshold, status = calibrate_and_record(
-            args.roster,
-            args.key_file,
-            args.runtime_config,
+            args.runtime_root,
             args.candidate_output,
             args.result_output,
             producer_exact=args.producer_exact,

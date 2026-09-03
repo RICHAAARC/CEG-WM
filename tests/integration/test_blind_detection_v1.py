@@ -104,34 +104,6 @@ def _roster() -> BlindCalibrationRoster:
     )
 
 
-def _roster_json() -> dict:
-    return {
-        "disjoint_evidence": {
-            name: f"predeclared-evidence-{index}"
-            for index, name in enumerate(BLIND_DEV_DISJOINT_FROM)
-        },
-        "disjoint_from": list(BLIND_DEV_DISJOINT_FROM),
-        "units": [
-            {
-                "base_image_id": f"base-{index}",
-                "image_ref": f"ref-{index}",
-                "source_stratum": f"s-{index % 2}",
-                "unit_id": f"u-{index}",
-            }
-            for index in range(256)
-        ],
-    }
-
-
-def _runtime_config_json() -> dict:
-    return {
-        "content_model_id": "stabilityai/stable-diffusion-3.5-medium",
-        "device": "cuda",
-        "syncseal_checkpoint": "/content/drive/MyDrive/CEG-WM/public/syncmodel.jit.pt",
-        "syncseal_checkpoint_sha256": "c" * 64,
-    }
-
-
 def test_direct_positive_strictly_exceeds_tau_and_short_circuits_geometry(monkeypatch) -> None:
     backend = GeometryBackend(_geometry())
     seen = _install_scores(monkeypatch, [1.01])
@@ -392,59 +364,42 @@ def test_replay_time_operational_failure_and_false_positive_block_asset(
     assert not output.exists()
 
 
-def test_calibration_roster_freezes_physical_identity_and_retains_preflight_failure(
+def test_calibration_roster_freezes_logical_cross_product_and_retains_preflight_failure(
     monkeypatch, tmp_path: Path
 ) -> None:
-    roster_path = tmp_path / "roster.json"
-    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
-    roster, evidence, file_digest = runner.load_roster_inputs(roster_path)
-    assert len(roster.units) == 256 and tuple(evidence) == BLIND_DEV_DISJOINT_FROM
-    assert len(file_digest) == 64
-    with pytest.raises(ValueError, match="physical RGB is duplicated"):
-        runner.validate_unique_current_images(
-            roster, lambda image_ref: Image.new("RGB", (512, 512), "white")
-        )
+    root = Path(__file__).resolve().parents[2]
+    roster, generation_units, summary = runner.load_roster_inputs(root)
+    assert len(roster.units) == len(generation_units) == 256
+    assert roster.disjoint_from == BLIND_DEV_DISJOINT_FROM
+    assert summary["seeds"] == [2026101000, 2026101001, 2026101002, 2026101003]
+    assert summary["geometry_v7_excluded_pair_count"] == 12
+    assert set(summary["source_strata"].values()) == {32}
+    assert len(summary["source_strata"]) == 8
+    assert len({unit.calibration_unit.base_image_id for unit in generation_units}) == 256
+    assert len({(unit.prompt, unit.seed) for unit in generation_units}) == 256
 
-    invalid = _roster_json()
-    invalid["units"][1]["image_ref"] = invalid["units"][0]["image_ref"]
-    roster_path.write_text(json.dumps(invalid), encoding="utf-8")
-    with pytest.raises(ValueError, match="image references must be unique"):
-        runner.load_roster_inputs(roster_path)
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
-    key_path = tmp_path / "key.bin"
-    key_path.write_bytes(KEY.encode())
-    result_path = tmp_path / "duplicate-result.json"
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    monkeypatch.setattr(
+        runner, "load_roster_inputs", lambda root: (_ for _ in ()).throw(
+            ValueError("blind development logical image references must be unique")
+        ),
+    )
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, KEY)
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "test-token")
+    result_path = tmp_path / "preflight-result.json"
     _, candidate, status = runner.calibrate_and_record(
-        roster_path, key_path, config_path, tmp_path / "candidate.json", result_path,
+        tmp_path / "runtime", tmp_path / "candidate.json", result_path,
         producer_exact="d" * 40,
     )
     assert candidate is None and status == "OPERATIONAL_BLOCKED"
-    assert "image references must be unique" in json.loads(
+    assert "logical image references must be unique" in json.loads(
         result_path.read_text(encoding="ascii")
     )["error"]
-
-    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
-    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
-    result_path = tmp_path / "io-result.json"
-    _, candidate, status = runner.calibrate_and_record(
-        roster_path, key_path, config_path, tmp_path / "io-candidate.json", result_path,
-        producer_exact="d" * 40,
-    )
-    retained = json.loads(result_path.read_text(encoding="ascii"))
-    assert candidate is None and status == "OPERATIONAL_BLOCKED"
-    assert "roster_image_validation[0]" in retained["error"]
 
 
 def test_formal_calibration_retains_complete_method_failure_without_threshold(
     monkeypatch, tmp_path: Path
 ) -> None:
-    roster_path = tmp_path / "roster.json"
-    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
-    key_path = tmp_path / "key.bin"
-    key_path.write_bytes(KEY.encode())
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
     rows = tuple(
         BlindCalibrationRow(
             index, f"u-{index}", f"s-{index % 2}", "a" * 64,
@@ -463,14 +418,30 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
     )
     monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
     monkeypatch.setattr(
-        runner, "validate_unique_current_images",
-        lambda roster, loader: {
-            unit.image_ref: Image.new("RGB", (512, 512)) for unit in roster.units
-        },
+        runner, "public_key_digest", lambda key: runner.CONTENT_CHAIN_PUBLIC_KEY_DIGEST,
     )
     monkeypatch.setattr(
         runner, "build_production_runtime",
-        lambda root, config, hf_token: _production_assets(),
+        lambda root, config, hf_token, runtime_root: (object(), _production_assets()),
+    )
+    monkeypatch.setattr(
+        runner, "generate_development_images",
+        lambda units, pipeline, device: (
+            {
+                unit.calibration_unit.image_ref: Image.new("RGB", (512, 512))
+                for unit in units
+            },
+            tuple(
+                {
+                    "error": None,
+                    "roster_index": index,
+                    "source_stratum": unit.calibration_unit.source_stratum,
+                    "status": "GENERATED",
+                    "unit_id": unit.calibration_unit.unit_id,
+                }
+                for index, unit in enumerate(units)
+            ),
+        ),
     )
 
     def fail(*args, **kwargs):
@@ -481,10 +452,12 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
         )
 
     monkeypatch.setattr(runner, "evaluate_threshold_with_runtime", fail)
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, KEY)
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "test-token")
     result_path = tmp_path / "calibration_result.json"
     threshold_path = tmp_path / "threshold.json"
     result, threshold, status = runner.calibrate_and_record(
-        roster_path, key_path, config_path, threshold_path, result_path,
+        tmp_path / "runtime", threshold_path, result_path,
         producer_exact="f" * 40,
     )
     assert result == result_path and threshold is None and status == "METHOD_FAILED"
@@ -497,22 +470,17 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
     assert payload["candidate_tau_blind_be_hex"] is not None
     assert payload["frozen_tau_blind_be_hex"] is None
     assert payload["threshold_candidate_ready"] is False
+    assert len(payload["generation_records"]) == 256
     with pytest.raises(FileExistsError, match="result is create-only"):
         runner.calibrate_and_record(
-            roster_path, key_path, config_path, threshold_path, result_path,
+            tmp_path / "other-runtime", threshold_path, result_path,
             producer_exact="f" * 40,
         )
 
 
-def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
+def test_formal_calibration_success_retains_rows_replay_and_threshold(
     monkeypatch, tmp_path: Path
 ) -> None:
-    roster_path = tmp_path / "roster.json"
-    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
-    key_path = tmp_path / "key.bin"
-    key_path.write_bytes(KEY.encode())
-    config_path = tmp_path / "config.json"
-    config_path.write_text(json.dumps(_runtime_config_json()), encoding="utf-8")
     rows = tuple(
         BlindCalibrationRow(
             index, f"u-{index}", f"s-{index % 2}", "b" * 64,
@@ -533,23 +501,41 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
     )
     monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
     monkeypatch.setattr(
-        runner, "validate_unique_current_images",
-        lambda roster, loader: {
-            unit.image_ref: Image.new("RGB", (512, 512)) for unit in roster.units
-        },
+        runner, "public_key_digest", lambda key: runner.CONTENT_CHAIN_PUBLIC_KEY_DIGEST,
     )
     monkeypatch.setattr(
         runner, "build_production_runtime",
-        lambda root, config, hf_token: _production_assets(),
+        lambda root, config, hf_token, runtime_root: (object(), _production_assets()),
+    )
+    monkeypatch.setattr(
+        runner, "generate_development_images",
+        lambda units, pipeline, device: (
+            {
+                unit.calibration_unit.image_ref: Image.new("RGB", (512, 512))
+                for unit in units
+            },
+            tuple(
+                {
+                    "error": None,
+                    "roster_index": index,
+                    "source_stratum": unit.calibration_unit.source_stratum,
+                    "status": "GENERATED",
+                    "unit_id": unit.calibration_unit.unit_id,
+                }
+                for index, unit in enumerate(units)
+            ),
+        ),
     )
     monkeypatch.setattr(
         runner, "evaluate_threshold_with_runtime",
         lambda *args, **kwargs: (rows, replay, asset),
     )
+    monkeypatch.setenv(runner.ROOT_KEY_ENV, KEY)
+    monkeypatch.setenv(runner.HF_TOKEN_ENV, "test-token")
     result_path = tmp_path / "calibration_result.json"
     threshold_path = tmp_path / "threshold.json"
     result, threshold, status = runner.calibrate_and_record(
-        roster_path, key_path, config_path, threshold_path, result_path,
+        tmp_path / "runtime", threshold_path, result_path,
         producer_exact="e" * 40,
     )
     assert (result, threshold) == (result_path, threshold_path)
@@ -559,14 +545,14 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
     assert payload["fresh_replay_false_positives"] == 0
     assert payload["candidate_tau_blind_be_hex"] == payload["frozen_tau_blind_be_hex"]
     assert payload["threshold_candidate_ready"] is True
-    assert payload["threshold_candidate_sha256"] == runner.hashlib.sha256(
-        threshold_path.read_bytes()
-    ).hexdigest()
+    assert len(payload["generation_records"]) == 256
+    assert "threshold_candidate_sha256" not in payload
     runner_source = (
         Path(__file__).resolve().parents[2] / "experiments/run_blind_detection_v1.py"
     ).read_text()
     assert "ContentCalibrationAssets(content_runner_assets.evaluation_assets)" in runner_source
-    assert "load_calibration_asset(weighted_path, weighted_sidecar)" in runner_source
+    assert "load_weighted_asset_semantic(repo_root)" in runner_source
+    assert "download_official_syncseal_torchscript(checkpoint)" in runner_source
     assert "SyncSealTorchScript.from_file(checkpoint" in runner_source
 
 

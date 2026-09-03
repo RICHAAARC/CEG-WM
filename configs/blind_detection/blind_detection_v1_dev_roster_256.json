@@ -1,0 +1,42 @@
+{
+  "denominator": 256,
+  "dimensions": {
+    "height": 512,
+    "width": 512
+  },
+  "disjoint_from": [
+    "geometry_v7_development",
+    "future_paper_calibration",
+    "future_paper_test"
+  ],
+  "exclusive_reservation": "blind_detection_v1_development_only",
+  "geometry_v7_pair_sources": [
+    {
+      "path": "configs/content_chain/content_adaptive_dual_branch_v2_clean.jsonl",
+      "selection": "first_4_in_source_order"
+    },
+    {
+      "path": "configs/content_chain/content_v6_iss_clean.jsonl",
+      "selection": "all_in_source_order"
+    }
+  ],
+  "ordering": "seed_major_then_prompt_source_then_source_order",
+  "prompt_sources": [
+    {
+      "expected_count": 32,
+      "source_id": "content_v6_iss_development_v1",
+      "path": "configs/content_chain/content_v6_iss_development_v1.jsonl"
+    },
+    {
+      "expected_count": 32,
+      "source_id": "content_v9_calibration_v1",
+      "path": "configs/content_chain/content_v9_calibration_v1.jsonl"
+    }
+  ],
+  "seeds": [
+    2026101000,
+    2026101001,
+    2026101002,
+    2026101003
+  ]
+}
