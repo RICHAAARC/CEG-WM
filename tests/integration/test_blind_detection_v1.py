@@ -652,28 +652,34 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
     assert "force_remount" not in source
-    assert "6b08bc8cff5158c8cfced7668249d01e9892e043" in source
+    assert "686b21e7e7d0358ca5a7dff78ac781b538087e35" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
     assert "status', '--porcelain=v1'" in source
-    assert "development-roster-256.json" in source
-    assert "load_roster_inputs(ROSTER)" in source
-    assert "config_file_sha256" in source and "key_public_digest" in source
-    assert "CALIBRATION_RUNNER_CALLS += 1" in source
+    assert "r.load_roster_inputs(r.REPO_ROOT); r.load_runtime_config(r.REPO_ROOT)" in source
+    assert source.count("userdata.get(") == 2
+    assert "userdata.get('CEG_WM_ROOT_KEY')" in source
+    assert "userdata.get('HF_TOKEN')" in source
+    assert "BLIND_CALIBRATION_RUNNER_CALLS += 1" in source
     assert source.count("'calibrate-and-freeze'") == 1
-    assert "'--runtime-config', str(CONFIG_FILE)" in source
+    assert "'--runtime-root', str(RUNTIME_ROOT)" in source
     assert "runtime_factory" not in source
     assert "'--result-output', str(LOCAL_RESULT)" in source
-    assert "artifact_manifest.json" in source and "runner.stdout.txt" in source
+    assert "runner.stdout.txt" in source and "runner.stderr.txt" in source
+    assert "calibration_rows.json" in source and "fresh_replay_rows.json" in source
     assert "fresh_replay_zero_of_256" in source
-    assert "notebook_status.json" not in source
-    assert "'input_hashes': dict(INPUT_HASHES)" in source
-    assert "SyncSeal checkpoint identity differs" in source
-    assert source.index("publish_create_only(LOCAL_STDERR, DRIVE_STDERR)") < source.index(
-        "status='CALIBRATION_COMPLETE_THRESHOLD_PENDING_LAST'"
-    ) < source.index("with DRIVE_THRESHOLD.open('xb') as sink:")
-    assert "pending.unlink()" not in source and ".replace(DRIVE_THRESHOLD)" not in source
-    assert "for local, drive_path in" not in source
+    assert source.count("zipfile.ZipFile(TERMINAL_ZIP, mode='x'") == 1
+    assert "members.append(LOCAL_THRESHOLD)" in source
+    assert "if not terminal_published and BLIND_TERMINAL_ZIP_WRITES == 0" in source
+    for forbidden in (
+        "sha256", "hashlib", ".zip.sha256", "artifact_manifest", "receipt",
+        "signature", "INPUT_ROOT", "KEY_FILE", "CONFIG_FILE", "pending.unlink()",
+        ".replace(",
+    ):
+        assert forbidden not in source
     assert "blind_detection_v1_callback.ipynb" not in source
     assert "N_CALLBACK" not in source and "--manifest" not in source
     for forbidden in ("paired_null", "stored_h", "proxy_rgb", "truth_label"):
         assert forbidden not in source.lower()
+    final_source = "".join(code_cells[-1]["source"])
+    assert "mode='r'" in final_source and "archive.read('calibration_result.json')" in final_source
+    assert "subprocess" not in final_source and "archive.write" not in final_source
