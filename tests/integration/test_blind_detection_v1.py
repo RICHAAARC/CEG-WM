@@ -402,14 +402,14 @@ def test_formal_calibration_retains_complete_method_failure_without_threshold(
 ) -> None:
     rows = tuple(
         BlindCalibrationRow(
-            index, f"u-{index}", f"s-{index % 2}", "a" * 64,
-            0.0, None, "NO_H", True, None,
+            index, f"u-{index}", f"s-{index % 2}", 0.0, None,
+            "NO_H", True, None,
         )
         for index in range(256)
     )
     replay = tuple(
         BlindReplayRow(
-            index, f"u-{index}", f"s-{index % 2}", "a" * 64,
+            index, f"u-{index}", f"s-{index % 2}",
             1.0 if index == 0 else 0.0, None,
             "DIRECT_POSITIVE" if index == 0 else "GEOMETRY_NO_H",
             index == 0, False, True, None,
@@ -483,15 +483,15 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold(
 ) -> None:
     rows = tuple(
         BlindCalibrationRow(
-            index, f"u-{index}", f"s-{index % 2}", "b" * 64,
-            0.0, None, "NO_H", True, None,
+            index, f"u-{index}", f"s-{index % 2}", 0.0, None,
+            "NO_H", True, None,
         )
         for index in range(256)
     )
     replay = tuple(
         BlindReplayRow(
-            index, f"u-{index}", f"s-{index % 2}", "b" * 64,
-            0.0, None, "GEOMETRY_NO_H", False, False, True, None,
+            index, f"u-{index}", f"s-{index % 2}", 0.0, None,
+            "GEOMETRY_NO_H", False, False, True, None,
         )
         for index in range(256)
     )

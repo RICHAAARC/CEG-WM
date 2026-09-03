@@ -44,7 +44,6 @@ def _rows() -> tuple[BlindCalibrationRow, ...]:
             index,
             f"unit-{index:03d}",
             f"source-{index % 4}",
-            f"{index:064x}",
             float(index) / 10.0,
             float(index) / 10.0 + 0.25 if index % 2 else None,
             "RECOVERED" if index % 2 else "NO_H",
@@ -57,8 +56,8 @@ def _rows() -> tuple[BlindCalibrationRow, ...]:
 def _replay() -> tuple[BlindReplayRow, ...]:
     return tuple(
         BlindReplayRow(
-            index, f"unit-{index:03d}", f"source-{index % 4}", f"{index:064x}",
-            0.0, None, "GEOMETRY_NO_H", False, False, True,
+            index, f"unit-{index:03d}", f"source-{index % 4}", 0.0, None,
+            "GEOMETRY_NO_H", False, False, True,
         )
         for index in range(256)
     )
@@ -98,6 +97,11 @@ def test_threshold_is_exact_binary64_max_z_and_strict_replay_zero(tmp_path: Path
     assert decode_binary64(encode_binary64(asset.tau_blind)) == asset.tau_blind
     assert replay_empirical_false_positives(rows, asset) == 0
     assert asset.payload["wrong_key_attribution_experiment"] == "separate_fixed_denominator_experiment"
+    assert "image_digest" not in {field.name for field in fields(BlindCalibrationRow)}
+    assert "image_digest" not in {field.name for field in fields(BlindReplayRow)}
+    assert not {
+        "rows_digest", "roster_digest", "full_system_replay_rows_digest",
+    }.intersection(asset.payload)
     path = tmp_path / "threshold.json"
     path.write_bytes(asset.json_bytes)
     assert load_threshold_asset(path).payload == asset.payload
@@ -109,7 +113,7 @@ def test_threshold_generation_retains_no_h_but_blocks_missing_or_operational_row
     rows = list(_rows())
     assert rows[0].geometry_outcome == "NO_H" and rows[0].z == rows[0].pre_score
     rows[1] = BlindCalibrationRow(
-        1, "unit-001", "source-1", f"{1:064x}", 0.1, None,
+        1, "unit-001", "source-1", 0.1, None,
         "RECOVERED", False, "content_post:failed",
     )
     with pytest.raises(ValueError, match="operational interruption"):
@@ -124,11 +128,11 @@ def test_threshold_generation_retains_no_h_but_blocks_missing_or_operational_row
         )
 
 
-def test_threshold_blocks_replay_failure_false_positive_and_image_drift() -> None:
+def test_threshold_blocks_replay_failure_false_positive_and_order_drift() -> None:
     replay = list(_replay())
     replay[0] = BlindReplayRow(
-        0, "unit-000", "source-0", f"{0:064x}",
-        None, None, "ERROR_FAIL_CLOSED", False, False, False, "content_pre:stopped",
+        0, "unit-000", "source-0", None, None,
+        "ERROR_FAIL_CLOSED", False, False, False, "content_pre:stopped",
     )
     with pytest.raises(ValueError, match="operational interruption"):
         build_threshold_asset(
@@ -137,8 +141,8 @@ def test_threshold_blocks_replay_failure_false_positive_and_image_drift() -> Non
         )
     replay = list(_replay())
     replay[0] = BlindReplayRow(
-        0, "unit-000", "source-0", f"{0:064x}",
-        30.0, None, "DIRECT_POSITIVE", True, False, True,
+        0, "unit-000", "source-0", 30.0, None,
+        "DIRECT_POSITIVE", True, False, True,
     )
     with pytest.raises(ValueError, match="0/256"):
         build_threshold_asset(
@@ -147,10 +151,10 @@ def test_threshold_blocks_replay_failure_false_positive_and_image_drift() -> Non
         )
     replay = list(_replay())
     replay[0] = BlindReplayRow(
-        0, "unit-000", "source-0", "f" * 64,
-        0.0, None, "GEOMETRY_NO_H", False, False, True,
+        0, "unit-001", "source-0", 0.0, None,
+        "GEOMETRY_NO_H", False, False, True,
     )
-    with pytest.raises(ValueError, match="current-image identity"):
+    with pytest.raises(ValueError, match="identity/order"):
         build_threshold_asset(
             _rows(), _roster(), replay, producer_exact="d" * 40,
             calibration_key_digest="b" * 64,

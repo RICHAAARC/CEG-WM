@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import math
 from typing import Any, Callable
 
@@ -126,17 +125,6 @@ def _finite(value: Any, name: str) -> float:
     if not math.isfinite(scalar):
         raise ValueError(f"{name} must be a finite real scalar")
     return scalar
-
-
-def _image_digest(image: Image.Image) -> str:
-    current = require_ordinary_rgb_image(image)
-    framed = (
-        b"CEG-WM/blind-current-rgb/v1\0"
-        + current.width.to_bytes(8, "big")
-        + current.height.to_bytes(8, "big")
-        + current.tobytes()
-    )
-    return hashlib.sha256(framed).hexdigest()
 
 
 def _score_current_rgb(
@@ -393,65 +381,64 @@ def _calibration_row(
 ) -> BlindCalibrationRow:
     try:
         current = require_ordinary_rgb_image(image)
-        image_digest = _image_digest(current)
         pre = _score_current_rgb(current, detection_key, assets).value
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, None, None, None,
+            roster_index, unit_id, source_stratum, None, None,
             "GEOMETRY_ERROR", False, f"content_pre:{type(error).__name__}: {error}",
         )
     try:
         geometry = assets.geometry_backend.detect_geometry(current)
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "GEOMETRY_ERROR", False, f"geometry_runtime:{type(error).__name__}: {error}",
         )
     if not isinstance(geometry, GeometryEstimate):
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "GEOMETRY_ERROR", False,
             "geometry_runtime:TypeError: detector must return GeometryEstimate",
         )
     disposition, geometry_error = _geometry_disposition(geometry)
     if disposition == "OPERATIONAL":
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "GEOMETRY_ERROR", False, geometry_error,
         )
     if disposition == "INVALID_H":
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "INVALID_H", True, None,
         )
     try:
         matrix = _raw_h(geometry)
     except LookupError:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "NO_H", True, None,
         )
     except (TypeError, ValueError):
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "INVALID_H", True, None,
         )
     try:
         recovered = rectify_attacked_rgb(current, matrix)
     except Exception:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "RECTIFICATION_ERROR", True, None,
         )
     try:
         post = _score_current_rgb(recovered, detection_key, assets).value
     except Exception as error:
         return BlindCalibrationRow(
-            roster_index, unit_id, source_stratum, image_digest, pre, None,
+            roster_index, unit_id, source_stratum, pre, None,
             "RECOVERED", False, f"content_post:{type(error).__name__}: {error}",
         )
     return BlindCalibrationRow(
-        roster_index, unit_id, source_stratum, image_digest, pre, post,
+        roster_index, unit_id, source_stratum, pre, post,
         "RECOVERED", True, None,
     )
 
@@ -485,7 +472,7 @@ def run_development_calibration(
         except Exception as error:
             rows.append(
                 BlindCalibrationRow(
-                    index, unit.unit_id, unit.source_stratum, None, None, None,
+                    index, unit.unit_id, unit.source_stratum, None, None,
                     "GEOMETRY_ERROR", False,
                     f"image_io:{type(error).__name__}: {error}",
                 )
@@ -521,11 +508,10 @@ def run_development_full_system_replay(
     for index, unit in enumerate(_frozen_units(roster)):
         try:
             current = require_ordinary_rgb_image(image_loader(unit.image_ref))
-            image_digest = _image_digest(current)
         except Exception as error:
             rows.append(
                 BlindReplayRow(
-                    index, unit.unit_id, unit.source_stratum, None, None, None,
+                    index, unit.unit_id, unit.source_stratum, None, None,
                     "ERROR_FAIL_CLOSED", False, False, False,
                     f"image_io:{type(error).__name__}: {error}",
                 )
@@ -534,7 +520,7 @@ def run_development_full_system_replay(
         record = _detect_core(current, key, assets, tau_blind)
         rows.append(
             BlindReplayRow(
-                index, unit.unit_id, unit.source_stratum, image_digest,
+                index, unit.unit_id, unit.source_stratum,
                 None if record.pre is None else record.pre.value,
                 None if record.post is None else record.post.value,
                 record.route, record.positive, record.recovered,

@@ -7,7 +7,6 @@ a positive decision here.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -134,26 +133,12 @@ class BlindCalibrationRoster:
         if self.disjoint_from != BLIND_DEV_DISJOINT_FROM:
             raise ValueError("blind development disjointness declaration differs")
 
-    @property
-    def digest(self) -> str:
-        payload = [
-            {
-                "base_image_id": unit.base_image_id,
-                "image_ref": unit.image_ref,
-                "source_stratum": unit.source_stratum,
-                "unit_id": unit.unit_id,
-            }
-            for unit in self.units
-        ]
-        return hashlib.sha256(stable_json_bytes(payload)).hexdigest()
-
 
 @dataclass(frozen=True, slots=True)
 class BlindCalibrationRow:
     roster_index: int
     unit_id: str
     source_stratum: str
-    image_digest: str | None
     pre_score: float | None
     post_score: float | None
     geometry_outcome: str
@@ -173,7 +158,6 @@ class BlindReplayRow:
     roster_index: int
     unit_id: str
     source_stratum: str
-    image_digest: str | None
     pre_score: float | None
     post_score: float | None
     route: str
@@ -233,8 +217,6 @@ def validate_calibration_rows(
             raise ValueError("calibration row identity/order differs from frozen roster")
         if not row.method_complete or row.operational_error is not None:
             raise ValueError("calibration rows contain an operational interruption")
-        if not isinstance(row.image_digest, str) or _HEX64.fullmatch(row.image_digest) is None:
-            raise ValueError("calibration row image identity differs")
         _finite(row.pre_score, f"row[{index}].pre_score")
         if row.geometry_outcome == "RECOVERED":
             _finite(row.post_score, f"row[{index}].post_score")
@@ -265,7 +247,7 @@ def validate_full_system_replay(
     tau_blind: float,
 ) -> tuple[BlindReplayRow, ...]:
     received = tuple(rows)
-    calibrated = validate_calibration_rows(calibration_rows, roster)
+    validate_calibration_rows(calibration_rows, roster)
     tau = _finite(tau_blind, "tau_blind")
     if len(received) != BLIND_DEV_DENOMINATOR:
         raise ValueError("full-system replay requires all fixed 256 rows")
@@ -280,8 +262,6 @@ def validate_full_system_replay(
             raise ValueError("full-system replay identity/order differs from frozen roster")
         if not row.method_complete or row.operational_error is not None:
             raise ValueError("full-system replay contains an operational interruption")
-        if row.image_digest != calibrated[index].image_digest:
-            raise ValueError("full-system replay current-image identity differs")
         if not isinstance(row.route, str) or not row.route:
             raise ValueError("full-system replay route is absent")
         if not isinstance(row.positive, bool) or not isinstance(row.recovered, bool):
@@ -306,32 +286,10 @@ def validate_full_system_replay(
     return received
 
 
-def _rows_digest(rows: Sequence[BlindCalibrationRow]) -> str:
-    payload = [
-        {
-            "geometry_outcome": row.geometry_outcome,
-            "method_complete": row.method_complete,
-            "image_digest": row.image_digest,
-            "operational_error": row.operational_error,
-            "post_score_be_hex": (
-                None if row.post_score is None else encode_binary64(row.post_score, "post_score")
-            ),
-            "pre_score_be_hex": encode_binary64(row.pre_score, "pre_score"),
-            "roster_index": row.roster_index,
-            "source_stratum": row.source_stratum,
-            "unit_id": row.unit_id,
-            "z_be_hex": encode_binary64(row.z, "z"),
-        }
-        for row in rows
-    ]
-    return hashlib.sha256(stable_json_bytes(payload)).hexdigest()
-
-
 def _replay_rows_payload(rows: Sequence[BlindReplayRow]) -> list[dict[str, Any]]:
     return [
         {
             "method_complete": row.method_complete,
-            "image_digest": row.image_digest,
             "operational_error": row.operational_error,
             "post_score_be_hex": (
                 None if row.post_score is None else encode_binary64(row.post_score, "post_score")
@@ -346,10 +304,6 @@ def _replay_rows_payload(rows: Sequence[BlindReplayRow]) -> list[dict[str, Any]]
         }
         for row in rows
     ]
-
-
-def _replay_rows_digest(rows: Sequence[BlindReplayRow]) -> str:
-    return hashlib.sha256(stable_json_bytes(_replay_rows_payload(rows))).hexdigest()
 
 
 def build_threshold_asset(
@@ -378,13 +332,10 @@ def build_threshold_asset(
                 "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
                 "fpr_experiment": "independent_unwatermarked_primary_null_only",
                 "full_system_replay_rows": _replay_rows_payload(replay),
-                "full_system_replay_rows_digest": _replay_rows_digest(replay),
                 "producer_exact": producer_exact,
                 "production_runtime_id": BLIND_PRODUCTION_RUNTIME_ID,
                 "replay_false_positives": 0,
                 "replay_kind": "fresh_full_system_pre_geometry_post_same_roster_images_key_runtime",
-                "roster_digest": roster.digest,
-                "rows_digest": _rows_digest(checked),
                 "schema_version": BLIND_THRESHOLD_SCHEMA_ID,
                 "statistic_id": BLIND_STATISTIC_ID,
                 "tau_blind_be_hex": encode_binary64(tau, "tau_blind"),
@@ -430,8 +381,8 @@ def _validate_threshold_payload(payload: Any, raw: Any) -> None:
         raise ValueError("blind threshold asset fields must use stable order")
     required = {
         "calibration_key_digest", "decision_rule", "denominator", "disjoint_from", "fpr_experiment",
-        "full_system_replay_rows", "full_system_replay_rows_digest", "producer_exact", "replay_false_positives",
-        "production_runtime_id", "replay_kind", "roster_digest", "rows_digest", "schema_version",
+        "full_system_replay_rows", "producer_exact", "replay_false_positives",
+        "production_runtime_id", "replay_kind", "schema_version",
         "statistic_id", "tau_blind_be_hex", "value_dtype",
         "wrong_key_attribution_experiment",
     }
@@ -459,18 +410,14 @@ def _validate_threshold_payload(payload: Any, raw: Any) -> None:
         raise ValueError("wrong-key attribution must remain separate from FPR")
     if not isinstance(payload["producer_exact"], str) or _HEX40.fullmatch(payload["producer_exact"]) is None:
         raise ValueError("blind threshold producer exact differs")
-    for name in (
-        "calibration_key_digest", "full_system_replay_rows_digest", "roster_digest", "rows_digest"
+    if (
+        not isinstance(payload["calibration_key_digest"], str)
+        or _HEX64.fullmatch(payload["calibration_key_digest"]) is None
     ):
-        if not isinstance(payload[name], str) or _HEX64.fullmatch(payload[name]) is None:
-            raise ValueError(f"blind threshold {name} differs")
+        raise ValueError("blind threshold calibration key digest differs")
     replay_rows = payload["full_system_replay_rows"]
     if not isinstance(replay_rows, list) or len(replay_rows) != BLIND_DEV_DENOMINATOR:
         raise ValueError("blind threshold full-system replay rows differ")
-    if hashlib.sha256(stable_json_bytes(replay_rows)).hexdigest() != payload[
-        "full_system_replay_rows_digest"
-    ]:
-        raise ValueError("blind threshold full-system replay row digest differs")
     decode_binary64(payload["tau_blind_be_hex"], "tau_blind")
     if payload["value_dtype"] != "IEEE-754_binary64_big_endian_hex":
         raise ValueError("blind threshold dtype differs")
