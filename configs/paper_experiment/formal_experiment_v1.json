@@ -1,0 +1,73 @@
+{
+  "schema_version": "cegwm_formal_experiment_v1",
+  "status": "FORMAL_EXPERIMENT_CONTRACT_FROZEN",
+  "alpha": 0.001,
+  "calibration_negatives": 2000,
+  "clean_test_negatives": 3000,
+  "evaluation_pairs": 1000,
+  "prompt_sources": [
+    "configs/content_chain/content_v6_iss_development_v1.jsonl",
+    "configs/content_chain/content_v9_calibration_v1.jsonl"
+  ],
+  "partitions": {
+    "threshold_calibration": {"count": 2000, "seed_start": 2027010000},
+    "clean_negative_test": {"count": 3000, "seed_start": 2027020000},
+    "formal_evaluation_pairs": {"count": 1000, "seed_start": 2027030000}
+  },
+  "conditions": [
+    "clean_no_attack",
+    "jpeg_q50",
+    "resize_50_bicubic_restore",
+    "center_crop_80_restore",
+    "gaussian_blur_sigma_1px",
+    "rotation_10_bicubic_reflect_center_crop_v1"
+  ],
+  "ablations": {
+    "subset_size": 100,
+    "subset_rule": "first_100_formal_evaluation_pairs_before_any_outcome",
+    "variants": {
+      "no_content_adaptive": {"conditions": ["clean_no_attack", "gaussian_blur_sigma_1px"], "threshold_role": "same_detector_and_route_reuse_formal_threshold"},
+      "lf_only": {"conditions": ["clean_no_attack", "jpeg_q50"], "threshold_role": "same_detector_and_route_reuse_formal_threshold"},
+      "hf_only": {"conditions": ["clean_no_attack", "jpeg_q50"], "threshold_role": "same_detector_and_route_reuse_formal_threshold"},
+      "no_geometry": {"conditions": ["clean_no_attack", "rotation_10_bicubic_reflect_center_crop_v1"], "threshold_role": "controlled_same_threshold_ablation_not_independently_calibrated_at_target_fpr"}
+    }
+  },
+  "quality": {
+    "metrics": ["psnr", "ssim", "lpips"],
+    "source": "existing_formal_evaluation_clean_pairs",
+    "new_generation": false,
+    "gate": false
+  },
+  "reconstruction": {
+    "scope": "proposed_main_method_supplement_only",
+    "pool": "formal_evaluation_pairs",
+    "pair_count_formula": "max(100,ceil(0.01*N_pool))",
+    "resolved_pair_count": 100,
+    "subset_rule": "first_100_formal_evaluation_pairs_before_any_outcome",
+    "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+    "model_revision": "462165984030d82259a11f4367a4eed129e94a7b",
+    "pipeline": "StableDiffusionXLImg2ImgPipeline",
+    "prompt": "",
+    "strength": 0.3,
+    "guidance_scale": 1.0,
+    "num_inference_steps": 20,
+    "fpr_resolution": 0.01,
+    "claim_ceiling": "supplementary_reconstruction_only_not_0.1_percent_attacked_fpr_validation"
+  },
+  "threshold": {
+    "estimator": "nearest_rank_empirical_quantile",
+    "rank_one_based": 1998,
+    "decision_rule": "positive_iff_normalized_score_strictly_greater_than_tau",
+    "equality_decision": "negative"
+  },
+  "checkpoint_interval_seconds": 7200,
+  "checkpoint_shard_size": 25,
+  "max_unit_attempts": 2,
+  "retryable_operational_codes": [
+    "CUDA_OOM_TRANSIENT",
+    "MODEL_RUNTIME_TRANSIENT"
+  ],
+  "operator_constraint": "one_colab_runtime_per_stable_job_id",
+  "result_policy": "fpr_tpr_ci_and_ucb_are_report_only_nonblocking",
+  "integrity_governance": "git_exact_config_path_roster_indices_rows_and_status_only"
+}

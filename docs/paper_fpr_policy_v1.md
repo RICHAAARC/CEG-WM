@@ -5,6 +5,12 @@
 This policy is frozen on branch `PaperFPR-V1` from
 `main@e12c7eae91cc36edc5d1a1d96249780a3925eccb`.
 
+The complete execution semantics are frozen in
+`docs/formal_experiment_contract_v1.md`. If this policy's earlier no-retry
+wording is read more narrowly, the complete contract controls: no replacement
+is allowed, while one predeclared retry of the identical unit is allowed only
+for typed operational failures and retains every attempt.
+
 It freezes only threshold calibration and FPR reporting semantics. It does not
 freeze calibration/test denominators, prompt or image rosters, attack-table
 membership, generative-attack models, baseline readiness, or execution
@@ -55,11 +61,12 @@ Calibration data must be disjoint from confirmation and formal test data.
 Formal test scores, labels, attacks, or aggregate outcomes may not be used to
 select or revise `tau`.
 
-If the fixed calibration roster contains a failure or missing score, every row
-and its failure remains in the fixed denominator. No threshold may be
+If the fixed calibration roster contains a terminal failure or missing score,
+every row and attempt remains in the fixed denominator. No threshold may be
 fabricated from a filtered subset. The result package is still produced with
-an explicit incomplete threshold status; there is no retry, replacement, or
-post-hoc roster change.
+an explicit incomplete threshold status; there is no replacement or post-hoc
+roster change. The complete contract permits at most one predeclared retry of
+the identical unit for typed operational failures only.
 
 ## Formal evaluation
 
