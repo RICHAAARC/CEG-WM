@@ -1,0 +1,80 @@
+{
+  "schema_version": "cegwm_paper_fpr_policy_v1",
+  "status": "FROZEN_POLICY_ONLY",
+  "base_main_exact": "e12c7eae91cc36edc5d1a1d96249780a3925eccb",
+  "scope": {
+    "frozen": [
+      "score_orientation",
+      "target_fpr",
+      "threshold_estimator",
+      "calibration_population_role",
+      "test_reporting",
+      "nonblocking_result_policy"
+    ],
+    "not_frozen": [
+      "calibration_denominator",
+      "confirmation_denominator",
+      "test_denominators",
+      "data_rosters",
+      "attack_table",
+      "generative_attack_models",
+      "baseline_readiness",
+      "execution_authorization"
+    ]
+  },
+  "score": {
+    "normalized_orientation": "higher_is_more_watermark_evidence",
+    "native_orientation_conversion": "method_specific_fixed_monotone_conversion_declared_before_calibration"
+  },
+  "target_fpr": {
+    "decimal": "0.001",
+    "percent": "0.1",
+    "role": "calibration_target_not_test_admission_gate"
+  },
+  "calibration": {
+    "threshold_scope": "one_independent_threshold_per_method",
+    "negative_population": "clean_unwatermarked_only",
+    "attacked_negatives_used_for_threshold": false,
+    "partition_rule": "disjoint_from_confirmation_and_formal_test",
+    "denominator": "TO_BE_FROZEN_SEPARATELY",
+    "estimator": "nearest_rank_empirical_quantile",
+    "order": "nondecreasing",
+    "rank_formula": "k=ceil((1-alpha)*N_cal), one_based",
+    "threshold_formula": "tau=c_(k)",
+    "decision_rule": "positive_iff_normalized_score_strictly_greater_than_tau",
+    "equality_decision": "negative",
+    "incomplete_policy": "retain_fixed_rows_and_failures_emit_incomplete_threshold_no_filtered_subset"
+  },
+  "evaluation": {
+    "threshold_reuse": "same_frozen_per_method_tau_for_all_clean_and_attacked_positive_and_negative_conditions",
+    "attack_specific_retuning": false,
+    "test_feedback_into_threshold": false,
+    "attacked_negative_role": "separate_per_condition_fpr_evaluation",
+    "operating_point_deviation": "report_only_nonblocking",
+    "result_package_produced_when_target_missed": true,
+    "automatic_retry_or_replacement": false
+  },
+  "required_reporting": [
+    "raw_normalized_scores",
+    "threshold_identity",
+    "strict_decisions",
+    "tp_fn_fp_tn",
+    "planned_observed_failed_missing_denominators",
+    "tpr",
+    "observed_fpr",
+    "exact_two_sided_binomial_ci95",
+    "per_condition_attacked_negative_fpr",
+    "operational_failures",
+    "method_complete_fail_closed_rows"
+  ],
+  "optional_reporting": [
+    "one_sided_fpr_ucb95_diagnostic",
+    "roc_curve",
+    "roc_auc",
+    "low_fpr_partial_auc"
+  ],
+  "primary_metric_name": "TPR at a threshold calibrated for target FPR = 0.1%",
+  "forbidden_primary_metric_name_without_observed_support": "TPR@FPR=0.1%",
+  "existing_blind_n_dev_256_threshold_role": "engineering_only_not_paper_threshold",
+  "claim_ceiling": "evaluation_policy_frozen_no_paper_threshold_denominator_result_robustness_or_readiness_claim"
+}
