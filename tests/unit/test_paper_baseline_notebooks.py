@@ -13,7 +13,7 @@ BOOKS = (
     "paper_baseline_worker_colab-shallow-diffuse.ipynb",
 )
 
-PRODUCER_EXACT = "23862e0c47411d67e66a617cf35dbd54bbdc0435"
+PRODUCER_EXACT = "004b73dd1ebcceae73f05adb76159788414fb43f"
 
 
 @pytest.mark.unit
@@ -26,6 +26,11 @@ def test_formal_baseline_notebooks_are_clean_thin_fixed_entries() -> None:
         assert PRODUCER_EXACT in text
         assert "experiments.run_paper_baseline_worker" in text
         assert "--job-id" in text and "--expected-exact" in text
+        assert "--engineering-canary" in text
+        assert "PaperFormal-V1-EngineeringCanary" in text
+        assert "canary_final.json" in text
+        assert "'PYTHONPATH'" in text
+        assert "'pip', 'install', '-e'" not in text
         assert "force_remount" not in text
         assert "force-rerun-all" not in text
         for cell in code:

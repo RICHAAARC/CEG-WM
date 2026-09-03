@@ -1,9 +1,9 @@
 # Baseline-V1 formal protocol (user-frozen)
 
-The four formal worker notebooks will be rebound to the revised producer exact
-after local validation. They remain unauthorized for formal Colab, GPU, model,
-or denominator execution; their default notebook mode is an independent
-engineering canary with `science_denominator=0`.
+The four worker notebooks are bound to revised producer exact
+`004b73dd1ebcceae73f05adb76159788414fb43f`. They remain unauthorized for
+formal Colab, GPU, model, or denominator execution; their default notebook mode
+is an independent engineering canary with `science_denominator=0`.
 
 This protocol covers Tree-Ring, Gaussian Shading, Shallow Diffuse, and T2SMark
 only. It excludes CEG and Geometry-V4 rows, results, thresholds, and attacks.
