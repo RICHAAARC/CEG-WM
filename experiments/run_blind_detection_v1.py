@@ -10,6 +10,7 @@ import hashlib
 import importlib
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -35,6 +36,8 @@ from cegwm.method.blind_detection import (  # noqa: E402
     load_threshold_asset,
     stable_json_bytes,
 )
+from cegwm.geometry_v7.syncseal import SyncSealTorchScript  # noqa: E402
+from cegwm.method.content_weighted_joint import load_calibration_asset  # noqa: E402
 from cegwm.runtime.blind_detection import (  # noqa: E402
     BLIND_PREPROCESS_ID,
     BLIND_SCORER_ID,
@@ -43,6 +46,8 @@ from cegwm.runtime.blind_detection import (  # noqa: E402
     run_development_calibration,
     run_development_full_system_replay,
 )
+from cegwm.runtime.content_weighted_joint_sd35 import ContentCalibrationAssets  # noqa: E402
+from cegwm.runtime.observation import require_ordinary_rgb_image  # noqa: E402
 from cegwm.shared.keys import normalize_detection_key, public_key_digest  # noqa: E402
 
 
@@ -50,6 +55,13 @@ CALIBRATION_RESULT_SCHEMA = "cegwm_blind_detection_v1_calibration_result_v1"
 CALIBRATION_CLAIM_CEILING = (
     "engineering_N_dev_256_threshold_calibration_only; science_denominator=0; "
     "not_fixed_FPR_production_reliability_or_paper_evidence"
+)
+CONTENT_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+WEIGHTED_ASSET_REPO_PATH = Path(
+    "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
+)
+WEIGHTED_ASSET_SIDECAR_REPO_PATH = Path(
+    "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json.sha256"
 )
 
 
@@ -82,11 +94,99 @@ def load_roster_inputs(
         raise ValueError("blind development disjointness evidence must be nonempty")
     units = tuple(BlindCalibrationUnit(**unit) for unit in payload["units"])
     roster = BlindCalibrationRoster(units, tuple(payload["disjoint_from"]))
+    if len({unit.image_ref for unit in roster.units}) != BLIND_DEV_DENOMINATOR:
+        raise ValueError("blind development image references must be unique")
     return roster, dict(evidence), _sha256_file(path)
 
 
 def load_roster(path: str | Path) -> BlindCalibrationRoster:
     return load_roster_inputs(path)[0]
+
+
+def _current_rgb_digest(image: Image.Image) -> str:
+    current = require_ordinary_rgb_image(image)
+    framed = (
+        b"CEG-WM/blind-current-rgb/v1\0"
+        + current.width.to_bytes(8, "big")
+        + current.height.to_bytes(8, "big")
+        + current.tobytes()
+    )
+    return hashlib.sha256(framed).hexdigest()
+
+
+def validate_unique_current_images(
+    roster: BlindCalibrationRoster, image_loader
+) -> dict[str, Image.Image]:
+    """Load and validate all 256 physical RGBs before the first score."""
+
+    if not callable(image_loader):
+        raise TypeError("roster image loader must be callable")
+    cached: dict[str, Image.Image] = {}
+    digest_owner: dict[str, str] = {}
+    for index, unit in enumerate(roster.units):
+        try:
+            current = require_ordinary_rgb_image(image_loader(unit.image_ref))
+        except Exception as error:
+            raise RuntimeError(
+                f"roster_image_validation[{index}]:{type(error).__name__}: {error}"
+            ) from error
+        digest = _current_rgb_digest(current)
+        if digest in digest_owner:
+            raise ValueError(
+                "blind development physical RGB is duplicated: "
+                f"unit {unit.unit_id} matches {digest_owner[digest]}"
+            )
+        digest_owner[digest] = unit.unit_id
+        cached[unit.image_ref] = current.copy()
+    if len(cached) != BLIND_DEV_DENOMINATOR:
+        raise RuntimeError("blind development physical image cache denominator differs")
+    return cached
+
+
+def load_runtime_config(path: str | Path) -> tuple[dict[str, str], str]:
+    payload = _read_json(path)
+    required = {
+        "content_model_id", "device", "syncseal_checkpoint",
+        "syncseal_checkpoint_sha256",
+    }
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise ValueError("blind calibration runtime config fields differ")
+    if payload["content_model_id"] != CONTENT_MODEL_ID or payload["device"] != "cuda":
+        raise ValueError("blind calibration frozen model or device identity differs")
+    checkpoint = payload["syncseal_checkpoint"]
+    checkpoint_sha256 = payload["syncseal_checkpoint_sha256"]
+    if not isinstance(checkpoint, str) or not checkpoint or not Path(checkpoint).is_absolute():
+        raise ValueError("SyncSeal checkpoint path must be absolute and nonempty")
+    if (
+        not isinstance(checkpoint_sha256, str)
+        or len(checkpoint_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in checkpoint_sha256)
+    ):
+        raise ValueError("SyncSeal checkpoint SHA-256 must be lowercase 64-hex")
+    return dict(payload), _sha256_file(path)
+
+
+def build_production_runtime(
+    repo_root: Path, config: dict[str, str], *, hf_token: str
+) -> BlindProductionAssets:
+    """Construct the real typed detector through existing repository loaders."""
+
+    if not isinstance(hf_token, str) or not hf_token.strip():
+        raise RuntimeError("HF_TOKEN is required to load frozen public content assets")
+    from experiments import content_iss_engine
+
+    _, content_runner_assets = content_iss_engine._load_pipeline_and_assets(
+        config["content_model_id"], hf_token
+    )
+    content_assets = ContentCalibrationAssets(content_runner_assets.evaluation_assets)
+    weighted_path = repo_root / WEIGHTED_ASSET_REPO_PATH
+    weighted_sidecar = repo_root / WEIGHTED_ASSET_SIDECAR_REPO_PATH
+    weighted_asset = load_calibration_asset(weighted_path, weighted_sidecar)
+    checkpoint = Path(config["syncseal_checkpoint"])
+    if _sha256_file(checkpoint) != config["syncseal_checkpoint_sha256"]:
+        raise ValueError("SyncSeal checkpoint SHA-256 differs")
+    geometry = SyncSealTorchScript.from_file(checkpoint, device=config["device"])
+    return BlindProductionAssets(content_assets, weighted_asset, geometry)
 
 
 class ThresholdFreezeBlocked(RuntimeError):
@@ -106,6 +206,7 @@ def evaluate_threshold_with_runtime(
     image_loader,
     *,
     producer_exact: str,
+    replay_image_loader=None,
 ):
     """Evaluate fixed calibration and fresh replay without writing any artifact."""
 
@@ -119,7 +220,11 @@ def evaluate_threshold_with_runtime(
     except Exception as error:
         raise ThresholdFreezeBlocked(error, rows, ()) from error
     replay = run_development_full_system_replay(
-        roster, key, public_assets, image_loader, tau_blind
+        roster,
+        key,
+        public_assets,
+        image_loader if replay_image_loader is None else replay_image_loader,
+        tau_blind,
     )
     try:
         asset = build_threshold_asset(
@@ -228,6 +333,7 @@ def _input_summary(
     roster: BlindCalibrationRoster,
     evidence: dict[str, str],
     roster_file_sha256: str,
+    runtime_config_file_sha256: str,
     key: bytes,
 ) -> dict[str, Any]:
     return {
@@ -238,31 +344,39 @@ def _input_summary(
         "disjoint_from": list(roster.disjoint_from),
         "roster_digest": roster.digest,
         "roster_file_sha256": roster_file_sha256,
+        "runtime_config_file_sha256": runtime_config_file_sha256,
         "source_strata": dict(sorted(Counter(unit.source_stratum for unit in roster.units).items())),
     }
 
 
-def _config_summary(runtime_factory: str) -> dict[str, Any]:
+def _config_summary(config: dict[str, str]) -> dict[str, Any]:
     return {
         "automatic_retries": 0,
+        "content_model_id": config["content_model_id"],
         "decision_rule": "positive_iff_m_strictly_greater_than_tau_blind",
+        "device": config["device"],
         "geometry_route": "Geometry-Direct_once_per_current_RGB",
         "preprocess_id": BLIND_PREPROCESS_ID,
         "production_runtime_id": BLIND_PRODUCTION_RUNTIME_ID,
-        "runtime_factory_spec_digest": hashlib.sha256(runtime_factory.encode("utf-8")).hexdigest(),
         "scorer_id": BLIND_SCORER_ID,
         "statistic_id": BLIND_STATISTIC_ID,
+        "syncseal_checkpoint": config["syncseal_checkpoint"],
+        "syncseal_checkpoint_sha256": config["syncseal_checkpoint_sha256"],
+        "weighted_asset_repo_path": str(WEIGHTED_ASSET_REPO_PATH),
+        "weighted_asset_sha256": _sha256_file(REPO_ROOT / WEIGHTED_ASSET_REPO_PATH),
+        "weighted_asset_sidecar_repo_path": str(WEIGHTED_ASSET_SIDECAR_REPO_PATH),
+        "weighted_asset_sidecar_sha256": _sha256_file(
+            REPO_ROOT / WEIGHTED_ASSET_SIDECAR_REPO_PATH
+        ),
     }
 
 
-def _base_calibration_result(
-    *, producer_exact: str, runtime_factory: str
-) -> dict[str, Any]:
+def _base_calibration_result(*, producer_exact: str) -> dict[str, Any]:
     return {
         "calibration_rows": [],
         "candidate_tau_blind_be_hex": None,
         "claim_ceiling": CALIBRATION_CLAIM_CEILING,
-        "config_summary": _config_summary(runtime_factory),
+        "config_summary": None,
         "denominator": BLIND_DEV_DENOMINATOR,
         "error": None,
         "fresh_replay_false_positives": None,
@@ -274,62 +388,73 @@ def _base_calibration_result(
         "schema_version": CALIBRATION_RESULT_SCHEMA,
         "science_denominator": 0,
         "status": "OPERATIONAL_BLOCKED",
-        "threshold_asset_sha256": None,
-        "threshold_written": False,
+        "threshold_candidate_ready": False,
+        "threshold_candidate_sha256": None,
     }
 
 
 def calibrate_and_record(
     roster_path: str | Path,
     key_path: str | Path,
-    runtime_factory: str,
-    threshold_output_path: str | Path,
+    runtime_config_path: str | Path,
+    threshold_candidate_path: str | Path,
     result_output_path: str | Path,
     *,
     producer_exact: str,
 ) -> tuple[Path, Path | None, str]:
     """Run one formal calibration attempt and retain success or failure create-only."""
 
-    threshold_output = Path(threshold_output_path)
+    threshold_candidate = Path(threshold_candidate_path)
     result_output = Path(result_output_path)
-    if threshold_output.exists():
-        raise FileExistsError("blind threshold output is create-only")
+    if threshold_candidate.exists():
+        raise FileExistsError("blind threshold candidate is create-only")
     if result_output.exists():
         raise FileExistsError("blind calibration result is create-only")
-    result = _base_calibration_result(
-        producer_exact=producer_exact, runtime_factory=runtime_factory
-    )
+    result = _base_calibration_result(producer_exact=producer_exact)
     rows = ()
     replay = ()
     try:
+        config, runtime_config_file_sha256 = load_runtime_config(runtime_config_path)
+        result["config_summary"] = _config_summary(config)
         roster, evidence, roster_file_sha256 = load_roster_inputs(roster_path)
         key = normalize_detection_key(Path(key_path).read_bytes())
         result["input_summary"] = _input_summary(
-            roster, evidence, roster_file_sha256, key
+            roster, evidence, roster_file_sha256, runtime_config_file_sha256, key
         )
         _verify_producer_checkout(producer_exact)
-        factory = _load_factory(runtime_factory)
-        public_assets = factory(REPO_ROOT)
-        if type(public_assets) is not BlindProductionAssets:
-            raise TypeError("runtime factory must return BlindProductionAssets")
 
-        def image_loader(image_ref: str) -> Image.Image:
+        def disk_image_loader(image_ref: str) -> Image.Image:
             with Image.open(image_ref) as opened:
                 return opened.copy()
 
+        cached_images = validate_unique_current_images(roster, disk_image_loader)
+        public_assets = build_production_runtime(
+            REPO_ROOT, config, hf_token=os.environ.get("HF_TOKEN", "")
+        )
+
+        def calibration_image_loader(image_ref: str) -> Image.Image:
+            return cached_images[image_ref].copy()
+
         rows, replay, asset = evaluate_threshold_with_runtime(
-            roster, key, public_assets, image_loader, producer_exact=producer_exact
+            roster,
+            key,
+            public_assets,
+            calibration_image_loader,
+            producer_exact=producer_exact,
+            replay_image_loader=disk_image_loader,
         )
         result["candidate_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
         result["frozen_tau_blind_be_hex"] = asset.payload["tau_blind_be_hex"]
         result["fresh_replay_false_positives"] = 0
         result["fresh_replay_zero_of_256"] = True
-        result["status"] = "THRESHOLD_FROZEN_AFTER_0_OF_256_FRESH_REPLAY"
-        threshold_output.parent.mkdir(parents=True, exist_ok=True)
-        with threshold_output.open("xb") as sink:
+        threshold_candidate.parent.mkdir(parents=True, exist_ok=True)
+        with threshold_candidate.open("xb") as sink:
             sink.write(asset.json_bytes)
-        result["threshold_asset_sha256"] = hashlib.sha256(asset.json_bytes).hexdigest()
-        result["threshold_written"] = True
+        if _sha256_file(threshold_candidate) != hashlib.sha256(asset.json_bytes).hexdigest():
+            raise RuntimeError("threshold candidate durable readback differs")
+        result["status"] = "CALIBRATION_COMPLETE_THRESHOLD_CANDIDATE_READY"
+        result["threshold_candidate_sha256"] = hashlib.sha256(asset.json_bytes).hexdigest()
+        result["threshold_candidate_ready"] = True
     except ThresholdFreezeBlocked as blocked:
         rows = blocked.calibration_rows
         replay = blocked.replay_rows
@@ -352,31 +477,10 @@ def calibrate_and_record(
     result_output.parent.mkdir(parents=True, exist_ok=True)
     with result_output.open("xb") as sink:
         sink.write(stable_json_bytes(result))
-    return result_output, threshold_output if result["threshold_written"] else None, result["status"]
-
-
-def calibrate_and_freeze(
-    roster_path: str | Path,
-    key_path: str | Path,
-    runtime_factory: str,
-    output_path: str | Path,
-    *,
-    producer_exact: str,
-) -> Path:
-    roster = load_roster(roster_path)
-    key = Path(key_path).read_bytes()
-    factory = _load_factory(runtime_factory)
-    public_assets = factory(REPO_ROOT)
-    if type(public_assets) is not BlindProductionAssets:
-        raise TypeError("runtime factory must return BlindProductionAssets")
-
-    def image_loader(image_ref: str) -> Image.Image:
-        with Image.open(image_ref) as opened:
-            return opened.copy()
-
-    return freeze_threshold_with_runtime(
-        roster, key, public_assets, image_loader, output_path,
-        producer_exact=producer_exact,
+    return (
+        result_output,
+        threshold_candidate if result["threshold_candidate_ready"] else None,
+        result["status"],
     )
 
 
@@ -543,9 +647,9 @@ def _parser() -> argparse.ArgumentParser:
     freeze = sub.add_parser("calibrate-and-freeze")
     freeze.add_argument("--roster", required=True)
     freeze.add_argument("--key-file", required=True)
-    freeze.add_argument("--runtime-factory", required=True)
+    freeze.add_argument("--runtime-config", required=True)
     freeze.add_argument("--producer-exact", required=True)
-    freeze.add_argument("--output", required=True)
+    freeze.add_argument("--candidate-output", required=True)
     freeze.add_argument("--result-output", required=True)
     diagnose = sub.add_parser("diagnose-existing")
     diagnose.add_argument("artifacts", nargs="+")
@@ -564,8 +668,8 @@ def main(argv: list[str] | None = None) -> int:
         result, threshold, status = calibrate_and_record(
             args.roster,
             args.key_file,
-            args.runtime_factory,
-            args.output,
+            args.runtime_config,
+            args.candidate_output,
             args.result_output,
             producer_exact=args.producer_exact,
         )
@@ -577,7 +681,7 @@ def main(argv: list[str] | None = None) -> int:
                     "disjoint_from": list(BLIND_DEV_DISJOINT_FROM),
                     "result_output": str(result),
                     "status": status,
-                    "threshold_output": None if threshold is None else str(threshold),
+                    "threshold_candidate": None if threshold is None else str(threshold),
                 }
             ).decode("ascii")
         )
