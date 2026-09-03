@@ -54,6 +54,30 @@ def test_reconstruction_missing_prerequisites_waits_without_terminal_or_model(
     assert not (root / "reconstruction_final.json").exists()
     assert not (root / "generation" / "units").exists()
 
+    main_root = tmp_path / "main" / "paper-main-v1"
+    main_root.mkdir(parents=True)
+    (main_root / "threshold.json").write_text(json.dumps({
+        "method_id": main_worker.METHOD_ID,
+        "producer_exact": "a" * 40,
+        "tau": 0.0,
+    }), encoding="utf-8")
+    generation = main_root / "evaluation_generation"
+    generation.mkdir()
+    (generation / "final_result.json").write_text(
+        json.dumps({"status": "COMPLETE"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        reconstruction_worker, "_prepare_runtime",
+        lambda config, runtime_root, threshold: (_ for _ in ()).throw(RuntimeError("probe failed")),
+    )
+    assert reconstruction_worker.run_worker(
+        job_id="paper-main-reconstruction-v1", main_job_id="paper-main-v1",
+        expected_exact="a" * 40, drive_root=tmp_path, runtime_root=tmp_path / "runtime",
+    ) == 3
+    state = json.loads((root / "job_state.json").read_text())
+    assert state["status"] == "PREFLIGHT_FAILED_RECOVERABLE"
+    assert not (root / "reconstruction_final.json").exists()
+
 
 @pytest.mark.unit
 def test_reconstruction_explicit_close_publishes_fixed_missing_denominator(
@@ -99,6 +123,7 @@ def test_finalizer_waits_by_default_and_only_explicitly_closes_missing_methods(
         main_worker.METHOD_ID, "t2smark", "tree_ring", "gaussian_shading", "shallow_diffuse",
     }
     assert all(method["evaluation"]["clean_no_attack:negative"]["n_missing"] == 1000 for method in result["methods"].values())
+    assert all(method["quality"]["n_missing_pairs"] == 1000 for method in result["methods"].values())
     assert result["reconstruction_supplement"]["summaries"]["positive"]["n_missing"] == 100
     assert (tmp_path / "finalized" / "paper-formal-v1" / "unified_main_table_long.csv").exists()
 
