@@ -39,7 +39,7 @@ FINAL_BASELINE_LONG_TABLE_FIELDS = (
     "clean_confirmation_negatives",
     "clean_confirmation_failure_count",
     "clean_confirmation_ucb95",
-    "clean_confirmation_gate_passed",
+    "operating_point_deviation",
     "status",
 )
 

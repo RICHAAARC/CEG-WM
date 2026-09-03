@@ -1,4 +1,4 @@
-"""Frozen Baseline-V1 formal protocol and exact clean-confirmation gate."""
+"""Frozen Baseline-V1 formal protocol and nonblocking clean-negative report."""
 
 from __future__ import annotations
 
@@ -149,10 +149,10 @@ class ConfirmationGateResult:
 
 
 def operating_point_violation(false_positives: int, negatives: int) -> bool:
-    """Return whether the predeclared exact-UCB admission condition fails.
+    """Return a report-only exact-UCB operating-point deviation diagnostic.
 
-    This formal condition never authorizes threshold retuning, sample
-    replacement, or result deletion; those complete records remain reportable.
+    The value is never an admission gate and cannot suppress a result package,
+    retune a threshold, replace a sample, or delete a row.
     """
 
     if negatives <= 0 or false_positives < 0 or false_positives > negatives:
@@ -161,7 +161,7 @@ def operating_point_violation(false_positives: int, negatives: int) -> bool:
 
 
 def evaluate_clean_confirmation(records: Iterable[BaselineObservation]) -> ConfirmationGateResult:
-    """Apply the independent clean-confirmation gate with no threshold feedback."""
+    """Report independent clean-negative evidence with no threshold feedback."""
 
     items = tuple(validate_observation(record) for record in records)
     if len(items) != CLEAN_CONFIRMATION_NEGATIVES:

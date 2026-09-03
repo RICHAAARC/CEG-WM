@@ -1,0 +1,41 @@
+{
+  "schema_version": "cegwm_formal_experiment_v1",
+  "status": "FORMAL_EXPERIMENT_CONTRACT_FROZEN",
+  "alpha": 0.001,
+  "calibration_negatives": 2000,
+  "clean_test_negatives": 3000,
+  "evaluation_pairs": 1000,
+  "prompt_sources": [
+    "configs/content_chain/content_v6_iss_development_v1.jsonl",
+    "configs/content_chain/content_v9_calibration_v1.jsonl"
+  ],
+  "partitions": {
+    "threshold_calibration": {"count": 2000, "seed_start": 2027010000},
+    "clean_negative_test": {"count": 3000, "seed_start": 2027020000},
+    "formal_evaluation_pairs": {"count": 1000, "seed_start": 2027030000}
+  },
+  "conditions": [
+    "clean_no_attack",
+    "jpeg_q50",
+    "resize_50_bicubic_restore",
+    "center_crop_80_restore",
+    "gaussian_blur_sigma_1px",
+    "rotation_10_bicubic_reflect_center_crop_v1"
+  ],
+  "threshold": {
+    "estimator": "nearest_rank_empirical_quantile",
+    "rank_one_based": 1998,
+    "decision_rule": "positive_iff_normalized_score_strictly_greater_than_tau",
+    "equality_decision": "negative"
+  },
+  "checkpoint_interval_seconds": 7200,
+  "checkpoint_shard_size": 25,
+  "max_unit_attempts": 2,
+  "retryable_operational_codes": [
+    "CUDA_OOM_TRANSIENT",
+    "MODEL_RUNTIME_TRANSIENT"
+  ],
+  "operator_constraint": "one_colab_runtime_per_stable_job_id",
+  "result_policy": "fpr_tpr_ci_and_ucb_are_report_only_nonblocking",
+  "integrity_governance": "git_exact_config_path_roster_indices_rows_and_status_only"
+}

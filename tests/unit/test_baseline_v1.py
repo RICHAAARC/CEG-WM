@@ -64,7 +64,7 @@ def test_final_baseline_long_table_contract_and_condition_order_are_frozen() -> 
         "false_positive", "true_negative", "tpr", "tpr_ci95_lower", "tpr_ci95_upper", "fpr",
         "fpr_ci95_lower", "fpr_ci95_upper", "clean_confirmation_false_positives",
         "clean_confirmation_negatives", "clean_confirmation_failure_count", "clean_confirmation_ucb95",
-        "clean_confirmation_gate_passed", "status",
+        "operating_point_deviation", "status",
     )
     assert FINAL_BASELINE_PRIMARY_CONDITION_ORDER == tuple(
         condition.condition for condition in FORMAL_ATTACK_CONDITIONS

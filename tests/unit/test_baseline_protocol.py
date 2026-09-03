@@ -16,7 +16,7 @@ from cegwm.baselines.protocol import (
 
 
 @pytest.mark.unit
-def test_exact_clean_confirmation_ucb_is_the_formal_admission_gate() -> None:
+def test_exact_clean_confirmation_ucb_is_report_only_diagnostic() -> None:
     upper_zero = one_sided_clopper_pearson_upper(0, CLEAN_CONFIRMATION_NEGATIVES)
     upper_one = one_sided_clopper_pearson_upper(1, CLEAN_CONFIRMATION_NEGATIVES)
     upper_four = one_sided_clopper_pearson_upper(4, CLEAN_CONFIRMATION_NEGATIVES)
