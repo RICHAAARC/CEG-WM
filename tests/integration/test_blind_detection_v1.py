@@ -652,7 +652,7 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
     assert "force_remount" not in source
-    assert "686b21ed9bf29ee8acbb29d224d855508aa523a9" in source
+    assert "650657a85b37ae5d6b7a6d6eb0ef0846700f1043" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
     assert "status', '--porcelain=v1'" in source
     assert "r.load_roster_inputs(r.REPO_ROOT); r.load_runtime_config(r.REPO_ROOT)" in source
