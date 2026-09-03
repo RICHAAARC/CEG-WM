@@ -10,8 +10,11 @@ from PIL import Image
 from cegwm.geometry_v7.contracts import GeometryEstimate, GeometryStatus, estimate_geometry
 from cegwm.geometry_v7.syncseal import SyncSealTorchScript
 from cegwm.method.blind_detection import (
+    BLIND_DEV_DISJOINT_FROM,
+    BlindCalibrationRow,
     BlindCalibrationRoster,
     BlindCalibrationUnit,
+    BlindReplayRow,
     build_test_only_threshold_asset,
     load_threshold_asset,
 )
@@ -99,6 +102,25 @@ def _roster() -> BlindCalibrationRoster:
             for index in range(256)
         )
     )
+
+
+def _roster_json() -> dict:
+    return {
+        "disjoint_evidence": {
+            name: f"predeclared-evidence-{index}"
+            for index, name in enumerate(BLIND_DEV_DISJOINT_FROM)
+        },
+        "disjoint_from": list(BLIND_DEV_DISJOINT_FROM),
+        "units": [
+            {
+                "base_image_id": f"base-{index}",
+                "image_ref": f"ref-{index}",
+                "source_stratum": f"s-{index % 2}",
+                "unit_id": f"u-{index}",
+            }
+            for index in range(256)
+        ],
+    }
 
 
 def test_direct_positive_strictly_exceeds_tau_and_short_circuits_geometry(monkeypatch) -> None:
@@ -361,6 +383,126 @@ def test_replay_time_operational_failure_and_false_positive_block_asset(
     assert not output.exists()
 
 
+def test_calibration_roster_freezes_disjoint_evidence_before_scoring(tmp_path: Path) -> None:
+    roster_path = tmp_path / "roster.json"
+    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
+    roster, evidence, file_digest = runner.load_roster_inputs(roster_path)
+    assert len(roster.units) == 256 and tuple(evidence) == BLIND_DEV_DISJOINT_FROM
+    assert len(file_digest) == 64
+
+    invalid = _roster_json()
+    invalid["disjoint_evidence"].pop("future_paper_test")
+    roster_path.write_text(json.dumps(invalid), encoding="utf-8")
+    with pytest.raises(ValueError, match="evidence fields differ"):
+        runner.load_roster_inputs(roster_path)
+
+
+def test_formal_calibration_retains_complete_method_failure_without_threshold(
+    monkeypatch, tmp_path: Path
+) -> None:
+    roster_path = tmp_path / "roster.json"
+    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
+    key_path = tmp_path / "key.bin"
+    key_path.write_bytes(KEY.encode())
+    rows = tuple(
+        BlindCalibrationRow(
+            index, f"u-{index}", f"s-{index % 2}", "a" * 64,
+            0.0, None, "NO_H", True, None,
+        )
+        for index in range(256)
+    )
+    replay = tuple(
+        BlindReplayRow(
+            index, f"u-{index}", f"s-{index % 2}", "a" * 64,
+            1.0 if index == 0 else 0.0, None,
+            "DIRECT_POSITIVE" if index == 0 else "GEOMETRY_NO_H",
+            index == 0, False, True, None,
+        )
+        for index in range(256)
+    )
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda root: _production_assets())
+
+    def fail(*args, **kwargs):
+        raise runner.ThresholdFreezeBlocked(
+            ValueError("full-system replay must produce exactly 0/256 empirical false positives"),
+            rows,
+            replay,
+        )
+
+    monkeypatch.setattr(runner, "evaluate_threshold_with_runtime", fail)
+    result_path = tmp_path / "calibration_result.json"
+    threshold_path = tmp_path / "threshold.json"
+    result, threshold, status = runner.calibrate_and_record(
+        roster_path, key_path, "fake:factory", threshold_path, result_path,
+        producer_exact="f" * 40,
+    )
+    assert result == result_path and threshold is None and status == "METHOD_FAILED"
+    assert result_path.is_file() and not threshold_path.exists()
+    payload = json.loads(result_path.read_text(encoding="ascii"))
+    assert payload["denominator"] == 256 and payload["science_denominator"] == 0
+    assert len(payload["calibration_rows"]) == len(payload["fresh_replay_rows"]) == 256
+    assert payload["calibration_rows"][0]["z_be_hex"] is not None
+    assert payload["fresh_replay_false_positives"] == 1
+    assert payload["candidate_tau_blind_be_hex"] is not None
+    assert payload["frozen_tau_blind_be_hex"] is None
+    assert payload["threshold_written"] is False
+    with pytest.raises(FileExistsError, match="result is create-only"):
+        runner.calibrate_and_record(
+            roster_path, key_path, "fake:factory", threshold_path, result_path,
+            producer_exact="f" * 40,
+        )
+
+
+def test_formal_calibration_success_retains_rows_replay_and_threshold_hash(
+    monkeypatch, tmp_path: Path
+) -> None:
+    roster_path = tmp_path / "roster.json"
+    roster_path.write_text(json.dumps(_roster_json()), encoding="utf-8")
+    key_path = tmp_path / "key.bin"
+    key_path.write_bytes(KEY.encode())
+    rows = tuple(
+        BlindCalibrationRow(
+            index, f"u-{index}", f"s-{index % 2}", "b" * 64,
+            0.0, None, "NO_H", True, None,
+        )
+        for index in range(256)
+    )
+    replay = tuple(
+        BlindReplayRow(
+            index, f"u-{index}", f"s-{index % 2}", "b" * 64,
+            0.0, None, "GEOMETRY_NO_H", False, False, True, None,
+        )
+        for index in range(256)
+    )
+    asset = SimpleNamespace(
+        payload={"tau_blind_be_hex": "0000000000000000"},
+        json_bytes=b'{"threshold":"test-double"}',
+    )
+    monkeypatch.setattr(runner, "_verify_producer_checkout", lambda exact: None)
+    monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda root: _production_assets())
+    monkeypatch.setattr(
+        runner, "evaluate_threshold_with_runtime",
+        lambda *args, **kwargs: (rows, replay, asset),
+    )
+    result_path = tmp_path / "calibration_result.json"
+    threshold_path = tmp_path / "threshold.json"
+    result, threshold, status = runner.calibrate_and_record(
+        roster_path, key_path, "fake:factory", threshold_path, result_path,
+        producer_exact="e" * 40,
+    )
+    assert (result, threshold) == (result_path, threshold_path)
+    assert status == "THRESHOLD_FROZEN_AFTER_0_OF_256_FRESH_REPLAY"
+    payload = json.loads(result_path.read_text(encoding="ascii"))
+    assert payload["fresh_replay_zero_of_256"] is True
+    assert payload["fresh_replay_false_positives"] == 0
+    assert payload["candidate_tau_blind_be_hex"] == payload["frozen_tau_blind_be_hex"]
+    assert payload["threshold_written"] is True
+    assert payload["threshold_asset_sha256"] == runner.hashlib.sha256(
+        threshold_path.read_bytes()
+    ).hexdigest()
+
+
 def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(monkeypatch) -> None:
     calls = []
 
@@ -444,3 +586,31 @@ def test_notebook_first_executable_cell_and_static_callback_contract() -> None:
     runner_source = (root / "experiments/run_blind_detection_v1.py").read_text()
     assert runner_source.count("detect_watermark(current_rgb, detection_key, public_assets)") == 1
     assert 'output.open("xb")' in runner_source
+
+
+def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_once() -> None:
+    root = Path(__file__).resolve().parents[2]
+    notebook = json.loads(
+        (root / "notebooks/blind_detection_v1_calibration.ipynb").read_text()
+    )
+    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    assert code_cells[0]["source"] == [
+        "from google.colab import drive\n", "drive.mount('/content/drive')\n",
+    ]
+    source = "".join("".join(cell["source"]) for cell in code_cells)
+    assert "force_remount" not in source
+    assert "0ce90f2f11669c4ab6e492cb196404bf2ff0401b" in source
+    assert "checkout', '--detach', PRODUCER_EXACT" in source
+    assert "status', '--porcelain=v1'" in source
+    assert "development-roster-256.json" in source
+    assert "load_roster_inputs(ROSTER)" in source
+    assert "disjoint_evidence_digest" in source and "key_public_digest" in source
+    assert "CALIBRATION_RUNNER_CALLS += 1" in source
+    assert source.count("'calibrate-and-freeze'") == 1
+    assert "'--result-output', str(RESULT)" in source
+    assert "artifact_manifest.json" in source and "runner.stdout.txt" in source
+    assert "fresh_replay_zero_of_256" in source
+    assert "blind_detection_v1_callback.ipynb" not in source
+    assert "N_CALLBACK" not in source and "--manifest" not in source
+    for forbidden in ("paired_null", "stored_h", "proxy_rgb", "truth_label"):
+        assert forbidden not in source.lower()
