@@ -799,6 +799,89 @@ def test_callback_n4_detection_handoff_is_closure_free_and_single_image_only() -
     assert args.command == "callback-n4"
 
 
+def test_callback_notebook_is_bound_to_p6_and_retains_one_terminal_zip() -> None:
+    root = Path(__file__).resolve().parents[2]
+    notebook = json.loads(
+        (root / "notebooks/blind_detection_v1_callback.ipynb").read_text()
+    )
+    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    assert code_cells[0]["source"] == [
+        "from google.colab import drive\n", "drive.mount('/content/drive')\n",
+    ]
+    for cell in code_cells:
+        ast.parse("".join(cell["source"]))
+    source = "".join("".join(cell["source"]) for cell in code_cells)
+    producer_exact = "0ff9b054c7caeaf487c3488fbcd04164d4db2ad3"
+    assert source.count(producer_exact) == 1
+    assert f"PRODUCER_EXACT = '{producer_exact}'" in source
+    assert "checkout', '--detach', PRODUCER_EXACT" in source
+    assert source.count("git_value('rev-parse', 'HEAD')") == 2
+    assert source.count("git_value('branch', '--show-current')") == 2
+    assert source.count("git_value('status', '--porcelain=v1')") == 2
+    assert "sys.executable, '-m', 'pip', 'install'" in source
+    assert "torch.cuda.is_available()" in source
+    assert "sys.executable, '-m', 'experiments.run_blind_detection_v1', 'callback-n4'" in source
+    assert "cwd=CHECKOUT, env=runner_env, check=False" in source
+    assert source.count("userdata.get(") == 2
+    assert "userdata.get('CEG_WM_ROOT_KEY')" in source
+    assert "userdata.get('HF_TOKEN')" in source
+    assert "secret_markers = ('TOKEN', 'KEY', 'SECRET', 'PASSWORD', 'CREDENTIAL')" in source
+    assert "runner_env.pop('CEG_WM_ROOT_KEY', None)" in source
+    assert "runner_env.pop('HF_TOKEN', None)" in source
+    assert "BLIND_CALLBACK_RUNNER_CALLS += 1" in source
+    assert source.count("'callback-n4'") == 1
+    assert source.count("    write_terminal_zip()\n") == 1
+    assert source.count("zipfile.ZipFile(TERMINAL_ZIP, mode='x'") == 1
+    assert "/content/drive/MyDrive/CEG-WM/BlindDetection-V1/calibration-runs" in source
+    assert "/content/drive/MyDrive/CEG-WM/BlindDetection-V1/callback-runs" in source
+    assert "PUBLIC_N4_CONFIG" in source and "CURRENT_RGB_DIR.glob('current_rgb_*.png')" in source
+    assert "if checkout_verified and PUBLIC_N4_CONFIG.is_file():" in source
+    assert "'records': []" in source and "'status': 'OPERATIONAL_BLOCKED'" in source
+    for forbidden in (
+        "force_remount", "CEGWM_BLIND_RUNTIME_FACTORY",
+        "CEGWM_BLIND_DETECTION_EXACT", "--key-file", "callback-input",
+        "manifest", "sha256", "hashlib", ".zip.sha", "receipt", "signature",
+        "LOCAL_THRESHOLD", "blind_detection_v1_thresholds.json",
+        "primary_null", "stored_h", "original_image",
+    ):
+        assert forbidden not in source
+    final_source = "".join(code_cells[-1]["source"])
+    assert "zipfile.ZipFile(TERMINAL_ZIP, mode='r')" in final_source
+    assert "archive.namelist()" in final_source
+    assert "public_result.get('status')" in final_source
+    assert "public_result.get('denominator')" in final_source
+    assert "subprocess" not in final_source and "archive.write" not in final_source
+
+    runner_source = subprocess.check_output(
+        ["git", "-C", str(root), "show", f"{producer_exact}:experiments/run_blind_detection_v1.py"],
+        text=True,
+    )
+    config_payload = json.loads(subprocess.check_output(
+        [
+            "git", "-C", str(root), "show",
+            f"{producer_exact}:configs/blind_detection/blind_detection_v1_callback_n4.json",
+        ],
+        text=True,
+    ))
+    for required in (
+        "def run_callback_n4(", "def discover_callback_n4_threshold(",
+        "def detect_callback_n4_current_rgb(",
+        "return detect_watermark(current_rgb, detection_key, public_assets)",
+        'sub.add_parser("callback-n4")', "run_content_iss_evaluation_pair(",
+        "generated = embed_watermark(", "generated = run_sd35_plain(",
+        "render_r1a_attack(", "del units", "del embedding_assets",
+    ):
+        assert required in runner_source
+    assert "--key-file" not in runner_source and "--runtime-factory" not in runner_source
+    assert config_payload["denominator"] == 4
+    assert config_payload["science_denominator"] == 0
+    assert config_payload["tau_blind_be_hex"] == "3ff2201bf0021293"
+    assert config_payload["attack_condition_id"] == "core_rotation_pos15"
+    assert [case["coverage"] for case in config_payload["cases"]] == list(
+        runner.CALLBACK_N4_COVERAGE
+    )
+
+
 def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_once() -> None:
     root = Path(__file__).resolve().parents[2]
     notebook = json.loads(
