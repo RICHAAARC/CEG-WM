@@ -684,7 +684,9 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     assert "SyncSeal checkpoint identity differs" in source
     assert source.index("publish_create_only(LOCAL_STDERR, DRIVE_STDERR)") < source.index(
         "status='CALIBRATION_COMPLETE_THRESHOLD_PENDING_LAST'"
-    ) < source.index("pending.replace(DRIVE_THRESHOLD)")
+    ) < source.index("with DRIVE_THRESHOLD.open('xb') as sink:")
+    assert "pending.unlink()" not in source and ".replace(DRIVE_THRESHOLD)" not in source
+    assert "for local, drive_path in" not in source
     assert "blind_detection_v1_callback.ipynb" not in source
     assert "N_CALLBACK" not in source and "--manifest" not in source
     for forbidden in ("paired_null", "stored_h", "proxy_rgb", "truth_label"):
