@@ -1084,3 +1084,73 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     assert _unresolved_global_references(
         runner_source, f"{producer_exact}:experiments/run_blind_detection_v1.py"
     ) == []
+
+
+def test_engineering_validation_notebook_is_exact_bound_single_run_and_output_only() -> None:
+    root = Path(__file__).resolve().parents[2]
+    notebook = json.loads(
+        (root / "notebooks/blind_detection_v1_engineering_validation.ipynb").read_text()
+    )
+    code_cells = [cell for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    assert code_cells[0]["source"] == [
+        "from google.colab import drive\ndrive.mount('/content/drive')"
+    ]
+    source = "".join("".join(cell["source"]) for cell in code_cells)
+    producer_exact = "0a438ad2b322cdfc86ee91221027308702457fb1"
+    assert source.count(producer_exact) == 1
+    assert f"PRODUCER_EXACT = '{producer_exact}'" in source
+    assert "checkout', '--detach', PRODUCER_EXACT" in source
+    assert source.count("status', '--porcelain=v1'") >= 2
+    assert source.count("userdata.get(") == 2
+    assert "userdata.get('CEG_WM_ROOT_KEY')" in source
+    assert "userdata.get('HF_TOKEN')" in source
+    assert "secret_markers = ('TOKEN', 'KEY', 'SECRET', 'PASSWORD', 'CREDENTIAL')" in source
+    assert "runner_env.pop('CEG_WM_ROOT_KEY', None)" in source
+    assert "runner_env.pop('HF_TOKEN', None)" in source
+    assert "BLIND_ENGINEERING_RUNNER_CALLS += 1" in source
+    assert source.count("'engineering-validate'") == 1
+    assert "sys.executable, '-m', 'experiments.run_blind_detection_v1'" in source
+    assert "cwd=CHECKOUT" in source
+    assert "load_engineering_validation_config" in source
+    assert "load_repository_threshold_asset" in source
+    assert "/content/drive/MyDrive/CEG-WM/BlindDetection-V1/engineering-validation-runs" in source
+    assert "calibration-runs" not in source and "callback-runs" not in source
+    assert source.count("zipfile.ZipFile(TERMINAL_ZIP, mode='x'") == 1
+    assert source.count("    write_terminal_zip()\n") == 1
+    assert "mode='x'" in source and "CURRENT_RGB_DIR.glob('*.png')" in source
+    assert "engineering_positive_rows.json" in source
+    assert "engineering_negative_rows.json" in source
+    for forbidden in (
+        "force_remount", "manifest", "receipt", "signature", "sidecar",
+        "sha256", "hashlib", "st_size", "getsize", ".zip.sha",
+        "--calibration-runs-root", "--key-file", "runtime_factory",
+        "primary_null", "stored_h", "original_image", "private_latent",
+    ):
+        assert forbidden not in source.lower()
+    final_source = "".join(code_cells[-1]["source"])
+    assert "zipfile.ZipFile(TERMINAL_ZIP, mode='r')" in final_source
+    assert "archive.read('engineering_validation_result.json')" in final_source
+    assert "archive.namelist" not in final_source and "archive.write" not in final_source
+    assert "subprocess" not in final_source
+
+    runner_source = subprocess.check_output(
+        ["git", "-C", str(root), "show", f"{producer_exact}:experiments/run_blind_detection_v1.py"],
+        text=True,
+    )
+    config_payload = json.loads(
+        subprocess.check_output(
+            [
+                "git", "-C", str(root), "show",
+                f"{producer_exact}:configs/blind_detection/blind_detection_v1_engineering_validation.json",
+            ],
+            text=True,
+        )
+    )
+    assert "def run_engineering_validation(" in runner_source
+    assert "def detect_engineering_current_rgb(" in runner_source
+    assert "return detect_watermark(current_rgb, detection_key, public_assets)" in runner_source
+    assert "build_production_detection_runtime(" in runner_source
+    assert config_payload["positive"]["denominator"] == 64
+    assert config_payload["negative"]["denominator"] == 256
+    assert config_payload["science_denominator"] == 0
+    assert config_payload["success_criteria"] is None
