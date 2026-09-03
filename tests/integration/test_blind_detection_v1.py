@@ -657,6 +657,8 @@ def test_calibration_notebook_is_exact_bound_and_calls_only_formal_n256_runner_o
     assert "userdata.get('HF_TOKEN')" in source
     assert "BLIND_CALIBRATION_RUNNER_CALLS += 1" in source
     assert source.count("'calibrate-and-freeze'") == 1
+    assert "sys.executable, '-m', 'experiments.run_blind_detection_v1'" in source
+    assert "str(CHECKOUT / 'experiments/run_blind_detection_v1.py')" not in source
     assert "'--runtime-root', str(RUNTIME_ROOT)" in source
     assert "runtime_factory" not in source
     assert "'--result-output', str(LOCAL_RESULT)" in source
