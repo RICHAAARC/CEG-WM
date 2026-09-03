@@ -103,8 +103,11 @@ def test_threshold_is_exact_binary64_max_z_and_strict_replay_zero(tmp_path: Path
         "rows_digest", "roster_digest", "full_system_replay_rows_digest",
     }.intersection(asset.payload)
     path = tmp_path / "threshold.json"
-    path.write_bytes(asset.json_bytes)
-    assert load_threshold_asset(path).payload == asset.payload
+    noncanonical = json.dumps(asset.payload, indent=2).encode("ascii")
+    assert noncanonical != asset.json_bytes
+    path.write_bytes(noncanonical)
+    loaded = load_threshold_asset(path)
+    assert loaded.payload == asset.payload and loaded.json_bytes == noncanonical
     assert json.loads(path.read_text(encoding="ascii"))["replay_false_positives"] == 0
 
 

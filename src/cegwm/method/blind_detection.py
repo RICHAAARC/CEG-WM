@@ -179,11 +179,11 @@ class BlindThresholdAsset:
                 "schema_version": "cegwm_blind_detection_v1_explicit_test_only_threshold_v1",
                 "tau_blind_be_hex": self.payload.get("tau_blind_be_hex"),
             }
-            if dict(self.payload) != expected or self.json_bytes != stable_json_bytes(expected):
+            if dict(self.payload) != expected:
                 raise ValueError("explicit test-only threshold asset fields differ")
             decode_binary64(expected["tau_blind_be_hex"], "tau_blind")
             return
-        _validate_threshold_payload(self.payload, self.json_bytes)
+        _validate_threshold_payload(self.payload)
 
     @property
     def tau_blind(self) -> float:
@@ -376,7 +376,7 @@ def load_threshold_asset(path: str | Path) -> BlindThresholdAsset:
     return BlindThresholdAsset(payload, raw)
 
 
-def _validate_threshold_payload(payload: Any, raw: Any) -> None:
+def _validate_threshold_payload(payload: Any) -> None:
     if not isinstance(payload, dict) or tuple(payload) != tuple(sorted(payload)):
         raise ValueError("blind threshold asset fields must use stable order")
     required = {
@@ -421,8 +421,6 @@ def _validate_threshold_payload(payload: Any, raw: Any) -> None:
     decode_binary64(payload["tau_blind_be_hex"], "tau_blind")
     if payload["value_dtype"] != "IEEE-754_binary64_big_endian_hex":
         raise ValueError("blind threshold dtype differs")
-    if stable_json_bytes(payload) != raw:
-        raise ValueError("blind threshold asset must use stable JSON")
 
 
 __all__ = [

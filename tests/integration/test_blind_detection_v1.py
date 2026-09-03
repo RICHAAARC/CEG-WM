@@ -550,13 +550,29 @@ def test_formal_calibration_success_retains_rows_replay_and_threshold(
     runner_source = (
         Path(__file__).resolve().parents[2] / "experiments/run_blind_detection_v1.py"
     ).read_text()
-    assert "ContentCalibrationAssets(content_runner_assets.evaluation_assets)" in runner_source
+    assert "content_unweighted_engine._load_pipeline_and_assets(" in runner_source
+    assert "load_whitening_asset_semantic(repo_root)" in runner_source
+    assert "FrozenContentWhiteningLFPublicAssets(" in runner_source
+    assert "ContentISSEvaluationAssets(" in runner_source
+    assert "load_iss_asset_semantic(repo_root)" in runner_source
+    assert "ContentCalibrationAssets(evaluation_assets)" in runner_source
     assert "load_weighted_asset_semantic(repo_root)" in runner_source
     assert "download_official_syncseal_torchscript(checkpoint)" in runner_source
     assert "if not checkpoint.is_file()" in runner_source
     assert "SyncSealTorchScript.from_file(checkpoint" in runner_source
     assert ".stat()" not in runner_source and "st_size" not in runner_source
     assert "checkpoint download is empty" not in runner_source
+    for forbidden in (
+        "content_iss_engine", "content_whitening_engine",
+        "load_frozen_content_iss_asset", "load_frozen_content_whitening_asset",
+        "load_calibration_asset", "sha256", "hashlib", "hexdigest", "getsize",
+    ):
+        assert forbidden not in runner_source
+    threshold_source = (
+        Path(__file__).resolve().parents[2] / "src/cegwm/method/blind_detection.py"
+    ).read_text()
+    assert "stable_json_bytes(payload) != raw" not in threshold_source
+    assert "json_bytes != stable_json_bytes" not in threshold_source
 
 
 def test_embedding_order_is_content_then_strong_typed_final_rgb_syncseal_once(monkeypatch) -> None:

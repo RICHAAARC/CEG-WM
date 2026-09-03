@@ -37,6 +37,24 @@ from cegwm.method.blind_detection import (  # noqa: E402
     load_threshold_asset,
     stable_json_bytes,
 )
+from cegwm.method.content_iss import (  # noqa: E402
+    ISS_ASSET_ROLE_ID,
+    ISS_ASSET_SCHEMA_ID,
+    ISSAsset,
+    stable_json_bytes as iss_stable_json_bytes,
+)
+from cegwm.method.content_whitening import (  # noqa: E402
+    ASSET_PRODUCER_EXACT as WHITENING_ASSET_PRODUCER_EXACT,
+    ASSET_SCHEMA_ID as WHITENING_ASSET_SCHEMA_ID,
+    CONTENT_WHITENING_LF_SCORER_ID,
+    FIT_UNIT_COUNT as WHITENING_FIT_UNIT_COUNT,
+    OBSERVATION_CONTRACT_ID as WHITENING_OBSERVATION_CONTRACT_ID,
+    WHITENING_ORDER,
+    WHITENING_SHAPE,
+    FrozenContentWhiteningLFPublicAssets,
+    WhiteningAsset,
+    stable_json_bytes as whitening_stable_json_bytes,
+)
 from cegwm.geometry_v7.syncseal import (  # noqa: E402
     SYNCSEAL_TORCHSCRIPT_URL,
     SyncSealTorchScript,
@@ -57,6 +75,7 @@ from cegwm.runtime.blind_detection import (  # noqa: E402
     run_development_full_system_replay,
 )
 from cegwm.runtime.content_weighted_joint_sd35 import ContentCalibrationAssets  # noqa: E402
+from cegwm.runtime.content_iss_sd35 import ContentISSEvaluationAssets  # noqa: E402
 from cegwm.runtime.diffusers_sd35 import run_sd35_plain  # noqa: E402
 from cegwm.runtime.observation import require_ordinary_rgb_image  # noqa: E402
 from cegwm.shared.keys import normalize_detection_key, public_key_digest  # noqa: E402
@@ -76,6 +95,12 @@ COLAB_ASSETS_REPO_PATH = Path(
 )
 WEIGHTED_ASSET_REPO_PATH = Path(
     "configs/content_chain/assets/content_v9_calibrated_weighted_joint_v1.json"
+)
+WHITENING_ASSET_REPO_PATH = Path(
+    "configs/content_chain/assets/content_v4_clean_null_whitening_operator_v1.json"
+)
+ISS_ASSET_REPO_PATH = Path(
+    "configs/content_chain/assets/content_v6_iss_gain_target_v1.json"
 )
 WEIGHTED_ASSET_PRODUCER_EXACT = "c38522dcab6cb173cedf8415cee2fd30998222ba"
 ROOT_KEY_ENV = "CEG_WM_ROOT_KEY"
@@ -311,6 +336,59 @@ def load_weighted_asset_semantic(repo_root: str | Path) -> WeightedJointAsset:
     return asset
 
 
+def load_whitening_asset_semantic(repo_root: str | Path) -> WhiteningAsset:
+    """Parse only the computation-bearing semantics of the Git whitening JSON."""
+
+    payload = _read_json(Path(repo_root) / WHITENING_ASSET_REPO_PATH)
+    if not isinstance(payload, dict):
+        raise ValueError("content-whitening asset must be a JSON object")
+    expected_semantics = {
+        "observation_contract_id": WHITENING_OBSERVATION_CONTRACT_ID,
+        "schema_version": WHITENING_ASSET_SCHEMA_ID,
+        "whitening_order": WHITENING_ORDER,
+        "whitening_shape": list(WHITENING_SHAPE),
+    }
+    if any(payload.get(name) != value for name, value in expected_semantics.items()):
+        raise ValueError("content-whitening computation semantics differ")
+    normalized = {
+        "fit_sample_count": WHITENING_FIT_UNIT_COUNT,
+        "observation_contract_id": payload["observation_contract_id"],
+        "producer_exact": WHITENING_ASSET_PRODUCER_EXACT,
+        "schema_version": payload["schema_version"],
+        "whitening_order": payload["whitening_order"],
+        "whitening_shape": payload["whitening_shape"],
+        "whitening_words_be_hex": payload.get("whitening_words_be_hex"),
+    }
+    return WhiteningAsset(normalized, whitening_stable_json_bytes(normalized))
+
+
+def load_iss_asset_semantic(repo_root: str | Path) -> ISSAsset:
+    """Parse the ISS controller without using historical integrity metadata."""
+
+    payload = _read_json(Path(repo_root) / ISS_ASSET_REPO_PATH)
+    if not isinstance(payload, dict):
+        raise ValueError("content ISS asset must be a JSON object")
+    expected_semantics = {
+        "asset_role_id": ISS_ASSET_ROLE_ID,
+        "controller_formula": "beta_equals_clamp_total_multiplier_of_(m-h)/g_inclusive_1_to_2",
+        "schema_version": ISS_ASSET_SCHEMA_ID,
+        "v4_lf_scorer_id": CONTENT_WHITENING_LF_SCORER_ID,
+    }
+    if any(payload.get(name) != value for name, value in expected_semantics.items()):
+        raise ValueError("content ISS controller semantics differ")
+    beta = decode_binary64(payload.get("beta_development_be_hex"), "beta_development")
+    margin = decode_binary64(payload.get("margin_delta_be_hex"), "margin_delta")
+    gain = decode_binary64(payload.get("gain_g_be_hex"), "gain_g")
+    target = decode_binary64(payload.get("target_m_be_hex"), "target_m")
+    if beta != 1.0 or margin <= 0.0 or gain <= 0.0 or not -1.0 < target < 1.0:
+        raise ValueError("content ISS controller numeric domain differs")
+    normalized = {
+        "gain_g_be_hex": payload["gain_g_be_hex"],
+        "target_m_be_hex": payload["target_m_be_hex"],
+    }
+    return ISSAsset(normalized, iss_stable_json_bytes(normalized))
+
+
 def build_production_runtime(
     repo_root: Path,
     config: dict[str, str],
@@ -322,12 +400,19 @@ def build_production_runtime(
 
     if not isinstance(hf_token, str) or not hf_token.strip():
         raise RuntimeError("HF_TOKEN is required to load public content assets")
-    from experiments import content_iss_engine
+    from experiments import content_unweighted_engine
 
-    pipeline, content_runner_assets = content_iss_engine._load_pipeline_and_assets(
+    pipeline, embed_assets = content_unweighted_engine._load_pipeline_and_assets(
         config["content_model_id"], hf_token
     )
-    content_assets = ContentCalibrationAssets(content_runner_assets.evaluation_assets)
+    whitening_asset = load_whitening_asset_semantic(repo_root)
+    lf_public_assets = FrozenContentWhiteningLFPublicAssets(
+        embed_assets.lf_public_assets, whitening_asset
+    )
+    evaluation_assets = ContentISSEvaluationAssets(
+        embed_assets, lf_public_assets, load_iss_asset_semantic(repo_root)
+    )
+    content_assets = ContentCalibrationAssets(evaluation_assets)
     weighted_asset = load_weighted_asset_semantic(repo_root)
     checkpoint = runtime_root / config["syncseal_filename"]
     download_official_syncseal_torchscript(checkpoint)
