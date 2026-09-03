@@ -3,13 +3,13 @@
 ## Status and authority
 
 The frozen local state is
-`FORMAL_EXPERIMENT_CONTRACT_FROZEN / LOCAL_IMPLEMENTATION_VALIDATED /
-EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` is intentionally not claimed while
-the notebook-bound producer exacts exist only in local branches and cannot yet
-be fetched by the notebooks' remote clone step. Publishing those already-bound
-exacts requires separate push authorization; it does not authorize a model,
-GPU, Colab, Drive job, or formal denominator. Formal execution itself also
-requires a separate user authorization.
+`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_NOT_READY / CANARY_REQUIRED /
+EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` requires both remotely fetchable
+notebook-bound producer exacts and successful real GPU + Google Drive
+engineering canaries for the main, four baseline, reconstruction, and finalizer
+entries. Publishing producer exacts requires separate push authorization; it
+does not authorize a model, GPU, Colab, Drive job, or formal denominator.
+Formal execution itself also requires a separate user authorization.
 
 The proposed method is defined only by the frozen PaperFPR producer descended
 from `main@e12c7eae91cc36edc5d1a1d96249780a3925eccb`. Baselines remain on
@@ -17,9 +17,9 @@ Baseline-V1 and enter only through their result files. The existing
 BlindDetection-V1 N_dev=256 max-score threshold and N=4 smoke remain engineering
 evidence with science_denominator=0; neither is a paper threshold or FPR result.
 
-The notebook-executed producer exacts are
-`PaperFPR-V1@e0deb60d3796a59891cd669fe6f071589897885d` and
-`Baseline-V1@23862e0c47411d67e66a617cf35dbd54bbdc0435`.
+The revised producer exacts are recorded by the successor notebook-binding
+commits after implementation tests pass. Earlier notebook exacts are not valid
+for this repaired execution chain.
 
 ## Shared population contract
 
@@ -71,7 +71,10 @@ combination is absent.
 The one frozen per-method threshold is reused for clean/attacked positive and
 negative arms. There is no attack-specific threshold. Quality is PSNR, SSIM,
 and LPIPS only, computed on the already generated clean evaluation pairs. No
-quality-only image generation or quality gate exists.
+quality-only image generation or quality gate exists. Every method result and
+the unified JSON include, for each metric, valid/failed/missing counts, the
+valid denominator, and the valid-only mean. Quality failures remain visible and
+cannot remove a planned pair.
 
 ## Partial results and nonblocking statistics
 
@@ -122,6 +125,14 @@ support a claim of comprehensive generative-attack resistance.
 
 ## Recovery and Drive state
 
+Before any formal stage creates a unit record, each model worker builds every
+required model/dependency and runs one fixed engineering-only generation,
+detection, and, where applicable, quality probe. This preflight uses a seed
+outside all formal partitions, has `science_denominator=0`, and writes only a
+replaceable job-level state. Failure produces
+`PREFLIGHT_FAILED_RECOVERABLE`; it creates no formal unit and consumes none of
+N_cal, N_clean_test, or N_pair. Restarting the same JOB_ID reruns preflight.
+
 JOB_ID/RUN_ID and Drive directories are stable across Colab restarts. Each unit
 has a create-only terminal record. A score already committed is skipped forever.
 Only typed `CUDA_OOM_TRANSIENT` and `MODEL_RUNTIME_TRANSIENT` failures may retry
@@ -136,6 +147,11 @@ monitoring but is not statistical evidence. `/content` is disposable; Drive is
 the only cross-runtime state. There is no force-rerun-all, alternate JOB_ID to
 escape failures, lock, lease, heartbeat, or concurrent scheduler. One runtime
 per JOB_ID is an operator obligation.
+
+If exactly one arm of an uncommitted clean/watermarked pair exists after an
+interruption, the worker regenerates the same prompt/seed pair, preserves and
+validates the existing arm, and creates only the missing arm. It never replaces
+an existing arm or reruns an already committed unit.
 
 ## Seven notebook entries and stages
 
@@ -159,9 +175,25 @@ Calibration completes before one threshold is created. Evaluation refuses to
 load a model if its threshold is absent or mismatched. Main evaluation, clean
 negative testing, and same-threshold ablations follow threshold freeze.
 Reconstruction requires the main threshold and complete formal image stage.
+Absent prerequisites publish only `WAITING_FOR_PREREQUISITE`; they never create
+`reconstruction_final.json`. A terminal incomplete reconstruction is allowed
+only through explicit `--finalize-incomplete`, which records the unchanged
+planned/scored/failed/missing counts.
 Finalize reads Drive only, checks exacts, thresholds, method duplicates,
 roster/matrix coverage, missing rows, and failure states, then writes the table
 before publishing the unified JSON package last. It cannot run a model.
+By default, any absent required method or reconstruction result publishes
+`WAITING_FOR_REQUIRED_RESULTS` and no CSV or unified final. Only explicit
+`--finalize-incomplete` synthesizes all-missing entries and seals an incomplete
+package.
+
+Each model notebook defaults to `--engineering-canary` on a Drive tree separate
+from formal results. The canary executes real generation and detection, creates
+append-only unit records and checkpoints, reopens the same stores to prove
+resume does not rerun scored units, and publishes only
+`cegwm_engineering_canary_result_v1` with `science_denominator=0`. The finalizer
+canary verifies its Drive waiting-state write and absence of a premature final.
+These canaries are engineering evidence only.
 
 ## Result package and violations
 
@@ -170,8 +202,9 @@ attempts and failures, quality values, and append-only checkpoints. The unified
 package contains per-method thresholds, clean-negative and six-condition
 positive/negative summaries, minimal-ablation summaries, the reconstruction
 supplement, a long CSV table, and a terminal unified JSON result. Missing method
-or reconstruction files are represented explicitly as all-missing terminal
-entries; they do not prevent publication of that package.
+or reconstruction files keep the default finalizer nonterminal. They are
+represented as all-missing entries only after an explicit incomplete-close
+operation.
 
 Contract violations include cross-method or attack-specific thresholds, use of
 the N_dev=256 engineering threshold, test feedback, roster overlap or

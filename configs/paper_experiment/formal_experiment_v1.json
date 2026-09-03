@@ -67,6 +67,22 @@
     "CUDA_OOM_TRANSIENT",
     "MODEL_RUNTIME_TRANSIENT"
   ],
+  "preflight": {
+    "before_formal_unit_state": true,
+    "seed": 2027000000,
+    "science_denominator": 0,
+    "failure_status": "PREFLIGHT_FAILED_RECOVERABLE"
+  },
+  "engineering_canary": {
+    "science_denominator": 0,
+    "drive_tree": "PaperFormal-V1-EngineeringCanary",
+    "required_evidence": ["generation", "detection", "checkpoint", "resume"]
+  },
+  "finalization": {
+    "reconstruction_missing_prerequisite": "WAITING_FOR_PREREQUISITE",
+    "missing_required_results": "WAITING_FOR_REQUIRED_RESULTS",
+    "incomplete_close_requires_explicit_flag": true
+  },
   "operator_constraint": "one_colab_runtime_per_stable_job_id",
   "result_policy": "fpr_tpr_ci_and_ucb_are_report_only_nonblocking",
   "integrity_governance": "git_exact_config_path_roster_indices_rows_and_status_only"

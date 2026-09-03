@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
@@ -14,8 +16,11 @@ from cegwm.formal_experiment import (
     CLEAN_TEST_NEGATIVES,
     EVALUATION_PAIRS,
     FORMAL_CONDITIONS,
+    QUALITY_METRICS,
     empty_binary_summary,
     load_formal_config,
+    publish_job_state,
+    summarize_quality,
 )
 from experiments.run_paper_main_worker import CONFIG_PATH, METHOD_ID, REPO_ROOT
 
@@ -103,10 +108,39 @@ def _validate_method_result(result: Mapping[str, Any], *, method_id: str, exact:
         if not isinstance(value, dict):
             raise ValueError(f"{method_id} evaluation summary differs")
         _validate_summary(value, planned=EVALUATION_PAIRS, role=key.rsplit(":", 1)[1])
+    quality = result.get("quality")
+    if (
+        not isinstance(quality, dict)
+        or quality.get("n_planned_pairs") != EVALUATION_PAIRS
+        or not isinstance(quality.get("metrics"), dict)
+        or set(quality["metrics"]) != set(QUALITY_METRICS)
+    ):
+        raise ValueError(f"{method_id} quality summary differs")
+    for metric in QUALITY_METRICS:
+        summary = quality["metrics"][metric]
+        counts = (
+            summary.get("n_valid"), summary.get("n_failed"), summary.get("n_missing")
+        ) if isinstance(summary, dict) else ()
+        if (
+            not isinstance(summary, dict)
+            or not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in counts)
+            or sum(counts) != EVALUATION_PAIRS
+            or (
+                summary.get("mean") is not None
+                and (
+                    not isinstance(summary["mean"], (int, float))
+                    or isinstance(summary["mean"], bool)
+                    or not math.isfinite(float(summary["mean"]))
+                )
+            )
+            or (summary.get("mean") is None) != (summary.get("n_valid") == 0)
+        ):
+            raise ValueError(f"{method_id} {metric} quality denominator differs")
     if result.get("status") == "COMPLETE" and (
         threshold is None
         or clean.get("status") != "COMPLETE"
         or any(value.get("status") != "COMPLETE" for value in evaluation.values())
+        or quality.get("status") != "COMPLETE"
     ):
         raise ValueError(f"{method_id} complete status conflicts with incomplete evidence")
 
@@ -128,6 +162,7 @@ def _missing_method_result(method_id: str, exact: str) -> dict[str, Any]:
             for condition in FORMAL_CONDITIONS
             for role in ("negative", "positive")
         },
+        "quality": summarize_quality((), planned=EVALUATION_PAIRS),
         "status": "INCOMPLETE_OPERATIONAL",
         "reason": "method result file is missing at finalization",
         "source_result_missing": True,
@@ -181,36 +216,46 @@ def _validate_reconstruction(result: Mapping[str, Any], expected_exact: str) -> 
 
 
 def _write_csv_create_only(path: Path, methods: Mapping[str, Mapping[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=(
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=(
             "method_id", "condition", "role", "n_planned", "n_scored",
             "n_failed", "n_missing", "coverage", "conditional_rate",
             "ci95_lower", "ci95_upper", "planned_lower", "planned_upper", "status",
-        ))
-        writer.writeheader()
-        for method_id, result in methods.items():
-            for key, summary in result["evaluation"].items():
-                condition, role = key.rsplit(":", 1)
-                rate_key = "scored_only_tpr" if role == "positive" else "scored_only_fpr"
-                ci_key = "tpr_ci95" if role == "positive" else "fpr_ci95"
-                lower_key = "planned_tpr_lower" if role == "positive" else "planned_fpr_lower"
-                upper_key = "planned_tpr_upper" if role == "positive" else "planned_fpr_upper"
-                ci = summary[ci_key]
-                writer.writerow({
-                    "method_id": method_id, "condition": condition, "role": role,
-                    "n_planned": summary["n_planned"], "n_scored": summary["n_scored"],
-                    "n_failed": summary["n_failed"], "n_missing": summary["n_missing"],
-                    "coverage": summary["coverage"], "conditional_rate": summary[rate_key],
-                    "ci95_lower": ci[0], "ci95_upper": ci[1],
-                    "planned_lower": summary[lower_key], "planned_upper": summary[upper_key],
-                    "status": summary["status"],
-                })
+    ), lineterminator="\n")
+    writer.writeheader()
+    for method_id, result in methods.items():
+        for key, summary in result["evaluation"].items():
+            condition, role = key.rsplit(":", 1)
+            rate_key = "scored_only_tpr" if role == "positive" else "scored_only_fpr"
+            ci_key = "tpr_ci95" if role == "positive" else "fpr_ci95"
+            lower_key = "planned_tpr_lower" if role == "positive" else "planned_fpr_lower"
+            upper_key = "planned_tpr_upper" if role == "positive" else "planned_fpr_upper"
+            ci = summary[ci_key]
+            writer.writerow({
+                "method_id": method_id, "condition": condition, "role": role,
+                "n_planned": summary["n_planned"], "n_scored": summary["n_scored"],
+                "n_failed": summary["n_failed"], "n_missing": summary["n_missing"],
+                "coverage": summary["coverage"], "conditional_rate": summary[rate_key],
+                "ci95_lower": ci[0], "ci95_upper": ci[1],
+                "planned_lower": summary[lower_key], "planned_upper": summary[upper_key],
+                "status": summary["status"],
+            })
+    content = buffer.getvalue()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if path.read_text(encoding="utf-8") != content:
+            raise RuntimeError("existing unified CSV differs from the deterministic finalizer output")
+        return
+    with path.open("x", encoding="utf-8", newline="") as stream:
+        stream.write(content)
         stream.flush()
         os.fsync(stream.fileno())
 
 
-def run_finalize(*, drive_root: Path, expected_exact: str, baseline_exact: str) -> int:
+def run_finalize(
+    *, drive_root: Path, expected_exact: str, baseline_exact: str,
+    finalize_incomplete: bool = False,
+) -> int:
     _verify_checkout(expected_exact)
     load_formal_config(CONFIG_PATH)
     output_root = drive_root / "finalized" / "paper-formal-v1"
@@ -218,6 +263,36 @@ def run_finalize(*, drive_root: Path, expected_exact: str, baseline_exact: str) 
     if final_path.exists():
         final = _read(final_path)
         print(json.dumps({"status": final["status"], "terminal": True}, sort_keys=True))
+        return 0
+
+    required_paths = {
+        METHOD_ID: drive_root / "main" / MAIN_JOB_ID / "method_final.json",
+        **{
+            method_id: drive_root / "baselines" / job_id / "method_final.json"
+            for method_id, job_id in BASELINE_JOBS.items()
+        },
+        "reconstruction_supplement": (
+            drive_root / "reconstruction" / RECONSTRUCTION_JOB_ID / "reconstruction_final.json"
+        ),
+    }
+    missing = [name for name, path in required_paths.items() if not path.exists()]
+    if missing and not finalize_incomplete:
+        state = publish_job_state(
+            output_root,
+            {
+                "job_id": "paper-formal-v1-finalizer",
+                "run_id": "paper-formal-v1-finalizer",
+                "method_id": "five_method_unified_result",
+                "stage": "finalize",
+                "expected_exact": expected_exact,
+            },
+            "WAITING_FOR_REQUIRED_RESULTS",
+            missing_required_results=missing,
+        )
+        print(json.dumps({
+            "status": state["status"], "terminal": False,
+            "missing_required_results": missing,
+        }, sort_keys=True))
         return 0
 
     methods: dict[str, dict[str, Any]] = {}
@@ -258,6 +333,11 @@ def run_finalize(*, drive_root: Path, expected_exact: str, baseline_exact: str) 
         "methods": methods,
         "reconstruction_supplement": reconstruction,
         "status": "COMPLETE" if all(status == "COMPLETE" for status in statuses) else "INCOMPLETE_OPERATIONAL",
+        "closure_mode": (
+            "EXPLICIT_FINALIZE_INCOMPLETE"
+            if missing
+            else "ALL_REQUIRED_RESULTS_TERMINAL"
+        ),
         "statistical_policy": "report_only_nonblocking",
         "result_package_produced": True,
         "final_published_last": True,
@@ -268,8 +348,54 @@ def run_finalize(*, drive_root: Path, expected_exact: str, baseline_exact: str) 
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
+    publish_job_state(
+        output_root,
+        {
+            "job_id": "paper-formal-v1-finalizer",
+            "run_id": "paper-formal-v1-finalizer",
+            "method_id": "five_method_unified_result",
+            "stage": "finalize",
+            "expected_exact": expected_exact,
+        },
+        "TERMINAL_COMPLETE" if payload["status"] == "COMPLETE" else "TERMINAL_INCOMPLETE",
+        closure_mode=payload["closure_mode"],
+    )
     print(json.dumps({"status": payload["status"], "terminal": True}, sort_keys=True))
     return 0
+
+
+def run_engineering_canary(*, drive_root: Path, expected_exact: str, baseline_exact: str) -> int:
+    """Verify Drive waiting-state publication without fabricating scientific inputs."""
+
+    result = run_finalize(
+        drive_root=drive_root,
+        expected_exact=expected_exact,
+        baseline_exact=baseline_exact,
+        finalize_incomplete=False,
+    )
+    output_root = drive_root / "finalized" / "paper-formal-v1"
+    state = _read(output_root / "job_state.json")
+    if state.get("status") != "WAITING_FOR_REQUIRED_RESULTS":
+        raise RuntimeError("finalizer canary did not publish its waiting state")
+    if (output_root / "unified_result_package.json").exists():
+        raise RuntimeError("finalizer canary unexpectedly published a unified result")
+    canary_path = output_root / "canary_final.json"
+    if not canary_path.exists():
+        with canary_path.open("x", encoding="utf-8") as stream:
+            json.dump({
+                "schema_version": "cegwm_engineering_canary_result_v1",
+                "producer_exact": expected_exact,
+                "baseline_producer_exact": baseline_exact,
+                "status": "ENGINEERING_CANARY_COMPLETE",
+                "science_denominator": 0,
+                "waiting_state_verified": True,
+                "premature_final_absent": True,
+            }, stream, sort_keys=True, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    print(json.dumps({"status": "ENGINEERING_CANARY_COMPLETE", "terminal": True}, sort_keys=True))
+    return result
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -277,7 +403,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--drive-root", required=True)
     parser.add_argument("--expected-exact", required=True)
     parser.add_argument("--baseline-exact", required=True)
-    parser.add_argument("--validate-only", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--finalize-incomplete", action="store_true")
+    mode.add_argument("--validate-only", action="store_true")
+    mode.add_argument("--engineering-canary", action="store_true")
     return parser
 
 
@@ -292,9 +421,15 @@ def main(argv: list[str] | None = None) -> int:
             "reconstruction_job_id": RECONSTRUCTION_JOB_ID,
         }, sort_keys=True))
         return 0
+    if args.engineering_canary:
+        return run_engineering_canary(
+            drive_root=Path(args.drive_root), expected_exact=args.expected_exact,
+            baseline_exact=args.baseline_exact,
+        )
     return run_finalize(
         drive_root=Path(args.drive_root), expected_exact=args.expected_exact,
         baseline_exact=args.baseline_exact,
+        finalize_incomplete=args.finalize_incomplete,
     )
 
 

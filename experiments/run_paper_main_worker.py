@@ -20,12 +20,18 @@ from cegwm.formal_experiment import (
     FORMAL_CONDITIONS,
     FormalRunStore,
     OperationalUnitError,
+    PreflightFailed,
     apply_attack,
     empty_binary_summary,
+    execute_job_preflight,
     expand_rosters,
     freeze_threshold,
+    load_or_recover_pair,
     load_formal_config,
+    publish_job_state,
+    raise_classified_operational,
     summarize_binary,
+    summarize_quality,
 )
 from cegwm.geometry_v7.r1b import rectify_attacked_rgb
 from cegwm.runtime.blind_detection import (
@@ -49,6 +55,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "configs/paper_experiment/formal_experiment_v1.json"
 METHOD_ID = "cegwm_blind_detection_v1_paper"
 SYNCSEAL_RESIDUAL_MULTIPLIER = 0.75
+PREFLIGHT_PROMPT = "A neutral geometric still life for an engineering preflight."
+PREFLIGHT_SEED = 2027000000
 
 
 def _git_head() -> str:
@@ -144,11 +152,11 @@ def _calibration_score(runtime: Mapping[str, Any], image: Image.Image) -> tuple[
     try:
         pre = _score_current_rgb(image, runtime["key"], runtime["assets"])
     except Exception as error:
-        raise OperationalUnitError("MODEL_RUNTIME_TRANSIENT", "content_pre", f"{type(error).__name__}: {error}") from error
+        raise_classified_operational(error, "content_pre")
     try:
         geometry = runtime["assets"].geometry_backend.detect_geometry(image)
     except Exception as error:
-        raise OperationalUnitError("MODEL_RUNTIME_TRANSIENT", "geometry", f"{type(error).__name__}: {error}") from error
+        raise_classified_operational(error, "geometry")
     disposition, detail = _geometry_disposition(geometry)
     if disposition == "OPERATIONAL":
         raise OperationalUnitError("MODEL_RUNTIME_TRANSIENT", "geometry", detail or "geometry operational failure")
@@ -167,7 +175,7 @@ def _calibration_score(runtime: Mapping[str, Any], image: Image.Image) -> tuple[
     try:
         post = _score_current_rgb(recovered, runtime["key"], runtime["assets"])
     except Exception as error:
-        raise OperationalUnitError("MODEL_RUNTIME_TRANSIENT", "content_post", f"{type(error).__name__}: {error}") from error
+        raise_classified_operational(error, "content_post")
     return max(pre.value, post.value), "GEOMETRY_RECOVERED"
 
 
@@ -176,7 +184,7 @@ def _detect_payload(runtime: Mapping[str, Any], image: Image.Image, tau: float, 
         try:
             pre = _score_current_rgb(image, runtime["key"], runtime["assets"])
         except Exception as error:
-            raise OperationalUnitError("MODEL_RUNTIME_TRANSIENT", "content_pre", f"{type(error).__name__}: {error}") from error
+            raise_classified_operational(error, "content_pre")
         return {
             "normalized_score": pre.value,
             "decision": pre.value > tau,
@@ -284,6 +292,15 @@ def _build_runtime(runtime_root: Path) -> dict[str, Any]:
     return {"pipeline": pipeline, "assets": assets, "key": key, "device": config["device"]}
 
 
+def _prepare_runtime(runtime_root: Path) -> dict[str, Any]:
+    runtime = _build_runtime(runtime_root)
+    clean, marked = _main_pair(runtime, PREFLIGHT_PROMPT, PREFLIGHT_SEED)
+    _calibration_score(runtime, clean)
+    _detect_payload(runtime, marked, 0.0)
+    _quality(clean, marked)
+    return runtime
+
+
 def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_root: Path) -> int:
     verify_expected_exact(expected_exact)
     config = load_formal_config(CONFIG_PATH)
@@ -297,12 +314,21 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
         print(json.dumps({"method_id": METHOD_ID, "status": final["status"], "terminal": True}, sort_keys=True))
         return 0
 
-    runtime: dict[str, Any] | None = None
+    try:
+        runtime = execute_job_preflight(
+            job_root,
+            _identity(job_id, "preflight", expected_exact),
+            lambda: _prepare_runtime(runtime_root),
+        )
+    except PreflightFailed as error:
+        print(json.dumps({
+            "method_id": METHOD_ID,
+            "status": error.state["status"],
+            "science_denominator": 0,
+        }, sort_keys=True))
+        return 3
 
     def get_runtime() -> dict[str, Any]:
-        nonlocal runtime
-        if runtime is None:
-            runtime = _build_runtime(runtime_root)
         return runtime
 
     calibration_units = rosters["threshold_calibration"]
@@ -337,6 +363,7 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
             ),
             "evaluation": _empty_evaluation(),
             "ablations": _empty_ablations(config),
+            "quality": summarize_quality((), planned=EVALUATION_PAIRS),
             "quality_source": "not_available_threshold_stage_incomplete",
             "status": "INCOMPLETE_OPERATIONAL",
             "reason": "paper threshold unavailable after terminal calibration",
@@ -348,6 +375,10 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
             "status": "INCOMPLETE_OPERATIONAL",
             "terminal": True,
         }, sort_keys=True))
+        publish_job_state(
+            job_root, _identity(job_id, "method_terminal", expected_exact),
+            "TERMINAL_INCOMPLETE", reason="threshold unavailable",
+        )
         return 0
     tau = float(threshold["tau"])
 
@@ -382,16 +413,18 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
             unit = by_id[unit_id]
             clean_path = image_root / f"{unit.roster_index:04d}" / "clean.png"
             marked_path = image_root / f"{unit.roster_index:04d}" / "watermarked.png"
-            if clean_path.exists() or marked_path.exists():
-                clean, marked = _load_rgb(clean_path), _load_rgb(marked_path)
-            else:
-                clean, marked = _main_pair(get_runtime(), unit.prompt, unit.seed)
-                _atomic_png_create_only(clean_path, clean)
-                _atomic_png_create_only(marked_path, marked)
+            clean, marked, pair_state = load_or_recover_pair(
+                clean_path,
+                marked_path,
+                lambda: _main_pair(get_runtime(), unit.prompt, unit.seed),
+                _load_rgb,
+                _atomic_png_create_only,
+            )
             return {
                 "artifact_status": "GENERATED",
                 "clean_image": str(clean_path.relative_to(job_root)),
                 "watermarked_image": str(marked_path.relative_to(job_root)),
+                "pair_state": pair_state,
                 "quality": _quality(clean, marked),
             }
 
@@ -513,7 +546,11 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
     clean_result = json.loads(clean_store.final_path.read_text(encoding="utf-8"))
     eval_result = json.loads(detection.final_path.read_text(encoding="utf-8"))
     ablation_result = json.loads(ablation_detection.final_path.read_text(encoding="utf-8"))
-    statuses = (clean_result["status"], eval_result["status"], ablation_result["status"])
+    quality = summarize_quality(generation.rows(), planned=EVALUATION_PAIRS)
+    statuses = (
+        clean_result["status"], eval_result["status"], ablation_result["status"],
+        quality["status"],
+    )
     _write_json_create_only(final_path, {
         "schema_version": "cegwm_formal_method_result_v1",
         "method_id": METHOD_ID,
@@ -522,13 +559,130 @@ def run_worker(*, job_id: str, expected_exact: str, drive_root: Path, runtime_ro
         "clean_negative_test": clean_result["summary"],
         "evaluation": eval_result["summaries"],
         "ablations": ablation_result["summaries"],
+        "quality": quality,
         "quality_source": "evaluation_generation_clean_pairs",
         "status": "COMPLETE" if all(value == "COMPLETE" for value in statuses) else "INCOMPLETE_OPERATIONAL",
         "fpr_policy": "report_only_nonblocking",
         "result_package_produced": True,
     })
+    publish_job_state(
+        job_root, _identity(job_id, "method_terminal", expected_exact),
+        "TERMINAL_COMPLETE" if all(value == "COMPLETE" for value in statuses) else "TERMINAL_INCOMPLETE",
+    )
     print(json.dumps({"method_id": METHOD_ID, "status": statuses, "terminal": True}, sort_keys=True))
     return 0
+
+
+def run_engineering_canary(
+    *, job_id: str, expected_exact: str, drive_root: Path, runtime_root: Path,
+) -> int:
+    """Exercise real generation, detection, checkpoint, and resume outside paper denominators."""
+
+    verify_expected_exact(expected_exact)
+    load_formal_config(CONFIG_PATH)
+    root = drive_root / job_id
+    final_path = root / "canary_final.json"
+    if final_path.exists():
+        value = json.loads(final_path.read_text(encoding="utf-8"))
+        if value.get("producer_exact") != expected_exact or value.get("science_denominator") != 0:
+            raise RuntimeError("main canary final identity differs")
+        print(json.dumps({"status": value["status"], "terminal": True}, sort_keys=True))
+        return 0 if value["status"] == "ENGINEERING_CANARY_COMPLETE" else 4
+    try:
+        runtime = execute_job_preflight(
+            root,
+            _identity(job_id, "engineering_canary_preflight", expected_exact),
+            lambda: _prepare_runtime(runtime_root),
+        )
+    except PreflightFailed as error:
+        print(json.dumps({"status": error.state["status"], "science_denominator": 0}, sort_keys=True))
+        return 3
+
+    clean_path = root / "images" / "clean.png"
+    marked_path = root / "images" / "watermarked.png"
+    generation_identity = _identity(job_id, "engineering_canary_generation", expected_exact)
+    generation = FormalRunStore(root / "generation", generation_identity, ("engineering-canary-pair",))
+
+    def generate(unit_id: str, attempt: int) -> dict[str, Any]:
+        del unit_id, attempt
+        clean, marked, pair_state = load_or_recover_pair(
+            clean_path, marked_path,
+            lambda: _main_pair(runtime, PREFLIGHT_PROMPT, PREFLIGHT_SEED),
+            _load_rgb, _atomic_png_create_only,
+        )
+        return {
+            "artifact_status": "GENERATED", "pair_state": pair_state,
+            "quality": _quality(clean, marked),
+        }
+
+    generation.run(generate)
+    generation_status = (
+        "COMPLETE"
+        if all(row["terminal_status"] == "SCORED" for row in generation.rows())
+        else "INCOMPLETE_OPERATIONAL"
+    )
+    generation.finalize({"status": generation_status, "science_denominator": 0})
+    resumed_generation = FormalRunStore(
+        root / "generation", generation_identity, ("engineering-canary-pair",)
+    )
+    resumed_generation.run(lambda unit_id, attempt: (_ for _ in ()).throw(
+        AssertionError("scored canary generation unit reran")
+    ))
+
+    detection_identity = _identity(job_id, "engineering_canary_detection", expected_exact)
+    detection = FormalRunStore(
+        root / "detection", detection_identity,
+        ("engineering-canary-negative", "engineering-canary-positive"),
+    )
+
+    def detect(unit_id: str, attempt: int) -> dict[str, Any]:
+        del attempt
+        role = "negative" if unit_id.endswith("negative") else "positive"
+        image = clean_path if role == "negative" else marked_path
+        return {**_detect_payload(runtime, _load_rgb(image), 0.0), "truth_role": role}
+
+    detection.run(detect)
+    detection_status = (
+        "COMPLETE"
+        if all(row["terminal_status"] == "SCORED" for row in detection.rows())
+        else "INCOMPLETE_OPERATIONAL"
+    )
+    detection.finalize({"status": detection_status, "science_denominator": 0})
+    resumed_detection = FormalRunStore(
+        root / "detection", detection_identity,
+        ("engineering-canary-negative", "engineering-canary-positive"),
+    )
+    resumed_detection.run(lambda unit_id, attempt: (_ for _ in ()).throw(
+        AssertionError("scored canary detection unit reran")
+    ))
+    checkpoint_count = sum(
+        len(tuple((root / stage / "checkpoints").glob("checkpoint-*.json")))
+        for stage in ("generation", "detection")
+    )
+    if checkpoint_count < 2:
+        raise RuntimeError("main canary did not publish both stage checkpoints")
+    canary_status = (
+        "ENGINEERING_CANARY_COMPLETE"
+        if generation_status == detection_status == "COMPLETE"
+        else "ENGINEERING_CANARY_INCOMPLETE"
+    )
+    _write_json_create_only(final_path, {
+        "schema_version": "cegwm_engineering_canary_result_v1",
+        "method_id": METHOD_ID,
+        "producer_exact": expected_exact,
+        "status": canary_status,
+        "science_denominator": 0,
+        "generation_verified": generation_status == "COMPLETE",
+        "detection_verified": detection_status == "COMPLETE",
+        "checkpoint_count": checkpoint_count,
+        "resume_verified": True,
+    })
+    publish_job_state(
+        root, _identity(job_id, "engineering_canary_terminal", expected_exact),
+        canary_status,
+    )
+    print(json.dumps({"status": canary_status, "terminal": True}, sort_keys=True))
+    return 0 if canary_status == "ENGINEERING_CANARY_COMPLETE" else 4
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -537,7 +691,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-exact", required=True)
     parser.add_argument("--drive-root", required=True)
     parser.add_argument("--runtime-root", required=True)
-    parser.add_argument("--validate-only", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--validate-only", action="store_true")
+    mode.add_argument("--engineering-canary", action="store_true")
     return parser
 
 
@@ -555,6 +711,11 @@ def main(argv: list[str] | None = None) -> int:
             "model_execution": False,
         }, sort_keys=True))
         return 0
+    if args.engineering_canary:
+        return run_engineering_canary(
+            job_id=args.job_id, expected_exact=args.expected_exact,
+            drive_root=Path(args.drive_root), runtime_root=Path(args.runtime_root),
+        )
     return run_worker(
         job_id=args.job_id,
         expected_exact=args.expected_exact,
