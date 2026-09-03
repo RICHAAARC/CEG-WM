@@ -1177,7 +1177,7 @@ def test_engineering_validation_notebook_is_exact_bound_single_run_and_output_on
         "from google.colab import drive\ndrive.mount('/content/drive')"
     ]
     source = "".join("".join(cell["source"]) for cell in code_cells)
-    producer_exact = "0a438ad2b322cdfc86ee91221027308702457fb1"
+    producer_exact = "056b1e8bdb5125c1110d44e4e1ae42773c0ebd73"
     assert source.count(producer_exact) == 1
     assert f"PRODUCER_EXACT = '{producer_exact}'" in source
     assert "checkout', '--detach', PRODUCER_EXACT" in source
@@ -1201,6 +1201,10 @@ def test_engineering_validation_notebook_is_exact_bound_single_run_and_output_on
     assert "mode='x'" in source and "CURRENT_RGB_DIR.glob('*.png')" in source
     assert "engineering_positive_rows.json" in source
     assert "engineering_negative_rows.json" in source
+    assert "'positive_numerator': None" in source
+    assert "'false_positive_numerator': None" in source
+    assert "'operational_incomplete': 64" in source
+    assert "'operational_incomplete': 256" in source
     for forbidden in (
         "force_remount", "manifest", "receipt", "signature", "sidecar",
         "sha256", "hashlib", "st_size", "getsize", ".zip.sha",
