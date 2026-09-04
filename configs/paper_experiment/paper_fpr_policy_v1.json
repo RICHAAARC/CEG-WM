@@ -1,7 +1,8 @@
 {
   "schema_version": "cegwm_paper_fpr_policy_v1",
-  "status": "FROZEN_POLICY_ONLY",
+  "status": "FROZEN_INTEGRATED_FORMAL_EXPERIMENT_V1",
   "base_main_exact": "e12c7eae91cc36edc5d1a1d96249780a3925eccb",
+  "authoritative_contract": "docs/formal_experiment_contract_v1.md",
   "scope": {
     "frozen": [
       "score_orientation",
@@ -9,17 +10,18 @@
       "threshold_estimator",
       "calibration_population_role",
       "test_reporting",
-      "nonblocking_result_policy"
-    ],
-    "not_frozen": [
+      "nonblocking_result_policy",
       "calibration_denominator",
       "confirmation_denominator",
       "test_denominators",
       "data_rosters",
       "attack_table",
-      "generative_attack_models",
-      "baseline_readiness",
-      "execution_authorization"
+      "supplementary_reconstruction_model",
+      "baseline_entry_readiness"
+    ],
+    "not_frozen": [
+      "execution_authorization",
+      "measured_results"
     ]
   },
   "score": {
@@ -36,10 +38,11 @@
     "negative_population": "clean_unwatermarked_only",
     "attacked_negatives_used_for_threshold": false,
     "partition_rule": "disjoint_from_confirmation_and_formal_test",
-    "denominator": "TO_BE_FROZEN_SEPARATELY",
+    "denominator": 2000,
     "estimator": "nearest_rank_empirical_quantile",
     "order": "nondecreasing",
     "rank_formula": "k=ceil((1-alpha)*N_cal), one_based",
+    "resolved_rank": 1998,
     "threshold_formula": "tau=c_(k)",
     "decision_rule": "positive_iff_normalized_score_strictly_greater_than_tau",
     "equality_decision": "negative",
@@ -52,8 +55,15 @@
     "attacked_negative_role": "separate_per_condition_fpr_evaluation",
     "operating_point_deviation": "report_only_nonblocking",
     "result_package_produced_when_target_missed": true,
-    "automatic_retry_or_replacement": false
+    "retry_policy": "one_predeclared_retry_for_identical_unit_only_on_typed_cuda_oom_or_model_runtime_transient",
+    "replacement": false
   },
+  "formal_denominators": {
+    "clean_negative_test": 3000,
+    "formal_evaluation_pairs": 1000,
+    "supplementary_reconstruction_pairs": 100
+  },
+  "reconstruction_role": "proposed_method_only_supplementary_stress_test_not_five_method_main_table",
   "required_reporting": [
     "raw_normalized_scores",
     "threshold_identity",
@@ -76,5 +86,5 @@
   "primary_metric_name": "TPR at a threshold calibrated for target FPR = 0.1%",
   "forbidden_primary_metric_name_without_observed_support": "TPR@FPR=0.1%",
   "existing_blind_n_dev_256_threshold_role": "engineering_only_not_paper_threshold",
-  "claim_ceiling": "evaluation_policy_frozen_no_paper_threshold_denominator_result_robustness_or_readiness_claim"
+  "claim_ceiling": "formal_contract_ready_execution_not_authorized_no_measured_threshold_fpr_robustness_or_paper_result"
 }

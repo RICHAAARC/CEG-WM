@@ -4,6 +4,8 @@
 
 Geometry-V7 starts from main exact `5af1fadd6a8025c6b2664703d519606238a89143` and the complete step-18 content chain. SyncSeal is a frozen final-RGB postprocessor and coordinate estimator; it is not trained or fine-tuned here. Existing embedding, keyed LF/HF scoring, calibrated weighted-joint scoring, key normalization, preprocessing, and threshold semantics remain unchanged. Geometry produces coordinates plus `RELIABLE`, `UNRELIABLE`, `UNSUPPORTED`, or `ERROR`; only content statistics may create a positive watermark decision.
 
+The selectors and boundary routes below document historical Geometry-V7 method-development stages; they do not define the PaperFPR FormalExperiment-V1 route. For the current formal experiment, `docs/formal_experiment_contract_v1.md` and `docs/blind_detection_v1_contract.md` control: Geometry-Direct may supply coordinates only, adds no reliability gate, and the unchanged content statistic plus content threshold alone decides watermark presence.
+
 This P0 through R3 implementation is local engineering infrastructure. It does not itself run a real model, GPU, Colab, or Drive job and does not adjudicate robustness, FPR, or science.
 
 ## P0 public interface

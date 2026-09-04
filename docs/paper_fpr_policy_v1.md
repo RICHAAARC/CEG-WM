@@ -11,11 +11,12 @@ wording is read more narrowly, the complete contract controls: no replacement
 is allowed, while one predeclared retry of the identical unit is allowed only
 for typed operational failures and retains every attempt.
 
-It freezes only threshold calibration and FPR reporting semantics. It does not
-freeze calibration/test denominators, prompt or image rosters, attack-table
-membership, generative-attack models, baseline readiness, or execution
-authorization. The existing BlindDetection-V1 `N_dev=256` threshold remains an
-engineering asset and is not the paper threshold.
+This policy is now integrated into the authoritative formal contract, which
+also freezes calibration/test denominators, rosters, attack-table membership,
+the supplementary reconstruction model, and baseline entry readiness. Only
+execution authorization and future measured results remain unfrozen. The
+existing BlindDetection-V1 `N_dev=256` threshold remains an engineering asset
+and is not the paper threshold.
 
 ## Score orientation and target
 
@@ -40,10 +41,10 @@ Calibration uses clean, unwatermarked negatives only. Attacked negatives do
 not tune the threshold. They are evaluated later with the same frozen
 threshold and are reported separately by attack condition.
 
-For `N_cal` complete normalized calibration scores sorted in nondecreasing
-order as `c_(1), ..., c_(N_cal)`, define
+For exactly `N_cal=2000` complete normalized calibration scores sorted in
+nondecreasing order as `c_(1), ..., c_(2000)`, define
 
-`k = ceil((1 - alpha) * N_cal)`
+`k = ceil((1 - alpha) * N_cal) = 1998`
 
 and
 
@@ -54,8 +55,10 @@ This is the nearest-rank empirical `99.9%` quantile. The decision is strictly
 `positive iff score > tau`.
 
 Equality is negative. This strict rule also resolves ties at the threshold.
-The calibration denominator and roster will be frozen separately before any
-formal run.
+The denominator and roster are frozen by
+`configs/paper_experiment/formal_experiment_v1.json`; no attacked negative is
+part of this calibration population. This supersedes any earlier pooled
+clean-plus-attacked threshold design.
 
 Calibration data must be disjoint from confirmation and formal test data.
 Formal test scores, labels, attacks, or aggregate outcomes may not be used to
@@ -108,8 +111,9 @@ new production threshold from the test set.
 
 ## Claim ceiling
 
-Freezing this policy establishes an evaluation rule only. It does not establish
-a paper threshold, a fixed denominator, an observed FPR, attack robustness,
-baseline completion, or paper readiness. Results remain publishable as
-complete measurements even when the observed operating point misses the
-target; only the strength of the conclusion changes.
+Together with `docs/formal_experiment_contract_v1.md`, this policy establishes
+a frozen, execution-ready but execution-not-authorized measurement contract.
+It does not establish a measured paper threshold, observed FPR, attack
+robustness, or paper result. Results remain publishable as complete measurements
+even when the observed operating point misses the target; only the strength of
+the conclusion changes.

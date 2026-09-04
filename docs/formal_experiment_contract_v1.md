@@ -91,11 +91,21 @@ shared. Calibration sorts the 2,000 complete scores and freezes
 `score > tau`; equality is negative. Attacked negatives and all test results are
 excluded from calibration and cannot revise tau.
 
-The proposed method's calibration score is `max(m_pre,m_post)` when one legal
-rectification completes, otherwise `m_pre` for a method-complete fail-closed
-route. Operationally incomplete rows have no score. Tree-Ring uses negative
-Fourier-key L1 distance, Gaussian Shading uses bit accuracy, Shallow Diffuse
-uses exactly `negative_mask_l1diff_mean`, and T2SMark uses `norm1_w_master_key`.
+This clean-only calibration design supersedes any earlier research description
+that pooled clean and attacked negatives to select a threshold. Attacked
+negatives reuse the one clean-only frozen threshold and contribute only to
+separately reported attacked-negative FPR.
+
+The proposed method uses the current Geometry-Direct/SyncSeal route. Geometry
+provides only a reference frame or coordinates; it never votes positive. This
+contract does not add a boundary-failure trigger or a Geometry reliability gate.
+Whenever the frozen route produces one legal rectification, the calibration
+score is `max(m_pre,m_post)`; otherwise a method-complete fail-closed route uses
+`m_pre`. Both scores use the same content statistic, key semantics,
+preprocessing, and content threshold. Operationally incomplete rows have no
+score. Tree-Ring uses negative Fourier-key L1 distance, Gaussian Shading uses
+bit accuracy, Shallow Diffuse uses exactly `negative_mask_l1diff_mean`, and
+T2SMark uses `norm1_w_master_key`.
 
 If any calibration unit remains operationally failed after its frozen attempts,
 the calibration result is still published as `INCOMPLETE_OPERATIONAL`, no
@@ -203,21 +213,45 @@ an existing arm or reruns an already committed unit.
 
 ## Seven notebook entries and stages
 
-The only logical entries are:
+The only logical entries and their frozen formal JOB_ID values are:
 
-1. `paper_main_worker_colab.ipynb`;
-2. `paper_baseline_worker_colab-t2smark.ipynb`;
-3. `paper_baseline_worker_colab-treering.ipynb`;
-4. `paper_baseline_worker_colab-gaussian-shading.ipynb`;
-5. `paper_baseline_worker_colab-shallow-diffuse.ipynb`;
-6. `paper_reconstruction_worker_colab.ipynb`;
-7. `paper_results_finalize_colab.ipynb`.
+1. `paper_main_worker_colab.ipynb`: `paper-main-v1`;
+2. `paper_baseline_worker_colab-t2smark.ipynb`:
+   `paper-baseline-t2smark-v1`;
+3. `paper_baseline_worker_colab-treering.ipynb`:
+   `paper-baseline-treering-v1`;
+4. `paper_baseline_worker_colab-gaussian-shading.ipynb`:
+   `paper-baseline-gaussian-shading-v1`;
+5. `paper_baseline_worker_colab-shallow-diffuse.ipynb`:
+   `paper-baseline-shallow-diffuse-v1`;
+6. `paper_reconstruction_worker_colab.ipynb`:
+   `paper-main-reconstruction-v1`;
+7. `paper_results_finalize_colab.ipynb`, whose finalizer identity is fixed by
+   the runner as `paper-formal-v1-finalizer`.
 
 Every first code cell is exactly the two-line Drive mount without
 `force_remount`; outputs and execution counts are empty at commit. Notebooks
 select only fixed JOB_ID and expected exact. They do not contain scientific
 threshold, roster, attack, checkpoint, retry, or aggregation logic and do not
 print per-unit scores.
+
+The shared formal Drive root is
+`/content/drive/MyDrive/CEG-WM/PaperFormal-V1`. The proposed method writes below
+`main/`, the four baselines below `baselines/`, reconstruction below
+`reconstruction/`, and the finalizer below `finalized/paper-formal-v1/`.
+Different JOB_ID values may run in parallel, but one JOB_ID must never have two
+concurrent runtimes. No hard concurrency lock is added.
+
+The first operational wave may run the proposed method, T2SMark, Tree-Ring,
+Gaussian Shading, and Shallow Diffuse in parallel. Inside each worker the order
+is strict: preflight, `N_cal=2000`, threshold publication,
+`N_clean_test=3000`, `N_pair=1000` generation and detection, quality and any
+fixed ablation, then `method_final.json`. Reconstruction starts only after the
+proposed method has published its threshold and complete evaluation images;
+operationally, wait for the proposed `method_final.json`. The finalizer runs
+last and waits for all five method finals plus `reconstruction_final.json`.
+Missing prerequisites or results remain `WAITING`; the formal notebooks never
+request an incomplete close.
 
 Calibration completes before one threshold is created. Evaluation refuses to
 load a model if its threshold is absent or mismatched. Main evaluation, clean
@@ -235,13 +269,15 @@ By default, any absent required method or reconstruction result publishes
 `--finalize-incomplete` synthesizes all-missing entries and seals an incomplete
 package.
 
-Each model notebook defaults to `--engineering-canary` on a Drive tree separate
-from formal results. The canary executes real generation and detection, creates
-append-only unit records and checkpoints, reopens the same stores to prove
-resume does not rerun scored units, and publishes only
+The current seven notebooks are frozen formal entries and do not pass
+`--engineering-canary`; opening them is not execution authorization. The
+separate historical canaries executed real generation and detection, created
+append-only unit records and checkpoints, reopened the same stores to prove
+resume did not rerun scored units, and published only
 `cegwm_engineering_canary_result_v1` with `science_denominator=0`. The finalizer
-canary verifies its Drive waiting-state write and absence of a premature final.
-These canaries are engineering evidence only.
+canary verified its Drive waiting-state write and absence of a premature final.
+Those canaries remain engineering evidence only under the path-level impact
+policy above.
 
 ## Result package and violations
 
@@ -261,7 +297,7 @@ turning failures into TN/FN, blocking the package on performance, adding a
 rotation+scale main-table condition, changing the Shallow statistic, calling
 no-geometry target-calibrated without a separate N=2,000 calibration, adding
 quality generation, promoting reconstruction to the main table, using canary
-rows as paper results, changing a stable JOB_ID, concurrent use of one JOB_ID,
+rows as paper results, changing a frozen formal JOB_ID, concurrent use of one JOB_ID,
 or executing without separate authorization.
 
 Poor TPR, observed FPR above 0.1%, a wide interval, operational incompleteness,
