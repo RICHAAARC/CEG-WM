@@ -119,6 +119,9 @@ The supplement covers the proposed method only. It uses the first
 repository revision `462165984030d82259a11f4367a4eed129e94a7b`, empty prompt,
 strength 0.3, guidance 1.0, 20 steps, and a fixed per-unit seed. It reuses the
 paper threshold and reports the same partial-result fields and intervals.
+The worker keeps only one model stack resident at a time: it reconstructs and
+saves ordinary RGB images, releases the SDXL pipeline and CUDA cache, then
+loads the unchanged blind-detection runtime to score those saved images.
 
 With 100 negative samples the empirical FPR resolution is 1%. This supplement
 cannot validate a 0.1% attacked FPR, does not enter the main table, and cannot

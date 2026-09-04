@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import subprocess
@@ -143,15 +144,44 @@ def _close_incomplete(
     })
 
 
-def _prepare_runtime(
-    config: Mapping[str, Any], runtime_root: Path, threshold: Mapping[str, Any]
-) -> tuple[Any, dict[str, Any]]:
+def _prepare_reconstruction_runtime(
+    config: Mapping[str, Any],
+) -> tuple[Any, Image.Image]:
     pipeline = _load_reconstruction_pipeline(config)
+    try:
+        source = Image.new("RGB", (512, 512), (127, 127, 127))
+        reconstructed = _reconstruct_once(
+            pipeline, source, config["reconstruction"], PREFLIGHT_SEED
+        )
+    except Exception:
+        del pipeline
+        _release_cuda_memory()
+        raise
+    return pipeline, reconstructed
+
+
+def _prepare_detection_runtime(
+    runtime_root: Path, threshold: Mapping[str, Any], probe: Image.Image,
+) -> dict[str, Any]:
     detection_runtime = _build_runtime(runtime_root)
-    source = Image.new("RGB", (512, 512), (127, 127, 127))
-    reconstructed = _reconstruct_once(pipeline, source, config["reconstruction"], PREFLIGHT_SEED)
-    _detect_payload(detection_runtime, reconstructed, float(threshold["tau"]))
-    return pipeline, detection_runtime
+    try:
+        _detect_payload(detection_runtime, probe, float(threshold["tau"]))
+    except Exception:
+        del detection_runtime
+        _release_cuda_memory()
+        raise
+    return detection_runtime
+
+
+def _release_cuda_memory() -> None:
+    """Release unreferenced model storage before loading the next GPU runtime."""
+
+    gc.collect()
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 
 def run_worker(
@@ -222,25 +252,25 @@ def run_worker(
 
     if threshold is None:
         raise AssertionError("reconstruction prerequisite check lost its threshold")
-    try:
-        pipeline, detection_runtime = execute_job_preflight(
-            root,
-            _identity(job_id, "preflight", expected_exact),
-            lambda: _prepare_runtime(config, runtime_root, threshold),
-        )
-    except PreflightFailed as error:
-        print(json.dumps({
-            "status": error.state["status"], "terminal": False,
-            "science_denominator": 0,
-        }, sort_keys=True))
-        return 3
-
     generated_root = root / "images"
     generation = FormalRunStore(
         root / "generation", _identity(job_id, "generation", expected_exact), ids
     )
     if not generation.completed_result():
+        try:
+            pipeline, _ = execute_job_preflight(
+                root,
+                _identity(job_id, "reconstruction_preflight", expected_exact),
+                lambda: _prepare_reconstruction_runtime(config),
+            )
+        except PreflightFailed as error:
+            print(json.dumps({
+                "status": error.state["status"], "terminal": False,
+                "science_denominator": 0,
+            }, sort_keys=True))
+            return 3
         item_by_id = dict(zip(ids, items, strict=True))
+
         def reconstruct(item_id: str, attempt: int) -> dict[str, Any]:
             unit, role = item_by_id[item_id]
             source = main_root / "evaluation_images" / f"{unit.roster_index:04d}" / ("watermarked.png" if role == "positive" else "clean.png")
@@ -258,22 +288,46 @@ def run_worker(
                 "truth_role": role, "image": str(output.relative_to(root)),
             }
 
-        generation.run(reconstruct)
-        generation.finalize({
-            "status": "COMPLETE" if all(row["terminal_status"] == "SCORED" for row in generation.rows()) else "INCOMPLETE_OPERATIONAL"
-        })
-        del pipeline
         try:
-            import torch
-            torch.cuda.empty_cache()
-        except ImportError:
-            pass
+            generation.run(reconstruct)
+            generation.finalize({
+                "status": "COMPLETE" if all(row["terminal_status"] == "SCORED" for row in generation.rows()) else "INCOMPLETE_OPERATIONAL"
+            })
+        finally:
+            del pipeline
+            _release_cuda_memory()
 
     detection = FormalRunStore(
         root / "detection", _identity(job_id, "detection", expected_exact), ids
     )
     if not detection.completed_result():
+        probe_path = next(
+            (
+                generated_root / f"{unit.roster_index:04d}" / f"{role}.png"
+                for unit, role in items
+                if (generated_root / f"{unit.roster_index:04d}" / f"{role}.png").is_file()
+            ),
+            None,
+        )
+        probe = (
+            _load_rgb(probe_path)
+            if probe_path is not None
+            else Image.new("RGB", (512, 512), (127, 127, 127))
+        )
+        try:
+            detection_runtime = execute_job_preflight(
+                root,
+                _identity(job_id, "detection_preflight", expected_exact),
+                lambda: _prepare_detection_runtime(runtime_root, threshold, probe),
+            )
+        except PreflightFailed as error:
+            print(json.dumps({
+                "status": error.state["status"], "terminal": False,
+                "science_denominator": 0,
+            }, sort_keys=True))
+            return 3
         item_by_id = dict(zip(ids, items, strict=True))
+
         def detect(item_id: str, attempt: int) -> dict[str, Any]:
             del attempt
             unit, role = item_by_id[item_id]
@@ -284,18 +338,22 @@ def run_worker(
                 "truth_role": role,
             }
 
-        detection.run(detect)
-        summaries = {
-            role: summarize_binary(
-                [row for row in detection.rows() if row.get("truth_role") == role],
-                truth_positive=role == "positive", planned=100,
-            )
-            for role in ("negative", "positive")
-        }
-        detection.finalize({
-            "summaries": summaries,
-            "status": "COMPLETE" if all(value["status"] == "COMPLETE" for value in summaries.values()) else "INCOMPLETE_OPERATIONAL",
-        })
+        try:
+            detection.run(detect)
+            summaries = {
+                role: summarize_binary(
+                    [row for row in detection.rows() if row.get("truth_role") == role],
+                    truth_positive=role == "positive", planned=100,
+                )
+                for role in ("negative", "positive")
+            }
+            detection.finalize({
+                "summaries": summaries,
+                "status": "COMPLETE" if all(value["status"] == "COMPLETE" for value in summaries.values()) else "INCOMPLETE_OPERATIONAL",
+            })
+        finally:
+            del detection_runtime
+            _release_cuda_memory()
 
     detection_result = json.loads(detection.final_path.read_text(encoding="utf-8"))
     _write_json_create_only(final_path, {
@@ -334,16 +392,6 @@ def run_engineering_canary(
         print(json.dumps({"status": value["status"], "terminal": True}, sort_keys=True))
         return 0 if value["status"] == "ENGINEERING_CANARY_COMPLETE" else 4
     threshold = {"tau": 0.0}
-    try:
-        pipeline, detection_runtime = execute_job_preflight(
-            root,
-            _identity(job_id, "engineering_canary_preflight", expected_exact),
-            lambda: _prepare_runtime(config, runtime_root, threshold),
-        )
-    except PreflightFailed as error:
-        print(json.dumps({"status": error.state["status"], "science_denominator": 0}, sort_keys=True))
-        return 3
-
     output = root / "images" / "reconstructed.png"
     generation_identity = _identity(job_id, "engineering_canary_generation", expected_exact)
     generation = FormalRunStore(
@@ -364,13 +412,30 @@ def run_engineering_canary(
             state = "IMAGE_CREATED"
         return {"artifact_status": "GENERATED", "image_state": state}
 
-    generation.run(generate)
-    generation_status = (
-        "COMPLETE"
-        if all(row["terminal_status"] == "SCORED" for row in generation.rows())
-        else "INCOMPLETE_OPERATIONAL"
-    )
-    generation.finalize({"status": generation_status, "science_denominator": 0})
+    generation_result = generation.completed_result()
+    if generation_result:
+        generation_status = generation_result["status"]
+    else:
+        try:
+            pipeline, _ = execute_job_preflight(
+                root,
+                _identity(job_id, "engineering_canary_reconstruction_preflight", expected_exact),
+                lambda: _prepare_reconstruction_runtime(config),
+            )
+        except PreflightFailed as error:
+            print(json.dumps({"status": error.state["status"], "science_denominator": 0}, sort_keys=True))
+            return 3
+        try:
+            generation.run(generate)
+            generation_status = (
+                "COMPLETE"
+                if all(row["terminal_status"] == "SCORED" for row in generation.rows())
+                else "INCOMPLETE_OPERATIONAL"
+            )
+            generation.finalize({"status": generation_status, "science_denominator": 0})
+        finally:
+            del pipeline
+            _release_cuda_memory()
     FormalRunStore(
         root / "generation", generation_identity, ("engineering-canary-reconstruction",)
     ).run(lambda unit_id, attempt: (_ for _ in ()).throw(
@@ -381,16 +446,33 @@ def run_engineering_canary(
     detection = FormalRunStore(
         root / "detection", detection_identity, ("engineering-canary-detection",)
     )
-    detection.run(lambda unit_id, attempt: {
-        **_detect_payload(detection_runtime, _load_rgb(output), 0.0),
-        "truth_role": "engineering_canary",
-    })
-    detection_status = (
-        "COMPLETE"
-        if all(row["terminal_status"] == "SCORED" for row in detection.rows())
-        else "INCOMPLETE_OPERATIONAL"
-    )
-    detection.finalize({"status": detection_status, "science_denominator": 0})
+    detection_result = detection.completed_result()
+    if detection_result:
+        detection_status = detection_result["status"]
+    else:
+        try:
+            detection_runtime = execute_job_preflight(
+                root,
+                _identity(job_id, "engineering_canary_detection_preflight", expected_exact),
+                lambda: _prepare_detection_runtime(runtime_root, threshold, _load_rgb(output)),
+            )
+        except PreflightFailed as error:
+            print(json.dumps({"status": error.state["status"], "science_denominator": 0}, sort_keys=True))
+            return 3
+        try:
+            detection.run(lambda unit_id, attempt: {
+                **_detect_payload(detection_runtime, _load_rgb(output), 0.0),
+                "truth_role": "engineering_canary",
+            })
+            detection_status = (
+                "COMPLETE"
+                if all(row["terminal_status"] == "SCORED" for row in detection.rows())
+                else "INCOMPLETE_OPERATIONAL"
+            )
+            detection.finalize({"status": detection_status, "science_denominator": 0})
+        finally:
+            del detection_runtime
+            _release_cuda_memory()
     FormalRunStore(
         root / "detection", detection_identity, ("engineering-canary-detection",)
     ).run(lambda unit_id, attempt: (_ for _ in ()).throw(

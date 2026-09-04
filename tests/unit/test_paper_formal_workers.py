@@ -67,8 +67,8 @@ def test_reconstruction_missing_prerequisites_waits_without_terminal_or_model(
         json.dumps({"status": "COMPLETE"}), encoding="utf-8"
     )
     monkeypatch.setattr(
-        reconstruction_worker, "_prepare_runtime",
-        lambda config, runtime_root, threshold: (_ for _ in ()).throw(RuntimeError("probe failed")),
+        reconstruction_worker, "_prepare_reconstruction_runtime",
+        lambda config: (_ for _ in ()).throw(RuntimeError("probe failed")),
     )
     assert reconstruction_worker.run_worker(
         job_id="paper-main-reconstruction-v1", main_job_id="paper-main-v1",
@@ -179,8 +179,32 @@ def test_main_canary_exercises_checkpoint_and_resume_with_science_n_zero(
 def test_reconstruction_canary_exercises_checkpoint_and_resume(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    runtime_events: list[str] = []
+
+    def prepare_reconstruction(config: object) -> tuple[object, Image.Image]:
+        del config
+        runtime_events.append("reconstruction")
+        return object(), Image.new("RGB", (512, 512), (7, 8, 9))
+
+    def prepare_detection(
+        root: Path, threshold: object, probe: Image.Image,
+    ) -> dict[str, object]:
+        del root, threshold, probe
+        assert runtime_events == ["reconstruction", "release"]
+        runtime_events.append("detection")
+        return {}
+
     monkeypatch.setattr(reconstruction_worker, "_verify_exact", lambda exact: None)
-    monkeypatch.setattr(reconstruction_worker, "_prepare_runtime", lambda config, root, threshold: (object(), {}))
+    monkeypatch.setattr(
+        reconstruction_worker, "_prepare_reconstruction_runtime", prepare_reconstruction,
+    )
+    monkeypatch.setattr(
+        reconstruction_worker, "_prepare_detection_runtime", prepare_detection,
+    )
+    monkeypatch.setattr(
+        reconstruction_worker, "_release_cuda_memory",
+        lambda: runtime_events.append("release"),
+    )
     monkeypatch.setattr(
         reconstruction_worker, "_reconstruct_once",
         lambda pipeline, source, attack, seed: Image.new("RGB", (512, 512), (7, 8, 9)),
@@ -196,6 +220,7 @@ def test_reconstruction_canary_exercises_checkpoint_and_resume(
     final = json.loads((tmp_path / "paper-reconstruction-canary-v1" / "canary_final.json").read_text())
     assert final["status"] == "ENGINEERING_CANARY_COMPLETE"
     assert final["checkpoint_count"] == 2
+    assert runtime_events == ["reconstruction", "release", "detection", "release"]
 
 
 @pytest.mark.unit
