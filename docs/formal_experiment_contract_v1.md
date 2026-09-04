@@ -3,15 +3,13 @@
 ## Status and authority
 
 The frozen local state is
-`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_READY /
-EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` records that the notebook-bound
-producer exacts are remotely fetchable and that the real Colab GPU + Google
-Drive engineering-canary evidence has closed for the main, four baseline,
-reconstruction, and finalizer entries under the path-level impact audit below.
-It means only that the formal experiment has the prerequisites to start. It
-does not authorize a model, GPU, Colab, Drive job, formal denominator, paper
-result, or merge. Formal execution requires separate explicit user
-authorization.
+`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_NOT_READY /
+FORMAL_ENTRY_CLOSURE_PENDING / EXECUTION_NOT_AUTHORIZED`. The path-level
+engineering-canary audit below is complete, but the seven notebook entries have
+not yet been converted from engineering-canary launchers to the frozen formal
+JOB_ID and Drive layout. Readiness remains false until those entry contracts,
+their tests, and their remote availability close. This state does not authorize
+a model, GPU, Colab, Drive job, formal denominator, paper result, or merge.
 
 The proposed method is defined only by the frozen PaperFPR producer descended
 from `main@e12c7eae91cc36edc5d1a1d96249780a3925eccb`. Baselines remain on
