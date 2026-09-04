@@ -2,8 +2,8 @@
 
 The four worker notebooks are bound to revised producer exact
 `e4cf4ed2738cb91204695efbf9fb6ce35858b5f7`. They remain unauthorized for
-formal Colab, GPU, model, or denominator execution; their default notebook mode
-is an independent engineering canary with `science_denominator=0`.
+formal Colab, GPU, model, or denominator execution. They are frozen formal
+entries; readiness is not execution authorization.
 
 This protocol covers Tree-Ring, Gaussian Shading, Shallow Diffuse, and T2SMark
 only. It excludes CEG and Geometry-V4 rows, results, thresholds, and attacks.
@@ -14,6 +14,10 @@ It freezes a measurement plan, not a completed scientific result.
 Each method freezes its own method-native threshold from **2,000 independent
 clean unwatermarked-negative** `threshold_freeze` units. The threshold freezer
 cannot read or receive feedback from the separate confirmation partition.
+At target alpha 0.001, it uses nearest-rank `k=1998`, freezes
+`tau=c_(1998)`, and decides strictly `score > tau`. This clean-only design
+supersedes any earlier description that pooled clean and attacked negatives to
+select a threshold. Attacked negatives never revise tau.
 
 The clean-negative test uses **3,000 independent clean unwatermarked-negative**
 `clean_confirmation` units. It reports `FP/3000`, observed FPR, and the exact
@@ -81,6 +85,16 @@ no replacement, and every attempt is reported per method/condition.
 Wrong-key remains an optional diagnostic only. It is excluded from threshold
 calibration, confirmation, and the main-table FPR.
 
+The four baseline notebooks use the shared formal Drive root
+`/content/drive/MyDrive/CEG-WM/PaperFormal-V1`, write below `baselines/`, and
+fix JOB_ID values `paper-baseline-t2smark-v1`,
+`paper-baseline-treering-v1`, `paper-baseline-gaussian-shading-v1`, and
+`paper-baseline-shallow-diffuse-v1`. They may run in parallel with the proposed
+method and with one another because the JOB_ID values differ; the same JOB_ID
+must not run concurrently. Within one worker the order is preflight,
+`N_cal=2000`, threshold, `N_clean_test=3000`, `N_pair=1000` generation and
+detection, quality, then `method_final.json`.
+
 ## Final baseline robustness-table contract
 
 The machine-readable final artifact uses this ordered long-table contract:
@@ -135,6 +149,7 @@ gate. One runtime per JOB_ID is an operator constraint.
 An uncommitted pair with only one persisted arm is recovered by regenerating
 the same prompt and seed, preserving the existing arm, and creating only the
 missing arm. A committed unit is never rerun. Each notebook's independent
-engineering-canary mode verifies real generation, detection, checkpoint
-publication, and resume under a non-formal Drive path; those results cannot be
-used as paper evidence.
+historical engineering canary verified real generation, detection, checkpoint
+publication, and resume under a non-formal Drive path. The current notebooks do
+not pass `--engineering-canary`; the retained canary results have
+`science_denominator=0` and cannot be used as paper evidence.

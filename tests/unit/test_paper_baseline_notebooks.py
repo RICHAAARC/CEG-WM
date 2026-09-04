@@ -14,6 +14,13 @@ BOOKS = (
 )
 
 PRODUCER_EXACT = "e4cf4ed2738cb91204695efbf9fb6ce35858b5f7"
+FORMAL_DRIVE_ROOT = "/content/drive/MyDrive/CEG-WM/PaperFormal-V1"
+FORMAL_JOB_IDS = {
+    "paper_baseline_worker_colab-t2smark.ipynb": "paper-baseline-t2smark-v1",
+    "paper_baseline_worker_colab-treering.ipynb": "paper-baseline-treering-v1",
+    "paper_baseline_worker_colab-gaussian-shading.ipynb": "paper-baseline-gaussian-shading-v1",
+    "paper_baseline_worker_colab-shallow-diffuse.ipynb": "paper-baseline-shallow-diffuse-v1",
+}
 
 
 @pytest.mark.unit
@@ -24,15 +31,24 @@ def test_formal_baseline_notebooks_are_clean_thin_fixed_entries() -> None:
         assert "".join(code[0]["source"]) == "from google.colab import drive\ndrive.mount('/content/drive')"
         text = "\n".join("".join(cell["source"]) for cell in code)
         assert PRODUCER_EXACT in text
+        assert FORMAL_JOB_IDS[name] in text
+        assert FORMAL_DRIVE_ROOT in text
         assert "experiments.run_paper_baseline_worker" in text
         assert "--job-id" in text and "--expected-exact" in text
-        assert "--engineering-canary" in text
-        assert "PaperFormal-V1-EngineeringCanary" in text
-        assert "canary_final.json" in text
+        assert "'--drive-root', str(drive_root / 'baselines')" in text
+        assert "final_path = drive_root / 'baselines' / JOB_ID / 'method_final.json'" in text
+        assert "--engineering-canary" not in text
+        assert "--finalize-incomplete" not in text
+        assert "PaperFormal-V1-EngineeringCanary" not in text
+        assert "canary_final.json" not in text
+        assert "method_final.json" in text
         assert "'PYTHONPATH'" in text
         assert "'pip', 'install', '-e'" not in text
+        assert "'checkout', '--detach', EXPECTED_EXACT" in text
+        assert "head == EXPECTED_EXACT and not dirty" in text
         assert "force_remount" not in text
         assert "force-rerun-all" not in text
+        compile(text, name, "exec")
         for cell in code:
             assert cell["outputs"] == []
             assert cell["execution_count"] is None

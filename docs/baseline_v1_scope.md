@@ -21,9 +21,10 @@ An exact one-sided 95% upper bound is optional diagnostic context only; it is
 not an admission condition and cannot suppress a result package.
 Evaluation uses 1,000 physical units over the six frozen conditions: clean,
 JPEG Q50, 50% bicubic restore, 80% center-crop restore, Gaussian blur sigma 1,
-and the frozen +10-degree rotation. The prompt roster, sampling-seed roster,
-and dataset identity remain unresolved; this document does not invent them. A
-threshold is never shared between methods.
+and the frozen +10-degree rotation. The prompt-source roster, partitioned seed
+ranges, and ordered unit identities are frozen in
+`configs/paper_experiment/formal_experiment_v1.json`; a rotation-plus-scale
+condition is absent. A threshold is never shared between methods.
 
 The main-table builder admits only watermarked evaluation and unwatermarked
 negative evaluation records from these four baselines. It counts TP/FN/FP/TN and
@@ -34,12 +35,12 @@ Geometry-V4 rows are not baseline IDs and are rejected.
 
 The source audit registers method-native score directions. Shallow Diffuse uses
 exactly `negative_mask_l1diff_mean`; its p-value alternative is outside this
-contract. Tree-Ring, Gaussian
-Shading, and Shallow Diffuse have an `implemented_unexecuted` SD3.5 adapter
-status: the mechanism and CPU fixtures were migrated from the non-git SLM-WM
-adapter archive, which supplies neither a source exact nor a real GPU result.
-Their `result_status` remains `not_available` and `paper_claim_support` remains
-false. `observed` and
+contract. Tree-Ring, Gaussian Shading, Shallow Diffuse, and T2SMark have each
+completed a real Colab engineering canary for model loading, generation,
+detection, checkpoint publication, and resume. Those canaries have
+`science_denominator=0`; formal `result_status` remains `not_available` and
+`paper_claim_support` remains false. The archive origin of three adapters is
+implementation provenance, not scientific evidence. `observed` and
 `confirmation_observed` records require a real score/decision, that method's
 direction, and a `baseline_id:calibration:` threshold provenance prefix; optional
 source/adapter exacts or artifact digests never decide their admissibility.
@@ -48,6 +49,6 @@ decisions. The registry and adapter plan describe implementation work, not a
 claim that an adapter, calibration, or scientific result is complete.
 
 No record here supplies geometry (`H_hat` or corners), alters Geometry-V4, or
-constitutes a model execution, threshold calibration, attack roster, denominator,
-or scientific result.  Other baseline families are future extensions and are
+constitutes an executed threshold calibration, formal denominator, or
+scientific result. Other baseline families are future extensions and are
 outside this main table.
