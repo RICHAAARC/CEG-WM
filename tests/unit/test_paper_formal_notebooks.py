@@ -11,8 +11,8 @@ BOOKS = (
     "paper_reconstruction_worker_colab.ipynb",
     "paper_results_finalize_colab.ipynb",
 )
-PAPER_PRODUCER_EXACT = "93fc45a03ed3c15b1fde768316ba8db9dcff25e5"
-BASELINE_PRODUCER_EXACT = "004b73dd1ebcceae73f05adb76159788414fb43f"
+PAPER_PRODUCER_EXACT = "9ec454055c74cf4ed89001387c9f700e9ba5aef0"
+BASELINE_PRODUCER_EXACT = "e4cf4ed2738cb91204695efbf9fb6ce35858b5f7"
 
 
 @pytest.mark.unit
@@ -35,3 +35,21 @@ def test_formal_notebooks_are_clean_thin_fixed_entries() -> None:
         for cell in code:
             assert cell["outputs"] == []
             assert cell["execution_count"] is None
+
+
+@pytest.mark.unit
+def test_reconstruction_notebook_surfaces_worker_error_state() -> None:
+    payload = json.loads(
+        (Path("notebooks") / "paper_reconstruction_worker_colab.ipynb").read_text(
+            encoding="utf-8"
+        )
+    )
+    text = "\n".join(
+        "".join(cell["source"])
+        for cell in payload["cells"]
+        if cell["cell_type"] == "code"
+    )
+    assert "completed.returncode" in text
+    assert "job_state.json" in text
+    assert "error_code=" in text and "error=" in text
+    compile(text, "paper_reconstruction_worker_colab.ipynb", "exec")

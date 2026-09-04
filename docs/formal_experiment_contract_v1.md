@@ -18,8 +18,8 @@ BlindDetection-V1 N_dev=256 max-score threshold and N=4 smoke remain engineering
 evidence with science_denominator=0; neither is a paper threshold or FPR result.
 
 The notebook-executed producer exacts are
-`PaperFPR-V1@93fc45a03ed3c15b1fde768316ba8db9dcff25e5` and
-`Baseline-V1@004b73dd1ebcceae73f05adb76159788414fb43f`.
+`PaperFPR-V1@9ec454055c74cf4ed89001387c9f700e9ba5aef0` and
+`Baseline-V1@e4cf4ed2738cb91204695efbf9fb6ce35858b5f7`.
 Earlier notebook exacts are not valid for this repaired execution chain.
 
 ## Shared population contract
