@@ -13,7 +13,7 @@ BOOKS = (
     "paper_baseline_worker_colab-shallow-diffuse.ipynb",
 )
 
-PRODUCER_EXACT = "004b73dd1ebcceae73f05adb76159788414fb43f"
+PRODUCER_EXACT = "e4cf4ed2738cb91204695efbf9fb6ce35858b5f7"
 
 
 @pytest.mark.unit
@@ -36,3 +36,30 @@ def test_formal_baseline_notebooks_are_clean_thin_fixed_entries() -> None:
         for cell in code:
             assert cell["outputs"] == []
             assert cell["execution_count"] is None
+
+
+@pytest.mark.unit
+def test_t2smark_notebook_uses_proven_runtime_profile_and_surfaces_worker_error() -> None:
+    payload = json.loads(
+        (Path("notebooks") / "paper_baseline_worker_colab-t2smark.ipynb").read_text(
+            encoding="utf-8"
+        )
+    )
+    text = "\n".join(
+        "".join(cell["source"])
+        for cell in payload["cells"]
+        if cell["cell_type"] == "code"
+    )
+    for dependency in (
+        "diffusers==0.32.0",
+        "transformers==4.45.2",
+        "accelerate==1.1.1",
+        "huggingface_hub==0.26.2",
+        "safetensors==0.4.5",
+        "sentencepiece==0.2.0",
+    ):
+        assert dependency in text
+    assert "completed.returncode" in text
+    assert "job_state.json" in text
+    assert "error_code=" in text and "error=" in text
+    compile(text, "paper_baseline_worker_colab-t2smark.ipynb", "exec")

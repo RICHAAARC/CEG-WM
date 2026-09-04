@@ -1,7 +1,7 @@
 # Baseline-V1 formal protocol (user-frozen)
 
 The four worker notebooks are bound to revised producer exact
-`004b73dd1ebcceae73f05adb76159788414fb43f`. They remain unauthorized for
+`e4cf4ed2738cb91204695efbf9fb6ce35858b5f7`. They remain unauthorized for
 formal Colab, GPU, model, or denominator execution; their default notebook mode
 is an independent engineering canary with `science_denominator=0`.
 
