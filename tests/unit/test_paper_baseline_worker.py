@@ -34,6 +34,13 @@ def test_formal_worker_has_no_canary_lock_force_or_hash_gate() -> None:
 
 
 @pytest.mark.unit
+def test_t2smark_formal_runtime_reuses_proven_canary_loader() -> None:
+    source = Path(worker.__file__).read_text(encoding="utf-8")
+    assert "from cegwm.baselines.t2smark_canary import load_t2smark_sd35_pipeline" in source
+    assert "load_t2smark_sd35_pipeline(" in source
+
+
+@pytest.mark.unit
 def test_unavailable_threshold_keeps_all_planned_evaluation_cells() -> None:
     summaries = worker._empty_evaluation()
     assert len(summaries) == 12

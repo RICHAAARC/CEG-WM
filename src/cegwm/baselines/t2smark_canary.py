@@ -25,6 +25,33 @@ CONDITIONS = ("clean_no_attack", "gaussian_noise_sigma_0p05_v1", "jpeg_q50_v1",
               "rotation_10_bicubic_reflect_center_crop_v1")
 
 
+def load_t2smark_sd35_pipeline(
+    official_source: Path,
+    *,
+    model_id: str,
+    model_revision: str,
+    hf_token: str,
+) -> Any:
+    """Load the pinned official SD3.5 pipeline used by the proven canary path."""
+
+    if not isinstance(hf_token, str) or not hf_token.strip():
+        raise RuntimeError("HF_TOKEN is required")
+    source_text = str(official_source)
+    if source_text not in sys.path:
+        sys.path.insert(0, source_text)
+    import torch
+    from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
+
+    pipeline = InversionDiffusion3Pipeline.from_pretrained(
+        model_id,
+        revision=model_revision,
+        torch_dtype=torch.float16,
+        token=hf_token,
+    ).to("cuda")
+    pipeline.set_progress_bar_config(disable=True)
+    return pipeline
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -293,10 +320,14 @@ def main() -> None:
     root = Path(args.run_dir); state: dict[str, Any] = {}
     def get_pipe() -> Any:
         if "pipe" in state: return state["pipe"]
-        from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
-        pipe = InversionDiffusion3Pipeline.from_pretrained(config["model_id"],revision=config["model_revision"],
-            torch_dtype=torch.float16,token=os.environ["HF_TOKEN"]).to("cuda")
-        pipe.set_progress_bar_config(disable=True); state["pipe"] = pipe; return pipe
+        pipe = load_t2smark_sd35_pipeline(
+            source,
+            model_id=config["model_id"],
+            model_revision=config["model_revision"],
+            hf_token=os.environ["HF_TOKEN"],
+        )
+        state["pipe"] = pipe
+        return pipe
     def generate() -> None:
         pipe = get_pipe(); device=torch.device(pipe._execution_device)
         latent=torch.randn((1,16,64,64),generator=torch.Generator("cuda").manual_seed(config["generation_seed"]),device=device,dtype=torch.float16)

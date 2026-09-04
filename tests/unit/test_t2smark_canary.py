@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, clear_stale_lock, establish_contract, generation_digest, pending_observations, run_canary, run_transaction, sha256_file, valid_generation, valid_observation, validate_final_publication
+from cegwm.baselines.t2smark_canary import CONDITIONS, RUN_SCHEMA, RunLock, atomic_json, atomic_png, clear_stale_lock, establish_contract, generation_digest, load_t2smark_sd35_pipeline, pending_observations, run_canary, run_transaction, sha256_file, valid_generation, valid_observation, validate_final_publication
 
 
 def config() -> dict:
@@ -125,3 +125,17 @@ def test_main_uses_transaction_not_lock_outside_generation() -> None:
     main_source = source[source.index("def main()"):]
     assert "run_transaction(root, config, generate, execute, force=args.force_rerun_all)" in main_source
     assert "run_canary(root,config" not in main_source and "establish_contract(root,config)" not in main_source
+
+
+def test_shared_pipeline_loader_requires_token(tmp_path: Path) -> None:
+    try:
+        load_t2smark_sd35_pipeline(
+            tmp_path,
+            model_id="model",
+            model_revision="revision",
+            hf_token="",
+        )
+    except RuntimeError as error:
+        assert str(error) == "HF_TOKEN is required"
+    else:
+        raise AssertionError("empty token reached the official runtime import")

@@ -12,7 +12,6 @@ import json
 import math
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Mapping
@@ -222,16 +221,17 @@ class _ExternalRuntime:
 class _T2SRuntime:
     def __init__(self, source: Path, hf_token: str) -> None:
         import torch
+        from cegwm.baselines.t2smark_canary import load_t2smark_sd35_pipeline
+
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is required for formal T2SMark execution")
-        sys.path.insert(0, str(source))
-        from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
         self.torch = torch
-        self.pipeline = InversionDiffusion3Pipeline.from_pretrained(
-            MODEL_ID, revision=MODEL_REVISION, torch_dtype=torch.float16,
-            token=hf_token,
-        ).to("cuda")
-        self.pipeline.set_progress_bar_config(disable=True)
+        self.pipeline = load_t2smark_sd35_pipeline(
+            source,
+            model_id=MODEL_ID,
+            model_revision=MODEL_REVISION,
+            hf_token=hf_token,
+        )
         keygen = torch.Generator("cuda").manual_seed(
             METHOD_SPECS["t2smark"]["watermark_seed"]
         )
