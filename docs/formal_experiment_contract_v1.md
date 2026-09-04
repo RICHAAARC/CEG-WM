@@ -3,13 +3,15 @@
 ## Status and authority
 
 The frozen local state is
-`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_NOT_READY / CANARY_REQUIRED /
-EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` requires both remotely fetchable
-notebook-bound producer exacts and successful real GPU + Google Drive
-engineering canaries for the main, four baseline, reconstruction, and finalizer
-entries. Publishing producer exacts requires separate push authorization; it
-does not authorize a model, GPU, Colab, Drive job, or formal denominator.
-Formal execution itself also requires a separate user authorization.
+`FORMAL_EXPERIMENT_CONTRACT_FROZEN / EXECUTION_READY /
+EXECUTION_NOT_AUTHORIZED`. `EXECUTION_READY` records that the notebook-bound
+producer exacts are remotely fetchable and that the real Colab GPU + Google
+Drive engineering-canary evidence has closed for the main, four baseline,
+reconstruction, and finalizer entries under the path-level impact audit below.
+It means only that the formal experiment has the prerequisites to start. It
+does not authorize a model, GPU, Colab, Drive job, formal denominator, paper
+result, or merge. Formal execution requires separate explicit user
+authorization.
 
 The proposed method is defined only by the frozen PaperFPR producer descended
 from `main@e12c7eae91cc36edc5d1a1d96249780a3925eccb`. Baselines remain on
@@ -20,7 +22,51 @@ evidence with science_denominator=0; neither is a paper threshold or FPR result.
 The notebook-executed producer exacts are
 `PaperFPR-V1@9ec454055c74cf4ed89001387c9f700e9ba5aef0` and
 `Baseline-V1@e4cf4ed2738cb91204695efbf9fb6ce35858b5f7`.
-Earlier notebook exacts are not valid for this repaired execution chain.
+Formal jobs must use these current producer exacts. Earlier exacts are not
+valid formal producers for this repaired execution chain, but their successful
+engineering-canary evidence may be inherited for an execution path that the
+impact audit confirms was not materially changed.
+
+## Engineering canary readiness audit
+
+Canary evidence is invalidated by material execution-path changes, not by
+unrelated repository commit changes. Reconstruction and T2SMark were rerun
+because their runtime paths changed; unchanged worker paths inherit the
+previous successful engineering canary evidence.
+
+All seven notebook entries have successful real Colab/Drive engineering
+canary evidence with `science_denominator=0`. These runs verify model loading,
+generation, detection, checkpoint publication and resume where applicable;
+the finalizer canary verifies its waiting-state write and the absence of a
+premature unified final. They do not consume or contaminate a formal
+denominator and are not paper results.
+
+The frozen impact dispositions are:
+
+- Paper changed from `93fc45a03ed3c15b1fde768316ba8db9dcff25e5`
+  to `9ec454055c74cf4ed89001387c9f700e9ba5aef0`. The material runtime change is
+  the Reconstruction GPU-runtime split, CUDA-memory release, and staged
+  generation/detection recovery. Reconstruction was rerun at the current exact
+  and completed. The main worker and finalizer core paths were not materially
+  changed, so their previous successful canary evidence is inherited.
+- Baseline changed from `004b73dd1ebcceae73f05adb76159788414fb43f`
+  to `e4cf4ed2738cb91204695efbf9fb6ce35858b5f7`. The material execution-path
+  change is the T2SMark runtime compatibility repair. T2SMark was rerun at the
+  current exact and completed. Tree-Ring, Gaussian Shading, and Shallow Diffuse
+  were not materially changed, so their previous successful canary evidence is
+  inherited.
+- The notebook-binding commits containing these producer exacts are present on
+  their remote branches. Existing Drive canary results remain retained without
+  deletion or overwrite and serve only as engineering-path evidence.
+
+Any later change to model loading, generation, detection, statistics, Drive
+state, checkpoint/resume, threshold, denominator, roster, attack parameters,
+or finalizer sealing requires a fresh impact analysis. Only execution paths
+affected by a material change require another engineering canary.
+
+Until separate explicit user authorization is received, no formal `N_cal`,
+`N_clean_test`, `N_pair`, or reconstruction denominator may run; no paper-level
+result may be produced; and this branch may not be merged to `main`.
 
 ## Shared population contract
 
