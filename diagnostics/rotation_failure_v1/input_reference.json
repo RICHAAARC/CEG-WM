@@ -1,0 +1,411 @@
+{
+  "status": "POSTHOC_DIAGNOSTIC_ONLY",
+  "science_denominator": 0,
+  "baseline_main": "e12c7eae91cc36edc5d1a1d96249780a3925eccb",
+  "drive_root": "https://drive.google.com/drive/folders/1UGp21CKpJoDs9hmT_K2qOOVvzg6-OeQq",
+  "manifest": "https://drive.google.com/file/d/1lG4YYKqnim0ToDwjuEbASNXA3OXuQkUG/view",
+  "drive_index": "https://drive.google.com/file/d/1YtBQG3gIX2TGtFDiLl5d7fnVrK3MGrI9/view",
+  "selection_note": "Existing roster retained. Typical stratum matches sorted remaining-948 central positions 463..486, not 24 nearest numeric distances to median. Original generation algorithm unverified.",
+  "entries": [
+    {
+      "sample_id": "formal_evaluation_pairs-0003",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0004",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0010",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0012",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0016",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0017",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0018",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0021",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0026",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0028",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0029",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0030",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0035",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0037",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0040",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0041",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0042",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0044",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0045",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0051",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0055",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0056",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0065",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0067",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0068",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0069",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0072",
+      "selection_stratum": "crop_success_rotation_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0074",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0076",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0083",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0092",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0106",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0107",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0109",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0120",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0152",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0185",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0198",
+      "selection_stratum": "rotation_success"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0212",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0224",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0279",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0280",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0289",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0339",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0340",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0355",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0372",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0380",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0384",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0385",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0398",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0403",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0412",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0416",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0444",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0453",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0458",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0463",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0464",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0466",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0479",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0483",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0486",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0543",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0561",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0577",
+      "selection_stratum": "rotation_success"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0593",
+      "selection_stratum": "rotation_success"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0632",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0644",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0653",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0674",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0677",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0680",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0685",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0691",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0725",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0728",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0730",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0732",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0738",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0751",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0763",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0781",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0793",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0802",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0818",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0819",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0822",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0842",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0848",
+      "selection_stratum": "rotation_success"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0866",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0867",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0875",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0893",
+      "selection_stratum": "rotation_near_miss"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0911",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0932",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0941",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0965",
+      "selection_stratum": "rotation_typical_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0993",
+      "selection_stratum": "rotation_worst_failure"
+    },
+    {
+      "sample_id": "formal_evaluation_pairs-0994",
+      "selection_stratum": "rotation_near_miss"
+    }
+  ]
+}
