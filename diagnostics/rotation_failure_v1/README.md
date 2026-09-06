@@ -78,3 +78,6 @@ python diagnostic.py --root /path/to/external/diagnostic-data run-diagnostic \
 使用原有 CEG_WM_ROOT_KEY、HF_TOKEN 环境变量，不写入日志。builder 可能加载生成 pipeline，但本程序不调用生成。
 运行参数不能改阈值、样本数或攻击条件；数据/运行资产/输出路径拒绝位于本 Git worktree 内。
 CPU 检查不代表真实模型诊断通过；阶段 3 的最终通过还需完整真实记录、oracle 正确性和原因审议。
+
+真实预检入口已单独准备：`preflight.py`、`run_preflight.sh`；范围与执行前置见 `PREFLIGHT_SCOPE.md`。
+新增预检检查后合计 13 项 CPU 测试通过，shell 语法检查通过。真实预检仍未启动，不能自动进入 100 对诊断。
