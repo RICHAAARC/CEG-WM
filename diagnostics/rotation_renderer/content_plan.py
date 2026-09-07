@@ -97,6 +97,28 @@ def _score_routes(attacked, predicted_h, truth_h, score, tau):
     return rows
 
 
+def validate_scoring_assets(assets, key, r0):
+    """Check existing assets for reuse without constructing or running models."""
+    from experiments.run_blind_detection_v1 import (
+        load_weighted_asset_semantic, load_whitening_asset_semantic, load_iss_asset_semantic,
+    )
+    if type(assets) is not BlindProductionAssets:
+        raise TypeError("requires current typed production scoring assets")
+    root = Path(__file__).resolve().parents[2]
+    normalized_key = normalize_detection_key(key)
+    if r0["public_key_digest"] != public_key_digest(normalized_key):
+        raise ValueError("original embedding and current scoring key differ")
+    iss = assets.content_assets.iss_assets
+    comparisons = (
+        (assets.weighted_joint_asset, load_weighted_asset_semantic(root)),
+        (iss.lf_public_assets.whitening_asset, load_whitening_asset_semantic(root)),
+        (iss.iss_asset, load_iss_asset_semantic(root)),
+    )
+    if any(a.payload != b.payload for a,b in comparisons):
+        raise ValueError("current production scoring asset semantics differ")
+    return normalized_key
+
+
 class ContentSession:
     """Call only after execution approval, with the existing production assets.
 
@@ -104,29 +126,14 @@ class ContentSession:
     Production factory construction, if needed, is a separately approved action.
     """
     def __init__(self, inputs, geometry_results, output, key, assets):
-        from experiments.run_blind_detection_v1 import (
-            load_weighted_asset_semantic,
-            load_whitening_asset_semantic, load_iss_asset_semantic,
-        )
-        if type(assets) is not BlindProductionAssets:
-            raise TypeError("requires current typed production scoring assets")
-        root = Path(__file__).resolve().parents[2]
         r0, self.sources = prepare_sources(inputs)
-        self.key = normalize_detection_key(key)
+        self.key = validate_scoring_assets(assets, key, r0)
         key_identity = public_key_digest(self.key)
-        if r0["public_key_digest"] != key_identity:
-            raise ValueError("original embedding and current scoring key differ")
-        iss = assets.content_assets.iss_assets
-        comparisons = (
-            (assets.weighted_joint_asset, load_weighted_asset_semantic(root)),
-            (iss.lf_public_assets.whitening_asset, load_whitening_asset_semantic(root)),
-            (iss.iss_asset, load_iss_asset_semantic(root)),
-        )
-        if any(a.payload != b.payload for a,b in comparisons):
-            raise ValueError("current production scoring asset semantics differ")
         self.assets, self.tau = assets, FORMAL_TAU_REFERENCE
-        geometry_rows = [json.loads(line) for name in ("baseline.jsonl","remaining.jsonl")
-            for line in (Path(geometry_results)/name).read_text().splitlines()]
+        geometry_path = Path(geometry_results)
+        geometry_rows = _read(geometry_path)["rows"] if geometry_path.is_file() else [
+            json.loads(line) for name in ("baseline.jsonl","remaining.jsonl")
+            for line in (geometry_path/name).read_text().splitlines()]
         self.cg_geometry = {}
         for row in geometry_rows:
             if row["unit_id"] in UNITS and row["interpolation"] == "bilinear":

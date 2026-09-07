@@ -1,0 +1,785 @@
+{
+  "source": "RotationRenderer-Diagnostic-V1/renderer-v1 baseline.jsonl and remaining.jsonl",
+  "execution_exact": "253e4a6cd47d04f535351b95165b7b238c0cfb60",
+  "source_count": 64,
+  "selected_count": 8,
+  "science_denominator": 0,
+  "rows": [
+    {
+      "unit_id": "content-v6-iss-eval-0001",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0001/CG.png",
+      "local_image_file": "content-v6-iss-eval-0001__CG.png",
+      "drive_id": "1DW3wxEkFxkfVD1pPYgNvcxZl_jgsmKgH",
+      "condition_id": "core_rotation_neg15",
+      "angle_deg": -15,
+      "fill": "black",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.010487699881196022,
+        "raw_syncseal_corners": [
+          [
+            -1.2229033708572388,
+            -0.7112836241722107
+          ],
+          [
+            0.7043142318725586,
+            -1.2211589813232422
+          ],
+          [
+            1.2134666442871094,
+            0.7030351161956787
+          ],
+          [
+            -0.7117710113525391,
+            1.2140967845916748
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -1.227450980392157,
+            -0.7098039215686274
+          ],
+          [
+            0.7098039215686274,
+            -1.219607843137255
+          ],
+          [
+            1.219607843137255,
+            0.7098039215686274
+          ],
+          [
+            -0.7098039215686274,
+            1.219607843137255
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9666619683861618,
+            0.25685804681753466,
+            -0.0009898415924115822
+          ],
+          [
+            -0.25490196078431404,
+            0.9647058823529413,
+            0.001700777542763129
+          ],
+          [
+            0.0005007974235900401,
+            0.0018953256338939406,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 1.3734667939798415,
+      "identity": false,
+      "historical_corner_rmse_px": 1.3734667939798415,
+      "difference_from_history_px": 0.0,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          0.7071067811865476
+        ],
+        [
+          -0.7071067811865476,
+          1.224744871391589
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.21527939999941736
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0002",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0002/CG.png",
+      "local_image_file": "content-v6-iss-eval-0002__CG.png",
+      "drive_id": "1FmL8v7hHYz5287AZ4nZO6w-qswKCEg7k",
+      "condition_id": "core_rotation_neg15",
+      "angle_deg": -15,
+      "fill": "black",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.01066024973988533,
+        "raw_syncseal_corners": [
+          [
+            -1.2235279083251953,
+            -0.7087225914001465
+          ],
+          [
+            0.7006388902664185,
+            -1.222079873085022
+          ],
+          [
+            1.2159371376037598,
+            0.7023426294326782
+          ],
+          [
+            -0.7088134288787842,
+            1.2147024869918823
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -1.227450980392157,
+            -0.7098039215686274
+          ],
+          [
+            0.7098039215686274,
+            -1.219607843137255
+          ],
+          [
+            1.227450980392157,
+            0.7098039215686274
+          ],
+          [
+            -0.7098039215686274,
+            1.219607843137255
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9686274509803922,
+            0.25882352941176484,
+            2.1655575314235283e-17
+          ],
+          [
+            -0.2549019607843138,
+            0.9647058823529412,
+            -1.5148513958385047e-17
+          ],
+          [
+            1.7642721102651745e-17,
+            0.0,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 1.255090505922239,
+      "identity": false,
+      "historical_corner_rmse_px": 1.255090505922239,
+      "difference_from_history_px": 0.0,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          0.7071067811865476
+        ],
+        [
+          -0.7071067811865476,
+          1.224744871391589
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.14864966191817075
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0001",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0001/CG.png",
+      "local_image_file": "content-v6-iss-eval-0001__CG.png",
+      "drive_id": "1DW3wxEkFxkfVD1pPYgNvcxZl_jgsmKgH",
+      "condition_id": "core_rotation_pos15",
+      "angle_deg": 15,
+      "fill": "black",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.0059222872368991375,
+        "raw_syncseal_corners": [
+          [
+            -0.7078771591186523,
+            -1.2224820852279663
+          ],
+          [
+            1.2157045602798462,
+            -0.7093538045883179
+          ],
+          [
+            0.701744019985199,
+            1.2145484685897827
+          ],
+          [
+            -1.2219213247299194,
+            0.7018986940383911
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -0.7098039215686274,
+            -1.219607843137255
+          ],
+          [
+            1.227450980392157,
+            -0.7098039215686274
+          ],
+          [
+            0.7098039215686274,
+            1.219607843137255
+          ],
+          [
+            -1.219607843137255,
+            0.7098039215686274
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9666619683861618,
+            -0.25685804681753444,
+            0.0009898415924120348
+          ],
+          [
+            0.25490196078431376,
+            0.9647058823529412,
+            0.0017007775427631217
+          ],
+          [
+            -0.0005007974235898845,
+            0.0018953256338940774,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 1.3734667939798415,
+      "identity": false,
+      "historical_corner_rmse_px": 1.3734667939798415,
+      "difference_from_history_px": 0.0,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          1.224744871391589
+        ],
+        [
+          -1.224744871391589,
+          0.7071067811865476
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.09315761306788772
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0002",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0002/CG.png",
+      "local_image_file": "content-v6-iss-eval-0002__CG.png",
+      "drive_id": "1FmL8v7hHYz5287AZ4nZO6w-qswKCEg7k",
+      "condition_id": "core_rotation_pos15",
+      "angle_deg": 15,
+      "fill": "black",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.005862592253834009,
+        "raw_syncseal_corners": [
+          [
+            -0.7104957103729248,
+            -1.2237228155136108
+          ],
+          [
+            1.2150272130966187,
+            -0.7094340324401855
+          ],
+          [
+            0.7024791836738586,
+            1.2149449586868286
+          ],
+          [
+            -1.222392201423645,
+            0.7026774287223816
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -0.7098039215686274,
+            -1.227450980392157
+          ],
+          [
+            1.227450980392157,
+            -0.7098039215686274
+          ],
+          [
+            0.7098039215686274,
+            1.227450980392157
+          ],
+          [
+            -1.219607843137255,
+            0.7098039215686274
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9666619607963416,
+            -0.25685803922771416,
+            0.0009851055445526595
+          ],
+          [
+            0.2588235294117648,
+            0.9686274509803922,
+            0.0017035250577069668
+          ],
+          [
+            -0.0005060689940729569,
+            0.0018939248717575108,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 1.1243190481117975,
+      "identity": false,
+      "historical_corner_rmse_px": 1.1243190481117975,
+      "difference_from_history_px": 0.0,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          1.224744871391589
+        ],
+        [
+          -1.224744871391589,
+          0.7071067811865476
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.07054290699306875
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0001",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0001/CG.png",
+      "local_image_file": "content-v6-iss-eval-0001__CG.png",
+      "drive_id": "1DW3wxEkFxkfVD1pPYgNvcxZl_jgsmKgH",
+      "condition_id": "core_rotation_neg15",
+      "angle_deg": -15,
+      "fill": "reflect",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.00875109527260065,
+        "raw_syncseal_corners": [
+          [
+            -1.0447882413864136,
+            -0.8464908599853516
+          ],
+          [
+            0.8693577647209167,
+            -1.0160118341445923
+          ],
+          [
+            1.0359176397323608,
+            0.8305933475494385
+          ],
+          [
+            -0.8909832239151001,
+            1.0058670043945312
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -1.0470588235294118,
+            -0.8431372549019608
+          ],
+          [
+            0.8745098039215686,
+            -1.0156862745098039
+          ],
+          [
+            1.0470588235294116,
+            0.8352941176470587
+          ],
+          [
+            -0.8901960784313725,
+            1.0156862745098039
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.964682647736639,
+            0.08237617579277264,
+            -0.0026153485869424777
+          ],
+          [
+            -0.0882303964611172,
+            0.9274558780486866,
+            -0.006017765622228864
+          ],
+          [
+            0.0017135111633973237,
+            -0.004211315993623285,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 63.49540026323477,
+      "identity": false,
+      "historical_corner_rmse_px": 1.3734667939798415,
+      "difference_from_history_px": 62.12193346925493,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          0.7071067811865476
+        ],
+        [
+          -0.7071067811865476,
+          1.224744871391589
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.20454701001290232
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0002",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0002/CG.png",
+      "local_image_file": "content-v6-iss-eval-0002__CG.png",
+      "drive_id": "1FmL8v7hHYz5287AZ4nZO6w-qswKCEg7k",
+      "condition_id": "core_rotation_neg15",
+      "angle_deg": -15,
+      "fill": "reflect",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.00874328799545765,
+        "raw_syncseal_corners": [
+          [
+            -1.062535285949707,
+            -0.803535521030426
+          ],
+          [
+            0.8036060929298401,
+            -1.0503387451171875
+          ],
+          [
+            1.0508712530136108,
+            0.8071850538253784
+          ],
+          [
+            -0.8277913331985474,
+            1.0411663055419922
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -1.0627450980392157,
+            -0.803921568627451
+          ],
+          [
+            0.8117647058823529,
+            -1.0470588235294118
+          ],
+          [
+            1.062745098039216,
+            0.8117647058823529
+          ],
+          [
+            -0.8274509803921568,
+            1.0470588235294116
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9411716795269285,
+            0.12157341851228713,
+            -0.006841805441796201
+          ],
+          [
+            -0.11962046639452756,
+            0.9274383571348842,
+            -0.0012792133688959621
+          ],
+          [
+            -0.0026080702879274025,
+            -0.0038297909211427125,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 51.3222659992164,
+      "identity": false,
+      "historical_corner_rmse_px": 1.255090505922239,
+      "difference_from_history_px": 50.06717549329416,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          0.7071067811865476
+        ],
+        [
+          -0.7071067811865476,
+          1.224744871391589
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.1448826720006764
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0001",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0001/CG.png",
+      "local_image_file": "content-v6-iss-eval-0001__CG.png",
+      "drive_id": "1DW3wxEkFxkfVD1pPYgNvcxZl_jgsmKgH",
+      "condition_id": "core_rotation_pos15",
+      "angle_deg": 15,
+      "fill": "reflect",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.004675672855228186,
+        "raw_syncseal_corners": [
+          [
+            -0.9007008671760559,
+            -1.0381091833114624
+          ],
+          [
+            1.0430151224136353,
+            -0.8785604238510132
+          ],
+          [
+            0.8868433237075806,
+            1.0351239442825317
+          ],
+          [
+            -1.0487614870071411,
+            0.8980001211166382
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -0.8980392156862745,
+            -1.0392156862745099
+          ],
+          [
+            1.0549019607843135,
+            -0.8745098039215686
+          ],
+          [
+            0.8980392156862744,
+            1.0392156862745097
+          ],
+          [
+            -1.0470588235294118,
+            0.9058823529411764
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9745201814781181,
+            -0.07648096579184357,
+            0.009483938937883282
+          ],
+          [
+            0.07455131414776588,
+            0.9646643721267438,
+            0.01097486383641504
+          ],
+          [
+            0.007926635935708925,
+            0.002634082095558442,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 66.34481868138917,
+      "identity": false,
+      "historical_corner_rmse_px": 1.3734667939798415,
+      "difference_from_history_px": 64.97135188740933,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          1.224744871391589
+        ],
+        [
+          -1.224744871391589,
+          0.7071067811865476
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.07459407404530793
+    },
+    {
+      "unit_id": "content-v6-iss-eval-0002",
+      "original_image_file": "images/evaluation/multiplier-0.75/content-v6-iss-eval-0002/CG.png",
+      "local_image_file": "content-v6-iss-eval-0002__CG.png",
+      "drive_id": "1FmL8v7hHYz5287AZ4nZO6w-qswKCEg7k",
+      "condition_id": "core_rotation_pos15",
+      "angle_deg": 15,
+      "fill": "reflect",
+      "interpolation": "bilinear",
+      "science_denominator": 0,
+      "errors": [],
+      "geometry": {
+        "status": "UNRELIABLE",
+        "uncalibrated_sync_logit": -0.004910244140774012,
+        "raw_syncseal_corners": [
+          [
+            -0.773900032043457,
+            -1.0419847965240479
+          ],
+          [
+            1.037084698677063,
+            -0.8129454851150513
+          ],
+          [
+            0.7704700827598572,
+            1.0413163900375366
+          ],
+          [
+            -1.041408896446228,
+            0.8135055303573608
+          ]
+        ],
+        "observed_corners_in_canonical_normalized": [
+          [
+            -0.7725490196078432,
+            -1.0392156862745099
+          ],
+          [
+            1.0470588235294116,
+            -0.8117647058823529
+          ],
+          [
+            0.780392156862745,
+            1.0470588235294116
+          ],
+          [
+            -1.0392156862745099,
+            0.8196078431372549
+          ]
+        ],
+        "homography_observed_to_canonical": [
+          [
+            0.9098039215686275,
+            -0.13333333333333341,
+            0.003921568627450864
+          ],
+          [
+            0.11372549019607847,
+            0.9294117647058825,
+            0.003921568627450845
+          ],
+          [
+            -1.2981944002543828e-16,
+            -6.528824590955641e-17,
+            1.0
+          ]
+        ],
+        "legal": true,
+        "basic_observable": true,
+        "error": null
+      },
+      "corner_rmse_px": 51.931596431109675,
+      "identity": false,
+      "historical_corner_rmse_px": 1.1243190481117975,
+      "difference_from_history_px": 50.807277382997874,
+      "truth_observed_corners_in_canonical_normalized": [
+        [
+          -0.7071067811865476,
+          -1.224744871391589
+        ],
+        [
+          1.224744871391589,
+          -0.7071067811865476
+        ],
+        [
+          0.7071067811865476,
+          1.224744871391589
+        ],
+        [
+          -1.224744871391589,
+          0.7071067811865476
+        ]
+      ],
+      "identity_baseline_rmse_px": 94.32646666536489,
+      "historical_errors": [],
+      "seconds": 0.07513664092402905
+    }
+  ]
+}
