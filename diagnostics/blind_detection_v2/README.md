@@ -1,7 +1,8 @@
 # BlindDetection-V2 mechanism development
 
-Stage 2 is in progress. No V2 detector has been selected or implemented, and
-stage 4 has not run. All development has `science_denominator=0`.
+Stage 2's canary has completed; see [measured conclusions and the V2 proposal](STAGE2_CONCLUSION_V2_PROPOSAL.md).
+No production V2 has been selected or implemented, and stage 4 has not run.
+All development has `science_denominator=0`.
 
 ## Observed native comparison
 
@@ -41,7 +42,7 @@ The historical 0056 negative replay score anomaly remains unresolved. The
 current CPU comparison does not execute the content scorer and cannot
 attribute that anomaly to hardware or explain it away.
 
-## Next mechanism canary: 216 rows
+## Executed mechanism canary: 216 rows
 
 `development.py` predeclares four new prompts and seeds 2026090700–2026090703.
 It generates fresh content-only/primary-null pairs using the existing ISS
@@ -95,10 +96,11 @@ CUDA; model/device/version are recorded. No global local environment repair
 or external model execution has been performed in this task.
 
 Local CPU landmark tests validate the diagnostic sampler at -13, +7 and +21
-degrees. They do not validate content robustness. Full canary execution is
-pending: this local machine has CPU Torch, no cached content model, and no
-HF_TOKEN or CEG_WM_ROOT_KEY in the task environment. The notebook has not
-been executed top-to-bottom in Colab.
+degrees. They do not validate content robustness. The user executed the
+canary on L4: all 216 rows exist, including one unavailable-public-H
+diagnostic error. The linked conclusion reports the original rows and
+separates that error from the complete negative V1 decision. No new model
+execution was performed during local analysis of those results.
 
 After the 216 rows, compare geometry error, score margins and quality jointly.
 Do not assume 0.75 is too weak. Use the measured tolerance to decide whether
