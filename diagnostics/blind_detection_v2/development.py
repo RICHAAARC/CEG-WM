@@ -80,13 +80,28 @@ def run(output):
     adapter = assets.geometry_backend
     rows=[]
 
+    def attempt(row, name, compute):
+        try:
+            row[name]=compute()
+        except Exception as error:
+            row["stage_errors"][name]=f"{type(error).__name__}: {error}"
+
+    def native_score(observed,geometry):
+        raw=torch.tensor(geometry.raw_syncseal_corners,device=adapter.device,dtype=torch.float32).reshape(1,8)
+        with torch.no_grad():
+            native=adapter.model.unwarp(_to_tensor(observed,adapter.device),raw,(512,512))
+        return score(_to_rgb(native.clamp(0,1)))
+
     def save(row, compute):
         start=time.monotonic()
         row["error"]=None
+        row["stage_errors"]={}
         try:
             compute(row)
         except Exception as error:
             row["error"]=f"{type(error).__name__}: {error}"
+        if row["stage_errors"]:
+            row["error"]="; ".join(filter(None,[row["error"],json.dumps(row["stage_errors"])]))
         row["seconds"]=time.monotonic()-start
         rows.append(row)
         with (output/"rows.jsonl").open("a") as stream:
@@ -98,20 +113,27 @@ def run(output):
     for unit in ROSTER:
         pair=None
         generation_error=None
+        sync_error=None
         try:
             pair=run_content_iss_evaluation_pair(pipeline,unit["prompt"],key,assets.content_assets.iss_assets,
                                                 height=512,width=512,seed=unit["seed"])
             pair.image.save(output/(unit["unit_id"]+"__content.png"))
             pair.primary_null.save(output/(unit["unit_id"]+"__clean.png"))
-            current=_to_tensor(pair.image,adapter.device)
-            with torch.no_grad():
-                embedded=adapter.model.embed(current)["imgs_w"]
         except Exception as error:
             generation_error=f"{type(error).__name__}: {error}"
+        if generation_error is None:
+            try:
+                current=_to_tensor(pair.image,adapter.device)
+                with torch.no_grad():
+                    embedded=adapter.model.embed(current)["imgs_w"]
+            except Exception as error:
+                sync_error=f"{type(error).__name__}: {error}"
 
-        def ensure():
+        def ensure(need_sync=True):
             if generation_error:
                 raise RuntimeError("generation:"+generation_error)
+            if need_sync and sync_error:
+                raise RuntimeError("sync_embed:"+sync_error)
 
         for strength in STRENGTHS:
             for angle in ANGLES:
@@ -121,43 +143,38 @@ def run(output):
                     observed=rotation(cg,angle)
                     row["quality_vs_content"]=quality(cg,pair.image)
                     row["quality_vs_clean"]=quality(cg,pair.primary_null)
+                    attempt(row,"oracle_warp_score",lambda:score(rectify_attacked_rgb(observed,sampler_h(angle))))
                     result=_detect_core(observed,key,assets,REFERENCE_TAU)
                     row["v1"]=asdict(result)
                     if not result.method_complete:
                         row["error"]=result.operational_error or "incomplete_v1_detection"
                     geometry=adapter.detect_geometry(observed)
                     row["geometry"]=asdict(geometry)
-                    row["adapter_warp_score"]=score(rectify_attacked_rgb(observed,geometry.homography_observed_to_canonical))
+                    attempt(row,"adapter_warp_score",lambda:score(rectify_attacked_rgb(observed,geometry.homography_observed_to_canonical)))
+                    attempt(row,"native_warp_score",lambda:native_score(observed,geometry))
                     q=np.array([[-1.,-1.,1.],[1.,-1.,1.],[1.,1.,1.],[-1.,1.,1.]])
                     # Exact pixel-center truth differs from the Pillow sampler by T(-.5) D T(.5).
                     t=np.array([[1.,0.,-1/511],[0.,1.,-1/511],[0.,0.,1.]])
                     truth=q@(t@sampler_h(angle)@np.linalg.inv(t)).T
                     prediction=np.asarray(geometry.observed_corners_in_canonical_normalized)
                     row["corner_rmse_pixels"]=float(np.sqrt(np.mean(np.sum((prediction-truth[:,:2]/truth[:,2,None])**2,axis=1)))*511/2)
-                    raw=torch.tensor(geometry.raw_syncseal_corners,device=adapter.device,dtype=torch.float32).reshape(1,8)
-                    with torch.no_grad():
-                        native=adapter.model.unwarp(_to_tensor(observed,adapter.device),raw,(512,512))
-                    row["native_warp_score"]=score(_to_rgb(native.clamp(0,1)))
                 save({"unit_id":unit["unit_id"],"kind":"strength","arm":"positive","strength":strength,"angle":angle},measure)
         for angle in ANGLES:
             def negative(row):
-                ensure()
+                ensure(need_sync=False)
                 observed=rotation(pair.primary_null,angle)
                 row["v1"]=asdict(_detect_core(observed,key,assets,REFERENCE_TAU))
                 if not row["v1"]["method_complete"]:
                     row["error"]=row["v1"]["operational_error"] or "incomplete_v1_detection"
                 geometry=adapter.detect_geometry(observed)
                 row["geometry"]=asdict(geometry)
-                row["adapter_warp_score"]=score(rectify_attacked_rgb(observed,geometry.homography_observed_to_canonical))
-                raw=torch.tensor(geometry.raw_syncseal_corners,device=adapter.device,dtype=torch.float32).reshape(1,8)
-                with torch.no_grad():
-                    native=adapter.model.unwarp(_to_tensor(observed,adapter.device),raw,(512,512))
-                row["native_warp_score"]=score(_to_rgb(native.clamp(0,1)))
+                attempt(row,"adapter_warp_score",lambda:score(rectify_attacked_rgb(observed,geometry.homography_observed_to_canonical)))
+                attempt(row,"native_warp_score",lambda:native_score(observed,geometry))
             save({"unit_id":unit["unit_id"],"kind":"baseline_negative","arm":"negative","angle":angle},negative)
         for arm in ("positive","negative"):
             for da,dx,dy in PERTURBATIONS:
                 def tolerance(row):
-                    ensure()
+                    ensure(need_sync=arm=="positive")
                     image=_to_rgb((current+.75*(embedded-current)).clamp(0,1)) if arm=="positive" else pair.primary_null
                     aligned=rectify_attacked_rgb(rotation(image,7.),sampler_h(7.+da,dx,dy))
                     row["score"]=score(aligned)

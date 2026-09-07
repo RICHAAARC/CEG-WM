@@ -55,7 +55,9 @@ Per unit:
 * 9 strength rows: positive C+SyncSeal at multipliers 0.5, 0.75 and 1.0,
   each at angles 0, -13 and +7 degrees. One official `embed` residual is
   shared across multipliers. Each row records V1 behavior, geometric error,
-  native/public warp scores from the same raw prediction, and RGB MSE/PSNR
+  native/public warp scores from the same raw prediction, an oracle score
+  to distinguish geometric error from multiplier-dependent content survival,
+  and RGB MSE/PSNR
   against both content-only and clean images.
 * 3 negative rows: the same primary-null image at those three angles.
   Unwatermarked negatives do not depend on the SyncSeal multiplier; each
@@ -73,6 +75,10 @@ strength rows, `(unit_id,kind,angle)` for negatives, and
 `(unit_id,kind,arm,angle_error,dx,dy)` for tolerance rows. Rows are incremental;
 failed generation/scoring retains every dependent planned row. A failed
 runtime initialization leaves the written plan but no completed experiment.
+Oracle/public/native scores are attempted independently: a failed oracle or
+public warp does not skip native scoring. SyncSeal embedding failure does
+not skip already available primary-null negative measurements. Stage errors
+remain visible within the affected row.
 
 The historical threshold 1.2657276026437319 is a descriptive reference only.
 There is no fitting, threshold change, sample selection, or formal FPR claim.
