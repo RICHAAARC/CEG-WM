@@ -115,6 +115,19 @@ def syncseal_raw_to_public_normalized(
     return tuple(tuple(float(value) for value in row) for row in public_normalized.tolist())
 
 
+def syncseal_raw_to_public_continuous(
+    raw_corners: Sequence[Real] | Sequence[Sequence[Real]],
+) -> Corners4:
+    """Experimental conversion preserving fractions on the official 256 grid.
+
+    Only omit grid rounding. The original conversion remains the V1 default.
+    """
+    raw = _corners_tensor(raw_corners)
+    model_centers = raw * (SYNCSEAL_MODEL_SIZE / 2.0) + (SYNCSEAL_MODEL_SIZE / 2.0)
+    public_normalized = 2.0 * model_centers / float(SYNCSEAL_MODEL_SIZE - 1) - 1.0
+    return tuple(tuple(float(value) for value in row) for row in public_normalized.tolist())
+
+
 def _corners_tensor(corners: Sequence[Real] | Sequence[Sequence[Real]]) -> torch.Tensor:
     try:
         tensor = torch.as_tensor(corners, dtype=torch.float64).reshape(4, 2)
@@ -319,4 +332,5 @@ __all__ = [
     "normalized_to_pixel_center",
     "pixel_center_to_normalized",
     "syncseal_raw_to_public_normalized",
+    "syncseal_raw_to_public_continuous",
 ]

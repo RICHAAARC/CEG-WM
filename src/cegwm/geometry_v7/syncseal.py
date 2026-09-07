@@ -17,6 +17,7 @@ from cegwm.geometry_v7.contracts import (
     PUBLIC_IMAGE_HEIGHT,
     PUBLIC_IMAGE_WIDTH,
     estimate_geometry,
+    syncseal_raw_to_public_continuous,
     syncseal_raw_to_public_normalized,
 )
 from cegwm.runtime.observation import require_ordinary_rgb_image
@@ -136,6 +137,15 @@ class SyncSealTorchScript:
     def detect_geometry(self, image: Any) -> GeometryEstimate:
         """Return coordinates and observability only; never a content decision."""
 
+        return self._detect_geometry(image, continuous=False)
+
+    def detect_geometry_continuous(self, image: Any) -> GeometryEstimate:
+        """Explicit experimental continuous-corner path; not the V1 default."""
+
+        return self._detect_geometry(image, continuous=True)
+
+    def _detect_geometry(self, image: Any, *, continuous: bool) -> GeometryEstimate:
+
         try:
             current = _to_tensor(image, self.device)
             with torch.no_grad():
@@ -168,7 +178,8 @@ class SyncSealTorchScript:
             raw_correspondences = (
                 predicted_canonical_correspondences[0].detach().cpu().tolist()
             )
-            public_canonical_correspondences = syncseal_raw_to_public_normalized(
+            convert = syncseal_raw_to_public_continuous if continuous else syncseal_raw_to_public_normalized
+            public_canonical_correspondences = convert(
                 raw_correspondences
             )
             return estimate_geometry(
