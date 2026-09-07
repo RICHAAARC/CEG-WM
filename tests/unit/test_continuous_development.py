@@ -45,6 +45,7 @@ def test_failed_generation_retains_fixed_denominator_and_manual_boundary(monkeyp
     session=runner.Session(None,None,'fixture',tmp_path/'output')
     pilot=session.pilot()
     assert len(session.rows)==18 and pilot['actual_score_calls']==0
+    assert pilot['complete_statistics']==0 and pilot['route_errors']==54
     with pytest.raises(ValueError): session.pilot()
     summary=session.remaining()
     assert summary['recorded_observations']==72 and summary['route_errors']==216

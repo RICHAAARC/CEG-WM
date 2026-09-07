@@ -205,6 +205,8 @@ class Session:
             sync_embedding=embedding,image_save_errors=image_save_errors,geometry_seconds=sum(r['geometry_seconds'] for r in unit_rows),
             content_score_seconds=sum(r['pre']['seconds']+sum(x['seconds'] for x in r['posts'].values()) for r in unit_rows),
             elapsed_seconds=time.perf_counter()-start,observations=len(unit_rows),planned_score_routes=54,
+            complete_statistics=sum(x['statistic'] is not None for r in unit_rows for x in (r['pre'],*r['posts'].values())),
+            route_errors=sum(x['error'] is not None for r in unit_rows for x in (r['pre'],*r['posts'].values())),
             actual_score_calls=sum(r['pre']['scorer_called']+sum(x['scorer_called'] for x in r['posts'].values()) for r in unit_rows))
         (directory/'timing.json').write_text(json.dumps(receipt,indent=2))
         return receipt
