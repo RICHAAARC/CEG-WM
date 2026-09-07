@@ -133,10 +133,16 @@ def _search_candidates(image: Image.Image, score_current_rgb: Callable,
             "score_upper_bound":plan.score_upper_bound,"rows":rows}
 
 
-def detect_watermark_v2(image,key,assets: BlindProductionAssets):
+def detect_watermark_v2(image,key,assets: BlindProductionAssets,*,reuse_observation=False):
     """Image/key/public-assets only. V1 thresholds do not authorize V2 positives."""
     if type(assets) is not BlindProductionAssets:
         raise TypeError("V2 requires real BlindProductionAssets")
     detection_key=normalize_detection_key(key)
-    return _search_candidates(image,lambda rgb:_score_current_rgb(rgb,detection_key,assets),
-                              assets.geometry_backend.detect_geometry,SearchPlan())
+    if reuse_observation:
+        from cegwm.runtime.blind_scoring_v2 import score_statistic_v2
+        scorer=lambda rgb:score_statistic_v2(rgb,detection_key,assets,reuse_observation=True)
+    else:
+        scorer=lambda rgb:_score_current_rgb(rgb,detection_key,assets)
+    result=_search_candidates(image,scorer,assets.geometry_backend.detect_geometry,SearchPlan())
+    result["reuse_observation_requested"]=bool(reuse_observation)
+    return result
