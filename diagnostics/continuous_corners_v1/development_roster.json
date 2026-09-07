@@ -1,0 +1,29 @@
+{
+  "status": "PROPOSED_NOT_EXECUTED",
+  "purpose": "independent development comparison; not formal calibration or paper test",
+  "selection": "four new fixed prompt and seed pairs, not selected from observed scores",
+  "units": [
+    {"unit_id": "continuous-dev-0001", "seed": 2026112101, "prompt": "A white ceramic pitcher on a plain beige tabletop beside a softly lit window, quiet still life photography."},
+    {"unit_id": "continuous-dev-0002", "seed": 2026112102, "prompt": "A narrow footpath through a pine forest with rough mossy stones and fallen needles, natural daylight photography."},
+    {"unit_id": "continuous-dev-0003", "seed": 2026112103, "prompt": "The glass facade of a modern office building at dusk, vertical window frames and reflections of the evening sky, architectural photography."},
+    {"unit_id": "continuous-dev-0004", "seed": 2026112104, "prompt": "A woven wicker basket filled with oranges on a dark wooden counter, detailed texture and soft side lighting, close-up photography."}
+  ],
+  "arms": {"CG": "content and synchronization present", "G": "synchronization present, content absent", "U": "neither content nor synchronization present"},
+  "size": [512, 512],
+  "residual_strength_multiplier": 0.75,
+  "conditions": [
+    {"id": "identity", "kind": "control", "angle_degrees": 0, "fill": "none"},
+    {"id": "black_rotation_neg11", "kind": "candidate_protocol", "angle_degrees": -11, "fill": "black", "interpolation": "bilinear"},
+    {"id": "black_rotation_pos23", "kind": "candidate_protocol", "angle_degrees": 23, "fill": "black", "interpolation": "bilinear"},
+    {"id": "reflect_rotation_neg11", "kind": "stress_protocol", "angle_degrees": -11, "fill": "reflect", "interpolation": "bilinear"},
+    {"id": "reflect_rotation_pos23", "kind": "stress_protocol", "angle_degrees": 23, "fill": "reflect", "interpolation": "bilinear"},
+    {"id": "core_fixed_canvas_zoom_0_8", "kind": "existing_attack_control", "fill": "black", "interpolation": "bilinear"}
+  ],
+  "geometry_modes": ["rounded", "continuous"],
+  "routes": ["shared_pre", "rounded_post", "continuous_post"],
+  "geometry_calls_max": 72,
+  "content_score_routes_max": 216,
+  "tau_reference": 1.2657276026437319,
+  "threshold_role": "historical descriptive reference only; no new calibration",
+  "science_denominator": 0
+}
