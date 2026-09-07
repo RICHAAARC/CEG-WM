@@ -3,6 +3,15 @@
 本包只准备方案、脚本和轻量测试。没有加载内容模型、执行内容评分、启动 GPU 或推送。
 先复用旧八图中的**原顺序前两图 0001/0002**，不按本轮误差挑选，不自动扩大到八图。
 
+可交付入口为 `content_renderer.ipynb`，固定代码
+`878488548dded46f3a5e90b481a968774f2afbe8`。它从原R0 Drive目录读取四图/result到
+Colab临时cache；`cg_geometry_reference.json`随代码包含本次64测量中所需8条原始记录，
+已逐行核对，无需用户Drive具有本地renderer-v1目录。首cell为独立两行mount。
+初始化优先复用类型及计算资产匹配的既有生产assets，否则才用原factory；初始化计时单列。
+不得直接run-all，pilot与remaining分开手动执行。
+本地只通过nbformat结构与所有code-cell语法验证、两项轻量测试和A3静态调用链审查；
+未执行Drive mount、依赖安装、模型初始化或52路线，真实Colab执行差距明确保留。
+
 ## 固定范围与成本
 
 | 输入/条件 | 图数 | 每图评分路线 | 计划评分数 |
