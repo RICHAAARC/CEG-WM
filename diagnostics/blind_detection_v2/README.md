@@ -22,7 +22,8 @@ no evidence for fixing it by simply inverting H or changing half pixels.
 Native unwarp versus production Pillow warp has median MAE 2.1093322039/255
 and median RMSE 7.1860525872/255. The native path truncates public endpoints
 to integers after scaling; the additional coordinate displacement is under
-1 pixel per axis. Sampling/quantization/boundary differences remain. Their
+1 pixel per axis (maximum Euclidean endpoint displacement 1.408668 px).
+Sampling/quantization/boundary differences remain. Their
 effect on content scores has **not** been tested locally and must not be
 declared harmless.
 
@@ -58,7 +59,8 @@ Per unit:
   against both content-only and clean images.
 * 3 negative rows: the same primary-null image at those three angles.
   Unwatermarked negatives do not depend on the SyncSeal multiplier; each
-  row is reused descriptively across the three strength comparisons and is
+  row includes the same native/public warp score comparison, is reused
+  descriptively across the three strength comparisons and is
   never counted three times as independent evidence.
 * 42 tolerance rows: 21 perturbations for each positive/negative arm, using
   the +7-degree attacked image and 0.75 positive multiplier. They include

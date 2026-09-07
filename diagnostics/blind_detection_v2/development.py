@@ -142,9 +142,17 @@ def run(output):
         for angle in ANGLES:
             def negative(row):
                 ensure()
-                row["v1"]=asdict(_detect_core(rotation(pair.primary_null,angle),key,assets,REFERENCE_TAU))
+                observed=rotation(pair.primary_null,angle)
+                row["v1"]=asdict(_detect_core(observed,key,assets,REFERENCE_TAU))
                 if not row["v1"]["method_complete"]:
                     row["error"]=row["v1"]["operational_error"] or "incomplete_v1_detection"
+                geometry=adapter.detect_geometry(observed)
+                row["geometry"]=asdict(geometry)
+                row["adapter_warp_score"]=score(rectify_attacked_rgb(observed,geometry.homography_observed_to_canonical))
+                raw=torch.tensor(geometry.raw_syncseal_corners,device=adapter.device,dtype=torch.float32).reshape(1,8)
+                with torch.no_grad():
+                    native=adapter.model.unwarp(_to_tensor(observed,adapter.device),raw,(512,512))
+                row["native_warp_score"]=score(_to_rgb(native.clamp(0,1)))
             save({"unit_id":unit["unit_id"],"kind":"baseline_negative","arm":"negative","angle":angle},negative)
         for arm in ("positive","negative"):
             for da,dx,dy in PERTURBATIONS:
