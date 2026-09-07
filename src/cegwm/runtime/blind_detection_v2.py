@@ -62,7 +62,8 @@ def rigid_hypothesis(angle,tx=0.,ty=0.):
 
 
 def _search_candidates(image: Image.Image, score_current_rgb: Callable,
-           geometry_backend: Callable | None = None, plan: SearchPlan = SearchPlan()):
+           geometry_backend: Callable | None = None, plan: SearchPlan = SearchPlan(),
+           *, on_candidate: Callable | None = None):
     current=require_ordinary_rgb_image(image)
     if current.size!=(512,512):
         raise ValueError("public canvas must be 512x512")
@@ -76,6 +77,8 @@ def _search_candidates(image: Image.Image, score_current_rgb: Callable,
         try:
             # Every warp starts from current. Refinement never warps a prior candidate.
             candidate=current.copy() if matrix is None else rectify_attacked_rgb(current,matrix)
+            if on_candidate is not None:
+                on_candidate(kind,parameters)
             score_calls+=1
             score=score_current_rgb(candidate)
             if isinstance(score,BlindStatistic):
@@ -138,11 +141,17 @@ def detect_watermark_v2(image,key,assets: BlindProductionAssets,*,reuse_observat
     if type(assets) is not BlindProductionAssets:
         raise TypeError("V2 requires real BlindProductionAssets")
     detection_key=normalize_detection_key(key)
+    modes={}
     if reuse_observation:
-        from cegwm.runtime.blind_scoring_v2 import score_statistic_v2
-        scorer=lambda rgb:score_statistic_v2(rgb,detection_key,assets,reuse_observation=True)
+        from cegwm.runtime.blind_scoring_v2 import score_branches_v2
+        from cegwm.method.blind_detection import statistic_from_weighted_scores
+        def scorer(rgb):
+            branches,mode=score_branches_v2(rgb,detection_key,assets,reuse_observation=True)
+            modes[mode]=modes.get(mode,0)+1
+            return statistic_from_weighted_scores(branches["weighted_joint"])
     else:
         scorer=lambda rgb:_score_current_rgb(rgb,detection_key,assets)
     result=_search_candidates(image,scorer,assets.geometry_backend.detect_geometry,SearchPlan())
     result["reuse_observation_requested"]=bool(reuse_observation)
+    result["scoring_modes"]=modes if reuse_observation else {"original":result["score_calls"]}
     return result
