@@ -237,15 +237,23 @@ def _detect_core(
     key: str | bytes | bytearray | memoryview,
     assets: BlindScoringAssets,
     tau_blind: float,
+    *,
+    continuous_corners: bool = False,
+    reuse_observation: bool = False,
 ) -> BlindDetectionRecord:
     """Shared core reached only through production or explicit test/calibration gates."""
 
     detection_key = normalize_detection_key(key)
     digest = public_key_digest(detection_key)
     tau = _finite(tau_blind, "tau_blind")
+    scorer = _score_current_rgb
+    if reuse_observation:
+        from functools import partial
+        from cegwm.runtime.blind_scoring_v2 import score_statistic_v2
+        scorer = partial(score_statistic_v2, reuse_observation=True)
     try:
         current = require_ordinary_rgb_image(image)
-        pre = _score_current_rgb(current, detection_key, assets)
+        pre = scorer(current, detection_key, assets)
     except Exception as error:
         return _record(
             "ERROR_FAIL_CLOSED", False, None, None, False, None, tau, digest,
@@ -258,7 +266,8 @@ def _detect_core(
             method_complete=True,
         )
     try:
-        geometry = assets.geometry_backend.detect_geometry(current)
+        geometry = (assets.geometry_backend.detect_geometry_continuous(current) if continuous_corners
+                    else assets.geometry_backend.detect_geometry(current))
     except Exception as error:
         return _record(
             "ERROR_FAIL_CLOSED", False, pre, None, False, None, tau, digest,
@@ -303,7 +312,7 @@ def _detect_core(
             method_complete=True,
         )
     try:
-        post = _score_current_rgb(recovered_rgb, detection_key, assets)
+        post = scorer(recovered_rgb, detection_key, assets)
     except Exception as error:
         return _record(
             "ERROR_FAIL_CLOSED", False, pre, None, True, geometry, tau, digest,
