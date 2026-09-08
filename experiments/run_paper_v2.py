@@ -26,6 +26,7 @@ def real_preflight(worker, root, runtime_root):
         if previous['status'] == 'PREFLIGHT_EXECUTED':
             print(json.dumps(previous, indent=2))
             return 0
+    if any((output/name).exists() for name in ('preflight.json','rows.jsonl','clean.png','watermarked.png')):
         attempt = 1
         while (output/f'failed-attempt-{attempt}').exists(): attempt += 1
         archived = output/f'failed-attempt-{attempt}'

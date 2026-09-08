@@ -129,3 +129,8 @@ def test_failed_preflight_can_retry_without_mixing_rows(monkeypatch,tmp_path):
     root=tmp_path/'preflight/main'
     assert (root/'failed-attempt-1/preflight.json').is_file()
     assert json.loads((root/'preflight.json').read_text())['missing_observations']==12
+    (root/'preflight.json').unlink()
+    (root/'rows.jsonl').write_text('{"interrupted_attempt":true}\n')
+    assert real_preflight('main',tmp_path,tmp_path/'runtime')==3
+    assert (root/'failed-attempt-2/rows.jsonl').is_file()
+    assert not (root/'rows.jsonl').exists()
