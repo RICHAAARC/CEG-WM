@@ -52,6 +52,8 @@ def test_callback_requires_end_to_end_remainder(monkeypatch):
         seen.append((key, beta, allocation))
         return latent + .01, None
     monkeypatch.setattr(runtime, 'embed_content_iss', embed)
+    monkeypatch.setattr(runtime, 'prepare_fixed_lf_reference', lambda *a:SimpleNamespace(beta=.7))
+    monkeypatch.setattr(runtime, 'embed_fixed_lf_hf', lambda latent,key,hf,lf,allocation,reference:embed(latent,key,hf,lf,allocation,reference.beta))
     assets = SimpleNamespace(embed_assets=SimpleNamespace(dino_processor=None,dino_model=None,hf_public_assets=None,lf_public_assets=None))
     cb = runtime.AllocatorCallback(b'key', assets, .7, 'uniform')
     latent = torch.ones(1,16,8,8)
@@ -99,6 +101,8 @@ def test_generate_variant_replay_seed_sync_and_missing_remainder(monkeypatch):
         calls.append(('embed', beta))
         return latent+.01,None
     monkeypatch.setattr(module,'embed_content_iss',embed)
+    monkeypatch.setattr(module,'prepare_fixed_lf_reference',lambda *a:SimpleNamespace(beta=.7))
+    monkeypatch.setattr(module,'embed_fixed_lf_hf',lambda latent,key,hf,lf,allocation,reference:embed(latent,key,hf,lf,allocation,reference.beta))
     image, features, budget = module.generate_variant(runtime,'test prompt',917,Image.new('RGB',(512,512)),'uniform')
     assert image.mode == 'RGB' and features.shape == (4,3)
     assert [call[0] for call in calls] == ['pipeline','embed','sync']

@@ -5,6 +5,7 @@ import torch
 from cegwm.formal_ablation import _adaptive_allocation
 from cegwm.method.content_adaptive import dino_last_layer_cls_patch_tiles, rgb_texture_tiles
 from cegwm.method.content_iss import embed_content_iss, iss_beta, score_content_iss_image
+from cegwm.method.fixed_lf_hf import prepare_fixed_lf_reference, embed_fixed_lf_hf
 from cegwm.method.survival_allocator import allocation_from_logits, macro_features
 from cegwm.runtime.content_adaptive_sd35 import _decode_callback_latents
 from cegwm.runtime.observation import require_ordinary_rgb_image
@@ -54,9 +55,18 @@ class AllocatorCallback:
                 elif self.variant != 'uniform':
                     raise ValueError('unknown allocator variant')
                 allocation = allocation_from_logits(logits, reference, uniform=self.variant == 'uniform')
-        embedded, self.measurement = embed_content_iss(latent, self.key, embed.hf_public_assets,
-            embed.lf_public_assets, allocation, self.beta,
-            hf_weight_interpolation="nearest" if self.variant == "original" else "bilinear")
+        if self.variant == 'original':
+            embedded, self.measurement = embed_content_iss(latent,self.key,embed.hf_public_assets,
+                embed.lf_public_assets,allocation,self.beta)
+        else:
+            if 'fixed_lf' not in self.reference_cache:
+                self.reference_cache['fixed_lf'] = prepare_fixed_lf_reference(latent,self.key,
+                    embed.hf_public_assets,embed.lf_public_assets,reference,self.beta)
+            fixed = self.reference_cache['fixed_lf']
+            if fixed.beta != self.beta:
+                raise RuntimeError('FIXED_LF_REFERENCE_BETA_MISMATCH')
+            embedded, self.measurement = embed_fixed_lf_hf(latent,self.key,embed.hf_public_assets,
+                embed.lf_public_assets,allocation,fixed)
         self.executed = True
         return {**callback_kwargs, 'latents': embedded}
 
@@ -74,5 +84,6 @@ def generate_variant(runtime, prompt, seed, primary_null, variant, allocator=Non
         raise RuntimeError('injection must be followed by actual final denoising step 19')
     content = require_ordinary_rgb_image(result.images[0])
     marked = runtime['assets'].geometry_backend.embed_final_rgb(content, SYNCSEAL_RESIDUAL_MULTIPLIER)
-    measurement = asdict(callback.measurement) if callback.measurement is not None else {}
+    measurement = (callback.measurement if isinstance(callback.measurement,dict) else
+        asdict(callback.measurement) if callback.measurement is not None else {})
     return require_ordinary_rgb_image(marked), callback.features, {'iss_beta':beta, 'embedding':measurement}
