@@ -55,8 +55,11 @@ There is no requirement to complete the former five-variant matrix.
 
 B labels must include perturbation through remaining sampler steps, attacks, old
 RGB sync and current blind registered-minus-max16wrong scoring. Record evidence
-increment relative to matched uniform-HF baseline with original per-image LF and
-branch shares held fixed, and final perceptual costs. Simple
+increment relative to the matched original-HF baseline with original per-image LF
+configuration and branch shares held fixed, and final perceptual costs. Uniform
+HF remains a separate comparison. The unchanged ISS joint budget projection can
+still change the actual LF perturbation when HF weights change; record actual
+LF/HF perturbation norms rather than claiming identical final LF perturbations. Simple
 VAE encode/decode response is a feature candidate, not a complete generation
 Jacobian. Fit only on fit pairs and freeze the small shared allocator before
 validation. Do not feed allocation masks to the detector.

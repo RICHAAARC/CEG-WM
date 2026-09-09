@@ -69,6 +69,12 @@ oracle diagnostic had no identified blind-input leakage.
 
 ## Evidence still needed
 
+Latest B readback uses original-HF as the probe reference and preserves original
+LF weights/shares and beta. The unchanged joint ISS budget projection rescales
+LF+HF together, so changed HF weights can change actual LF amplitude despite
+fixed LF configuration. Runtime records include actual LF/HF relative L2 values;
+this scope does not demonstrate an identical final LF perturbation.
+
 Real final-image anchor observability, residual transform accuracy inside content
 tolerance, and allocation utility generalization remain unmeasured. The selector
 may choose identical candidates for both objectives; preserve that outcome. A/B
