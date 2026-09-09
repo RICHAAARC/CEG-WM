@@ -69,8 +69,12 @@ oracle diagnostic had no identified blind-input leakage.
 
 ## Evidence still needed
 
-Latest B readback uses original-HF as the probe reference and preserves original
-LF weights/shares and beta. The unchanged joint ISS budget projection rescales
+Latest B readback uses uniform-HF as the probe reference; score increments, LPIPS
+increments and saved reference rows agree on this baseline. Uniform/probe/survival
+all use bilinear HF interpolation to the latent grid; original-HF remains a
+separate control with nearest interpolation. Added helper options default to
+nearest, preserving the old embedding path. Original LF configuration, shares
+and beta are retained. The unchanged joint ISS budget projection rescales
 LF+HF together, so changed HF weights can change actual LF amplitude despite
 fixed LF configuration. Runtime records include actual LF/HF relative L2 values;
 this scope does not demonstrate an identical final LF perturbation.
