@@ -260,6 +260,7 @@ def embed_content_iss(
     lf_assets: Any,
     allocation: ContentAllocation,
     beta: Any,
+    *, hf_weight_interpolation: str = "nearest",
 ) -> tuple[torch.Tensor, ContentAdaptiveMeasurement]:
     """Apply beta to only the content-whitening LF preprojection delta, then project jointly."""
 
@@ -281,7 +282,8 @@ def embed_content_iss(
 
     base64 = latents.to(torch.float64)
     lf_whitening, hf_whitening = _content_unweighted_branch_deltas(
-        latents, detection_key, hf_assets, lf_assets, allocation
+        latents, detection_key, hf_assets, lf_assets, allocation,
+        **({"hf_weight_interpolation":hf_weight_interpolation} if hf_weight_interpolation != "nearest" else {}),
     )
     lf_delta = lf_whitening * multiplier
     hf_delta = hf_whitening

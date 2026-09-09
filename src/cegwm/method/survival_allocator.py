@@ -1,4 +1,4 @@
-"""Shared 2x2 survival allocator; embedding only, no detector-side masks."""
+"""HF-only 2x2 survival allocator; embedding only, no detector-side masks."""
 from dataclasses import dataclass, asdict
 import numpy as np
 import torch
@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from cegwm.method.content_adaptive import ContentAllocation
 
 
-def allocation_from_logits(logits):
+def allocation_from_logits(logits, reference=None, *, uniform=False):
     values = np.asarray(logits, dtype=float).reshape(2, 2)
     if not np.isfinite(values).all():
         raise ValueError('allocator logits must be finite')
@@ -16,7 +16,10 @@ def allocation_from_logits(logits):
         size=(4, 4), mode='bilinear', align_corners=False).numpy().reshape(-1)
     weights /= weights.mean()
     result = tuple(float(x) for x in weights)
-    return ContentAllocation(result, result, .5, .5, (0.,) * 6)
+    if reference is None:
+        return ContentAllocation((1.,)*16, result, .5, .5, (0.,)*6)
+    return ContentAllocation(reference.lf_tile_weights, result,
+        reference.lf_branch_share, reference.hf_branch_share, reference.counterfactual_effects)
 
 
 def macro_features(semantic, texture, latents):
@@ -35,10 +38,10 @@ class SurvivalAllocator:
     fit_ids: tuple
     cost_penalty: float = 1.0
 
-    def predict(self, features):
+    def predict(self, features, reference=None):
         x = np.asarray(features, dtype=float)
         logits = (x - np.asarray(self.mean)) / np.asarray(self.scale) @ np.asarray(self.coefficients)
-        return allocation_from_logits(logits)
+        return allocation_from_logits(logits, reference)
 
     def to_dict(self):
         return asdict(self)

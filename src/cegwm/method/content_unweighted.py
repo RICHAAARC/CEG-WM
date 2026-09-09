@@ -136,6 +136,7 @@ def _hf_weighted_amplitude(
     carrier: torch.Tensor,
     weights: tuple[float, ...],
     amplitude: torch.Tensor,
+    *, interpolation: str = "nearest",
 ) -> torch.Tensor:
     vector = torch.as_tensor(weights, dtype=torch.float64)
     if (
@@ -145,10 +146,13 @@ def _hf_weighted_amplitude(
         or not bool((vector > 0.0).all())
     ):
         raise ValueError("content-unweighted HF tile weights must be 16 finite positive scalars")
+    if interpolation not in {"nearest", "bilinear"}:
+        raise ValueError("HF interpolation must be nearest or bilinear")
     weight_map = functional.interpolate(
         vector.reshape(1, 1, TILE_GRID_SIDE, TILE_GRID_SIDE),
         size=carrier.shape[-2:],
-        mode="nearest",
+        mode=interpolation,
+        **({"align_corners":False} if interpolation == "bilinear" else {}),
     ).to(device=carrier.device, dtype=torch.float64)
     return _normalized_amplitude(carrier.to(torch.float64) * weight_map, amplitude)
 
@@ -159,6 +163,7 @@ def _content_unweighted_branch_deltas(
     hf_assets: FrozenHFPublicAssets,
     lf_assets: FrozenLFPublicAssets,
     allocation: ContentAllocation,
+    *, hf_weight_interpolation: str = "nearest",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Construct the exact production LF and HF deltas before joint projection."""
 
@@ -183,6 +188,7 @@ def _content_unweighted_branch_deltas(
         hf_carrier,
         allocation.hf_tile_weights,
         base_l2 * COMBINED_RELATIVE_L2 * allocation.hf_branch_share,
+        interpolation=hf_weight_interpolation,
     )
     # content-unweighted intentionally does not consume allocation.lf_tile_weights here.
     lf_delta = _normalized_amplitude(
