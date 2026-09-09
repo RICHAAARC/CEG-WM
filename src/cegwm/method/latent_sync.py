@@ -6,7 +6,7 @@ matching is a development mechanism, not evidence of real VAE equivariance.
 from dataclasses import dataclass
 import numpy as np
 from scipy.ndimage import affine_transform, gaussian_filter
-from scipy.optimize import minimize
+from scipy.optimize import minimize, minimize_scalar
 from PIL import Image
 
 
@@ -76,7 +76,7 @@ def rectify_once(image, reference_to_observed):
 
 
 def estimate_similarity(observation, spec=AnchorSpec()):
-    """Coarse hypotheses followed by continuous template-only optimization.
+    """DEPRECATED prototype, excluded from active entry: global similarity search.
 
     Search does not query content scores. Confidence is descriptive only; even
     an unmarked image may produce H. Entire pre/post path needs calibration.
@@ -103,3 +103,28 @@ def estimate_similarity(observation, spec=AnchorSpec()):
     result = min(candidates,key=lambda r:r.fun)
     return dict(H=similarity((h,w),*result.x),parameters=result.x.tolist(),
                 correlation=-float(result.fun),optimizer_success=bool(result.success))
+
+
+def estimate_rotation(observation):
+    """Single fixed public anchor, bounded angle fit only; no RST/grid search.
+
+    Current readability scope is canonical and +10 degrees. Rotation search is
+    symmetric [-15,15], scale=1 and translation=0; no attack truth is consumed.
+    """
+    obs=np.asarray(observation,dtype=float)
+    if obs.ndim!=3 or not np.isfinite(obs).all(): raise ValueError('finite CHW required')
+    c,h,w=obs.shape
+    template=public_template(c,h,w,AnchorSpec())
+    obs=obs-gaussian_filter(obs,(0,3,3)); norm=np.linalg.norm(obs)
+    def objective(angle):
+        rendered=warp_field(template,similarity((h,w),angle))
+        rendered-=gaussian_filter(rendered,(0,3,3))
+        return -float(np.sum(obs*rendered)/(norm*np.linalg.norm(rendered)+1e-12))
+    if norm<1e-12:
+        return dict(H=np.eye(3),parameters=[0.,1.,0.,0.],correlation=0.)
+    result=minimize_scalar(objective,bounds=(-15.,15.),method='bounded',options={'xatol':.01})
+    neighbors=[-objective(float(np.clip(result.x+d,-15,15))) for d in (-1.,1.)]
+    return dict(H=similarity((h,w),result.x),parameters=[float(result.x),1.,0.,0.],
+                correlation=-float(result.fun),correlation_at_identity=-objective(0.),
+                one_degree_local_peak_margin=-float(result.fun)-max(neighbors),
+                optimizer_success=bool(result.success))

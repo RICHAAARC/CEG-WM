@@ -1,7 +1,7 @@
 """V2 content unchanged; step-18 public anchor replaces RGB SyncSeal embedding."""
 import numpy as np
 import torch
-from cegwm.method.latent_sync import AnchorSpec, public_template, estimate_similarity, latent_to_rgb_h, rectify_once
+from cegwm.method.latent_sync import AnchorSpec, public_template, estimate_rotation, latent_to_rgb_h, rectify_once
 from cegwm.method.content_iss import score_content_iss_image, iss_beta
 from cegwm.runtime.content_iss_sd35 import ContentISSInjectionCallback
 from cegwm.runtime.diffusers_sd35 import run_sd35_plain
@@ -36,10 +36,11 @@ class LatentAnchorCallback:
         return updated
 
 
-def run_pair(pipeline,prompt,key,iss_assets,seed,spec=AnchorSpec()):
+def run_pair(pipeline,prompt,key,iss_assets,seed,spec=AnchorSpec(),*,primary_null=None):
     device = pipeline._execution_device
     generator = lambda: torch.Generator(device=device).manual_seed(seed)
-    plain = require_ordinary_rgb_image(run_sd35_plain(pipeline,prompt,height=512,width=512,generator=generator()))
+    plain = require_ordinary_rgb_image(run_sd35_plain(pipeline,prompt,height=512,width=512,generator=generator())
+                                        if primary_null is None else primary_null)
     beta = iss_beta(score_content_iss_image(plain,key,iss_assets.lf_public_assets),iss_assets.iss_asset)
     callback = LatentAnchorCallback(ContentISSInjectionCallback(key,iss_assets,beta),spec)
     result = pipeline(prompt=prompt,height=512,width=512,num_inference_steps=20,generator=generator(),
@@ -51,6 +52,17 @@ def run_pair(pipeline,prompt,key,iss_assets,seed,spec=AnchorSpec()):
     return plain,require_ordinary_rgb_image(result.images[0]),dict(anchor_delta_rms=callback.delta_rms)
 
 
+def read_anchor(image,pipeline):
+    """The same image-only public reader, also used on content without anchors."""
+    observation=encode_final_rgb_image(image,pipeline.image_processor,pipeline.vae)
+    estimate=estimate_rotation(observation[0].float().cpu().numpy())
+    H=latent_to_rgb_h(estimate['H'],observation.shape[-2:],(image.height,image.width))
+    return dict(H_reference_to_observed_pixels=H.tolist(),correlation=estimate['correlation'],
+                parameters_latent=estimate['parameters'],
+                correlation_at_identity=estimate.get('correlation_at_identity',0.),
+                one_degree_local_peak_margin=estimate.get('one_degree_local_peak_margin',0.))
+
+
 def score_image(image,key,assets,pipeline,spec=AnchorSpec(),tau=None):
     """Blind production-shaped inputs; forced pre/post for development analysis.
 
@@ -58,14 +70,13 @@ def score_image(image,key,assets,pipeline,spec=AnchorSpec(),tau=None):
     Frozen pipeline is used solely as a public image processor/VAE here.
     """
     pre = score_current_rgb(image,key,assets).value
-    observation = encode_final_rgb_image(image,pipeline.image_processor,pipeline.vae)
-    estimate = estimate_similarity(observation[0].float().cpu().numpy(),spec)
-    H = latent_to_rgb_h(estimate['H'],observation.shape[-2:],(image.height,image.width))
+    if spec != AnchorSpec(): raise ValueError('active readability route has one fixed public anchor')
+    diagnostic=read_anchor(image,pipeline)
+    H=np.array(diagnostic['H_reference_to_observed_pixels'])
     recovered = rectify_once(image,H)
     post = score_current_rgb(recovered,key,assets).value
     payload = dict(pre=float(pre),post=float(post),score=float(max(pre,post)),
-                   H_reference_to_observed_pixels=H.tolist(),correlation=estimate['correlation'],
-                   parameters_latent=estimate['parameters'],rgb_rectifications=1)
+                   **diagnostic,rgb_rectifications=1)
     if tau is not None:
         if not np.isfinite(tau): raise ValueError('finite calibrated threshold required')
         payload.update(tau=float(tau),positive=max(pre,post)>tau)

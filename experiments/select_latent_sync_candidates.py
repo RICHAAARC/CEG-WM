@@ -1,55 +1,47 @@
-"""Fit-only two-objective public anchor selection from completed real reports."""
+"""Compatibility filename: descriptive single-candidate comparison, no selection.
+
+Own oracle-minus-post gaps can reward unreadable anchors and are not an objective.
+No fitted winner or public asset is emitted. Failures remain in report counts.
+"""
 import argparse
 import json
 from pathlib import Path
-import math
 
 
-def select_candidates(reports,max_mse):
-    if not math.isfinite(max_mse) or max_mse <= 0: raise ValueError('positive quality budget required')
-    groups={}
-    for report in reports:
-        if report['split']!='fit': raise ValueError('selection accepts fit only')
-        if report.get('errors') or report['missing_paths'] or report['failed_paths']:
-            raise ValueError('retain and resolve failed fit records before candidate comparison')
-        spec=report['anchor_spec']; identity=(spec['rms'],spec['seed'])
-        groups.setdefault(identity,[]).append(report)
-    if len(groups)<2: raise ValueError('at least two candidate anchors required')
-    summaries=[]; baseline=None
-    for (rms,seed),items in groups.items():
-        roster={(r['pair_id'],r['prompt']) for r in items}
-        if len(roster)!=len(items): raise ValueError('duplicate candidate pair')
-        if baseline is None: baseline=roster
-        if roster!=baseline: raise ValueError('candidate pair rosters differ')
-        quality=[sum(r['local_distortion_mse_2x2'])/4 for r in items]
-        rows=[row for r in items for row in r['rows'] if row['role']=='positive']
-        if len(rows)!=9*len(items): raise ValueError('incomplete conditions')
-        for r in items:
-            if len({row['condition'] for row in r['rows'] if row['role']=='positive'})!=9:
-                raise ValueError('duplicate conditions')
-        summary=dict(rms=rms,seed=seed,mean_mse=sum(quality)/len(quality),
-            worst_pair_mse=max(quality),geometry=sum(r['corner_rmse_pixels'] for r in rows)/len(rows),
-            content_tolerance=sum(r['oracle_minus_post_loss'] for r in rows)/len(rows))
-        if not all(math.isfinite(v) for v in summary.values()): raise ValueError('nonfinite candidate metric')
-        summaries.append(summary)
-    eligible=[r for r in summaries if r['worst_pair_mse']<=max_mse]
-    if not eligible: raise ValueError('no candidate meets the common image MSE budget')
-    selected={objective:{k:best[k] for k in ('rms','seed')} for objective in ('geometry','content_tolerance')
-              for best in [min(eligible,key=lambda r:(r[objective],r['mean_mse'],r['rms'],r['seed']))]}
-    return dict(schema='latent_sync_fit_selection_v1',quality_budget_mse=max_mse,
-                fit_pairs=sorted([list(x) for x in baseline]),candidates=summaries,selected=selected,
-                content_objective='mean positive-part oracle-score minus predicted-post-score',
-                claim='development selection; no fixed-FPR or real robustness claim')
+def compare_report(report):
+    rows=report['rows']; output=[]
+    for condition in sorted({r['condition'] for r in rows}):
+        values={}
+        for method in ('content_only','latent_anchor','v2_rgb_sync'):
+            subset=[r for r in rows if r['condition']==condition and r['method']==method]
+            if len(subset)!=2 or any(r.get('error') for r in subset):
+                values[method]=dict(status='incomplete',failed_or_missing=2-sum(not r.get('error') for r in subset))
+                continue
+            keyed={r['role']:r for r in subset}
+            if set(keyed)!={'positive','negative'}: raise ValueError('duplicate roles')
+            pos=float(keyed['positive']['post']); neg=float(keyed['negative']['post'])
+            whole_pos=float(keyed['positive']['score']); whole_neg=float(keyed['negative']['score'])
+            values[method]=dict(status='complete',positive_post=pos,negative_post=neg,post_separation=pos-neg,
+                                positive_whole_path=whole_pos,negative_whole_path=whole_neg,
+                                whole_path_separation=whole_pos-whole_neg)
+        baseline=values['content_only']
+        for method in ('latent_anchor','v2_rgb_sync'):
+            if baseline['status']=='complete' and values[method]['status']=='complete':
+                values[method]['separation_minus_content_only']=values[method]['post_separation']-baseline['post_separation']
+                values[method]['positive_post_minus_content_only']=values[method]['positive_post']-baseline['positive_post']
+                values[method]['whole_path_separation_minus_content_only']=values[method]['whole_path_separation']-baseline['whole_path_separation']
+        output.append(dict(condition=condition,methods=values))
+    return dict(rows=output,selection_performed=False,
+                claim='paired descriptive post scores; one pair is not detection rate or FPR')
 
 
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--reports',type=Path,nargs='+',required=True)
-    p.add_argument('--max-mse',type=float,required=True)
-    p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args(argv)
-    result=select_candidates([json.loads(path.read_text()) for path in a.reports],a.max_mse)
-    with a.output.open('x') as stream: json.dump(result,stream,indent=2)
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--report',type=Path,required=True)
+    parser.add_argument('--output',type=Path,required=True)
+    args=parser.parse_args(argv)
+    with args.output.open('x') as stream:
+        json.dump(compare_report(json.loads(args.report.read_text())),stream,indent=2)
     return 0
 
 

@@ -74,17 +74,31 @@ def test_blind_score_only_content_can_be_positive(monkeypatch):
     assert calls==[(b'key',assets,(32,32))]*2
 
 
-def test_fit_selector_can_select_different_objectives_and_reject_validation():
-    from experiments.select_latent_sync_candidates import select_candidates
-    def report(seed,geometry,loss):
-        return dict(split='fit',errors=[],missing_paths=0,failed_paths=0,
-          anchor_spec=dict(rms=.04,seed=seed),pair_id='fit1',prompt='a',
-          local_distortion_mse_2x2=[1.]*4,
-          rows=[dict(role='positive',condition=str(i),corner_rmse_pixels=geometry,
-                oracle_minus_post_loss=loss) for i in range(9)])
-    first=report(1,1.,3.); second=report(2,2.,1.)
-    result=select_candidates([first,second],2.)
-    assert result['selected']['geometry']['seed']==1
-    assert result['selected']['content_tolerance']['seed']==2
-    second['split']='validation'
-    with pytest.raises(ValueError,match='fit only'): select_candidates([first,second],2.)
+def test_comparison_uses_actual_separation_not_own_oracle_gap():
+    from experiments.select_latent_sync_candidates import compare_report
+    rows=[]
+    for method,pos,neg in [('content_only',3.,.2),('latent_anchor',.2,.2),('v2_rgb_sync',3.2,.1)]:
+        rows.extend(dict(condition='clean',method=method,role=role,post=score,score=score,error=None,
+                         oracle_minus_post_loss=0.) for role,score in [('positive',pos),('negative',neg)])
+    result=compare_report(dict(rows=rows))
+    assert not result['selection_performed']
+    anchor=result['rows'][0]['methods']['latent_anchor']
+    assert anchor['post_separation']==0
+    assert anchor['separation_minus_content_only']==pytest.approx(-2.8)
+
+
+def test_active_rotation_has_no_scale_translation_or_candidate_grid():
+    from cegwm.method.latent_sync import estimate_rotation
+    template=public_template(8,32,32)
+    result=estimate_rotation(warp_field(template,similarity((32,32),-10)))
+    assert result['parameters'][0]==pytest.approx(-10,abs=.1)
+    assert result['parameters'][1:]==[1.,0.,0.]
+    assert result['one_degree_local_peak_margin']>0
+
+
+def test_active_plan_is_single_candidate_and_two_conditions():
+    from experiments.run_latent_sync_development import development_plan
+    plan=development_plan()
+    assert (plan['generations'],plan['images'],plan['blind_paths'])==(3,4,12)
+    assert plan['anchor_candidates']==1
+    assert plan['oracle_paths']==plan['tolerance_paths']==0
