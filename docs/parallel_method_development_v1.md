@@ -5,8 +5,11 @@ authorized A/B worktrees. V2 results supplied by the control task are the starti
 point; this work does not claim to have repeated its raw-artifact audit.
 
 A fixes V2 content embedding and scoring while replacing the old RGB sync carrier
-and estimator with a step-18 latent anchor and a final RGB VAE observation. B fixes
-V2 RGB sync and blind scoring while replacing only the allocator. Both routes keep
+and estimator with one step-18 latent writer-reader candidate and a final RGB VAE
+observation, compared with a no-anchor reference. No multi-candidate selection or
+broad RST scan is part of the active work. B changes only HF spatial weights while
+preserving each image's original LF allocation, LF/HF shares, ISS, V2 RGB sync and
+blind scoring. Both routes keep
 full-support keyed LF/HF carriers and content as the sole positive authority.
 
 ## Coordinates and observation
@@ -33,32 +36,38 @@ latent/mask or cached Q/K. Oracle rectification is a development diagnostic only
 
 ## Development conditions and allocation labels
 
-`python -m experiments.parallel_method_protocol_v1` prints the proposed counts and
-nine conditions without generating images. `CORE_ATTACKS` and `render_attack`
-provide clean, ±10°, fixed-canvas scales .75/1.25, AWGN sigma .02/.05 and the
-+10°/.75 and -10°/1.25 combinations. AWGN is independent per RGB channel in [0,1],
+`python -m experiments.parallel_method_protocol_v1` prints the current narrow scope
+without generating images. `ACTIVE_A_ATTACKS` contains clean and the exact current
+V2 +10 rotation renderer; `ACTIVE_B_ATTACKS` contains clean, AWGN sigma .02 and
+JPEG50 (4:2:0 subsampling, nonprogressive, no optimization). The V2 rotation label
+must not be interpreted as the historical protocol's clockwise pixel-space +10:
+the helper preserves the V2 renderer exactly and derives truth H from its actual
+Pillow sampling matrix. `CORE_ATTACKS` retains the previous nine conditions only
+as an explicitly selected historical utility; it is not the active default.
+AWGN is independent per RGB channel in [0,1],
 then clipped and rounded to uint8; it is not Gaussian blur. Use the same explicit
 noise seed for matched variants of a pair and condition. Bilinear interpolation,
 black fill, and canvas dimensions are shared across variants.
 
-Suggested first run: 8 fit pairs plus 24 independent validation pairs; unmarked,
-V2, A geometry-target, A content-tolerance-target, B simplified and B survival
-variants total 192 base images, plus 72 B continuations if still needed. These are
-adjustable development counts, not a launch prerequisite. Label-path and oracle
-counts should reflect actual calls, not repeated calls to reach a quota.
+The previous 264-image / 3528-path suggested envelope has been withdrawn. Actual
+pair, continuation, score and oracle counts come from each CLI's selected options.
+There is no requirement to complete the former five-variant matrix.
 
 B labels must include perturbation through remaining sampler steps, attacks, old
 RGB sync and current blind registered-minus-max16wrong scoring. Record evidence
-increment relative to matched uniform baseline and final perceptual costs. Simple
+increment relative to matched uniform-HF baseline with original per-image LF and
+branch shares held fixed, and final perceptual costs. Simple
 VAE encode/decode response is a feature candidate, not a complete generation
 Jacobian. Fit only on fit pairs and freeze the small shared allocator before
 validation. Do not feed allocation masks to the detector.
 
 Compare final RGB PSNR/SSIM/LPIPS plus local distortion, including content LF/HF
 and synchronization interactions; latent L2 alone is insufficient. LF/HF roles
-remain empirical. A content tolerance curves should use residual angle, scale,
-and translations with the unchanged score; compare content-target and geometry-
-target fitting on held-out samples. Failures remain visible.
+remain empirical. A currently tests one writer-reader candidate and its no-anchor
+reference on clean/+10 only. Oracle is auxiliary; candidate selection by its own
+oracle-minus-post loss is not active. That loss can favor a candidate whose oracle
+and post scores are both poor and cannot establish recovered detection benefit.
+Failures remain visible.
 
 ## Evidence and next experiments
 
@@ -77,5 +86,5 @@ the maximum across conditions and use strict greater-than. Inputs must score the
 complete detection path. It is fit-only and gives no population FPR guarantee.
 
 Local T2SMark matched-sync/matched-quality controls follow mechanism development.
-JPEG, blur, crop-rescale and generative reconstruction remain staged research
-targets; their omission from the first nine conditions does not remove them.
+Blur, crop-rescale and generative reconstruction remain staged research targets;
+the narrowed first experiment does not remove them from the research scope.

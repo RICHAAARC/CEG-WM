@@ -23,6 +23,14 @@ template into a latent tensor or combining neighboring ideas is insufficient.
 
 ## Implementation inspection
 
+Current narrowed scope supersedes the earlier implementation snapshot below:
+A uses one writer-reader candidate plus a no-anchor reference on clean and the
+exact V2 +10 renderer, with no multi-candidate selection or broad RST search.
+B changes HF spatial weights only, fixing original per-image LF allocation,
+branch shares, ISS and V2 synchronization/scoring; active conditions are clean,
+AWGN .02 and JPEG50. The 264-image / 3528-path envelope is withdrawn. The snapshot
+below records what was inspected earlier, not proof of the latest code's effect.
+
 Inspected the A/B method, runtime and development CLI files. A wraps the existing
 content injection, adds a public asymmetric anchor at step 18, and omits the old
 RGB synchronization embed call. Its image scoring estimates H from current VAE
@@ -46,11 +54,18 @@ observed integer pixel centres; historical V2 adapters use observed-to-canonical
 normalized coordinates. Pixel-centre conjugation and one-operation combined
 attacks are covered by the shared protocol tests.
 
-The protocol's 264-image total is a user-suggested envelope only. Actual CLI plans
+The protocol's earlier 264-image total is withdrawn. Actual CLI plans
 must derive image, score and oracle counts from selected roster and options.
 Review feedback requested an explicit remaining-step check for A and disjoint
 oracle/additional-tolerance counts; these are engineering refinements, not new
 external execution gates. No real model was run by this review.
+
+The subsequently inspected candidate selector minimized positive-part
+oracle-minus-post loss. This can prefer oracle=.2/post=.2 over oracle=3/post=2.8,
+even though absolute recovered evidence is much weaker. The latest scope retires
+that selection objective; its historical implementation is not evidence of
+optimizing recovered detection benefit. Fit-seed isolation and the separate
+oracle diagnostic had no identified blind-input leakage.
 
 ## Evidence still needed
 

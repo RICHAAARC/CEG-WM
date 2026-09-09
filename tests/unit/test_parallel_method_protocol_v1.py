@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from PIL import Image
 from experiments.parallel_method_protocol_v1 import (
-    CORE_ATTACKS, Attack, latent_to_rgb_matrix, reference_to_observed,
-    render_attack, rectify_once,
+    CORE_ATTACKS, ACTIVE_A_ATTACKS, ACTIVE_B_ATTACKS, Attack, latent_to_rgb_matrix, reference_to_observed,
+    render_attack, rectify_once, protocol_summary,
 )
 
 pytestmark = pytest.mark.unit
@@ -47,3 +47,23 @@ def test_latent_pixel_centres_and_geometry_conjugation():
     H = reference_to_observed((512, 512), 10, .75)
     latent_H = np.linalg.inv(S) @ H @ S
     assert np.allclose(latent_H, reference_to_observed((64, 64), 10, .75))
+
+
+def test_active_v2_renderer_is_exact_and_truth_tracks_sampling():
+    from cegwm.formal_experiment_v2 import apply_attack, ROTATION
+    from experiments.parallel_method_protocol_v1 import _sample
+    image = Image.fromarray(np.random.default_rng(31).integers(0, 256, (512, 512, 3), dtype=np.uint8))
+    attacked, H = render_attack(image, ACTIVE_A_ATTACKS[1])
+    assert np.array_equal(np.asarray(attacked), np.asarray(apply_attack(image, ROTATION)))
+    # Matrix inversion rounding can move interpolated uint8 values by one level.
+    assert np.max(np.abs(np.asarray(attacked).astype(int) - np.asarray(_sample(image, np.linalg.inv(H))).astype(int))) <= 1
+
+
+def test_narrow_protocol_and_jpeg():
+    assert len(ACTIVE_A_ATTACKS) == 2 and len(ACTIVE_B_ATTACKS) == 3
+    image = Image.fromarray(np.random.default_rng(2).integers(0, 256, (32, 32, 3), dtype=np.uint8))
+    attacked, H = render_attack(image, ACTIVE_B_ATTACKS[2])
+    assert attacked.size == image.size and attacked.mode == 'RGB'
+    assert not np.array_equal(np.asarray(attacked), np.asarray(image))
+    assert np.array_equal(H, np.eye(3))
+    assert 'user_suggested_envelope' not in protocol_summary()

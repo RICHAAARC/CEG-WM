@@ -7,6 +7,7 @@ explicitly separate from historical normalized observed-to-canonical matrices.
 from dataclasses import asdict, dataclass
 import json
 import math
+import io
 
 import numpy as np
 from PIL import Image
@@ -18,6 +19,8 @@ class Attack:
     angle_deg: float = 0.0
     scale: float = 1.0
     noise_sigma: float = 0.0
+    jpeg_quality: int | None = None
+    renderer: str = "pixel_similarity"
 
 
 CORE_ATTACKS = (
@@ -28,6 +31,13 @@ CORE_ATTACKS = (
     Attack("rotation_plus10_scale075", 10, .75),
     Attack("rotation_minus10_scale125", -10, 1.25),
 )
+
+# Historical nine-condition renderer remains available only for explicitly
+# selected diagnostics. These narrow sets are the active development defaults.
+ACTIVE_A_ATTACKS = (Attack("clean"), Attack(
+    "rotation_10_bilinear_black_fixed_canvas_v2", renderer="paper_v2_rotation"))
+ACTIVE_B_ATTACKS = (Attack("clean"), Attack("awgn_002", noise_sigma=.02),
+                    Attack("jpeg50", jpeg_quality=50))
 
 
 def reference_to_observed(size, angle_deg=0., scale=1., translation=(0., 0.)):
@@ -62,6 +72,20 @@ def _sample(image, output_to_input):
 def render_attack(image, attack, *, noise_seed=0):
     """Returns RGB and diagnostic truth H. Never pass truth to blind detection."""
     rgb = image.convert("RGB")
+    if attack.renderer == "paper_v2_rotation":
+        from cegwm.formal_experiment_v2 import apply_attack, ROTATION
+        from cegwm.geometry_v7.r1a import _pixel_output_to_source
+        angle = math.radians(10.)
+        c, s = math.cos(angle), math.sin(angle)
+        sampling = np.array([*_pixel_output_to_source(
+            ((c, -s, 0.), (s, c, 0.), (0., 0., 1.))), 1.]).reshape(3, 3)
+        offset = np.eye(3); offset[:2, 2] = .5
+        # Preserve the actual historical Pillow renderer, including its centre
+        # and sign. Its label is not a new clockwise pixel-space +10 transform.
+        H = np.linalg.inv(np.linalg.inv(offset) @ sampling @ offset)
+        return apply_attack(rgb, ROTATION), H
+    if attack.renderer != "pixel_similarity":
+        raise ValueError("unknown renderer")
     H = reference_to_observed(rgb.size, attack.angle_deg, attack.scale)
     result = rgb.copy() if np.array_equal(H, np.eye(3)) else _sample(rgb, np.linalg.inv(H))
     if not math.isfinite(attack.noise_sigma) or attack.noise_sigma < 0:
@@ -70,6 +94,15 @@ def render_attack(image, attack, *, noise_seed=0):
         values = np.asarray(result, dtype=np.float64) / 255.
         noise = np.random.default_rng(noise_seed).normal(0., attack.noise_sigma, values.shape)
         result = Image.fromarray(np.rint(np.clip(values + noise, 0., 1.) * 255).astype(np.uint8))
+    if attack.jpeg_quality is not None:
+        if type(attack.jpeg_quality) is not int or not 1 <= attack.jpeg_quality <= 100:
+            raise ValueError("JPEG quality must be an integer in 1..100")
+        with io.BytesIO() as stream:
+            result.save(stream, format="JPEG", quality=attack.jpeg_quality,
+                        subsampling=2, optimize=False, progressive=False)
+            stream.seek(0)
+            with Image.open(stream) as decoded:
+                result = decoded.convert("RGB").copy()
     return result, H
 
 
@@ -87,17 +120,18 @@ def latent_to_rgb_matrix(rgb_size, latent_size):
 
 
 def protocol_summary():
-    return {"user_suggested_envelope": {"fit_pairs": 8, "independent_validation_pairs": 24,
-            "image_variants": ["unmarked", "v2", "A_geometry", "A_tolerance",
-                               "B_simple", "B_survival"],
-            "base_images": 192, "B_extra_continuations": 72,
-            "suggested_total_images": 264},
-            "actual_counts": "Use each executable entrypoint plan with its selected arguments; this envelope is not an execution plan",
-            "core_attacks": [asdict(a) for a in CORE_ATTACKS],
+    return {"scope": "narrow_method_development",
+            "withdrawn_envelope": "Previous 264-image / 3528-path suggestion is withdrawn",
+            "A": {"mechanism": "one writer-reader candidate plus no-anchor reference; oracle diagnostic only",
+                  "attacks": [asdict(a) for a in ACTIVE_A_ATTACKS]},
+            "B": {"mechanism": "HF spatial weights only; preserve per-image original LF, branch shares, ISS, scorer and RGB sync",
+                  "attacks": [asdict(a) for a in ACTIVE_B_ATTACKS]},
+            "actual_counts": "Use each executable entrypoint plan with its selected arguments",
+            "historical_core_attacks": [asdict(a) for a in CORE_ATTACKS],
             "geometry_direction": "reference_pixel_centres_to_observed_pixel_centres",
-            "render": "inverse H; bilinear; black; fixed canvas; one sample",
+            "render": "A exact paper-v2 renderer; historical pixel similarities inverse H; bilinear black fixed canvas",
             "noise": "independent RGB-channel Gaussian; RGB[0,1]; clip then round uint8",
-            "claim": "development only; 24 validation negatives cannot support 0.1% FPR"}
+            "claim": "development only; no population FPR or real robustness conclusion"}
 
 
 if __name__ == "__main__":
