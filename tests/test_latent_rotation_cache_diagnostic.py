@@ -64,3 +64,23 @@ def test_cached_analysis_does_not_pass_truth_to_blind_optimizer(tmp_path,monkeyp
     assert len(calls)==1 and np.array_equal(calls[0],values)
     assert result[0]['angle_errors_degrees']['original']==-1.
     assert result[0]['error'] is None
+
+
+def test_cpu_cache_replay_completes_all_rows_without_loading_vae(tmp_path,monkeypatch):
+    import json
+    import experiments.run_latent_rotation_cache_diagnostic as runner
+    cache=tmp_path/'cache';cache.mkdir();output=tmp_path/'output'
+    rows=[]
+    for source in SOURCE_NAMES:
+        for condition in ('clean','rotation'):
+            name=source+'__'+condition+'.npz'
+            np.savez_compressed(cache/name,observation=np.zeros((4,8,8),dtype=np.float32))
+            rows.append(dict(source=source,condition=condition,error=None,cache_file=name))
+    (cache/'cache_rows.jsonl').write_text(''.join(json.dumps(row)+'\n' for row in rows))
+    def forbidden():raise AssertionError('CPU replay must not load VAE')
+    monkeypatch.setattr(runner,'load_vae_runtime',forbidden)
+    assert runner.main(['--mode','diagnose-cache','--cache-dir',str(cache),'--output',str(output)])==0
+    report=json.loads((output/'report.json').read_text())
+    assert report['vae_encoding_attempts']==0 and report['failed_units']==0
+    assert len(report['diagnostic_rows'])==report['cached_observations']==8
+    assert len((output/'rows.jsonl').read_text().splitlines())==8
