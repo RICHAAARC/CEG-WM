@@ -17,6 +17,9 @@ dependencies = [
     "transformers>=4.44",
 ]
 
+[project.optional-dependencies]
+latent-sync = ["scipy>=1.10"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from PIL import Image
+pytestmark = pytest.mark.unit
 from cegwm.method.latent_sync import (public_template,similarity,warp_field,
     estimate_similarity,latent_to_rgb_h,rectify_once)
 
