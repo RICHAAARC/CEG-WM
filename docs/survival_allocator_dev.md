@@ -1,18 +1,30 @@
 # HF survival allocation development
 
-Only HF spatial amplitude weights change. Each image retains its original LF
-configuration, LF/HF branch shares, ISS beta, whitening, 0.012 joint projection,
-RGB SyncSeal and complete V2 registered-minus-max16wrong pre/post scoring path.
-The existing LF implementation does not consume LF tile weights. Joint projection
-can still change actual LF amplitude when HF changes; reports retain actual LF,
-HF and combined perturbation measurements rather than claiming identical deltas.
+The allocator comparison fixes an actual per-image LF reference and changes HF
+spatial weights and its budget scale. Whitening, RGB SyncSeal and complete V2
+registered-minus-max16wrong pre/post scoring remain unchanged. Original V2 is a
+historical system reference; it retains its existing joint ISS projection.
+
+For uniform, probes and survival, an original-allocation/ISS reference scale is
+computed once. Freeze L=cast(base+a_ref*LF) and its actual component delta_L=L-base.
+The new development-only solver forms Y=cast(L+b*HF); only b changes, and its
+actual HF component is Y-L. The total 0.012 budget is checked on Y-base, including
+the LF/HF cross term. The same L is reused for every allocator variant. Over-budget
+LF, mismatched replay base or failure to find nonzero feasible HF remains an error
+row. Quantized search does not claim a globally maximal amplitude or impossibility.
+This fixes the injected LF reference component, not the final latent's LF spectral
+projection: spatial weighting and quantization can add low-frequency energy.
+The historical production ISS path is not changed to use this solver.
 
 The three comparison arms are original HF, uniform HF and one learned HF rule.
 Original uses the unchanged nearest interpolation. Uniform, four macroblock
 probes and the fitted candidate use bilinear interpolation at the actual latent
 resolution. Uniform is identical under either interpolation and is the shared
-label reference. The new weights are positive, bounded, unit-mean and spatially
-smooth. This does not establish that their final images have matched quality.
+label reference. Uniform versus survival is the only allocator-effect comparison
+with the same fixed LF reference and smoother. Comparisons with original include
+both projection and smoothing differences and are labeled historical-system
+comparisons. The new weights are positive, bounded, unit-mean and spatially smooth.
+This does not establish that their final images have matched quality.
 
 A low-capacity ridge fit maps 2x2 DINO saliency, texture and latent-energy features
 to bounded allocation logits. Energy is a simplified candidate feature, not a

@@ -205,7 +205,8 @@ def test_actual_latent_hf_map_is_smooth_and_default_unchanged():
     assert torch.equal(_hf_weighted_amplitude(carrier,uniform,torch.tensor(1.)),
         _hf_weighted_amplitude(carrier,uniform,torch.tensor(1.),interpolation='bilinear'))
 
-def test_fit_fake_wiring_produces_four_labels_and_separation(monkeypatch,tmp_path):
+@pytest.mark.parametrize('fail_probe', [False, True])
+def test_fit_fake_wiring_produces_four_labels_and_separation(monkeypatch,tmp_path,fail_probe):
     from PIL import Image
     from experiments import run_paper_main_worker_v2 as v2
     from experiments import run_survival_allocator_dev as runner
@@ -215,6 +216,8 @@ def test_fit_fake_wiring_produces_four_labels_and_separation(monkeypatch,tmp_pat
     monkeypatch.setattr(v2,'_quality',lambda *args:{'psnr':40.,'ssim':.99,'lpips':.002})
     def generate(*args):
         variant=args[4]
+        if fail_probe and variant == 'probe2':
+            raise RuntimeError('FIXED_LF_NO_NONZERO_HF_FOUND_IN_BOUNDED_SEARCH')
         color=20+int(variant[-1]) if variant.startswith('probe') else 10
         return Image.new('RGB',(32,32),(color,)*3),np.arange(12).reshape(4,3),{'iss_beta':1.2,'embedding':{}}
     monkeypatch.setattr(runtime,'generate_variant',generate)
@@ -226,8 +229,15 @@ def test_fit_fake_wiring_produces_four_labels_and_separation(monkeypatch,tmp_pat
     roster.write_text(json.dumps([{'id':'fit-one','prompt':'fake only','seed':4}]))
     out=tmp_path/'output'
     assert main(['--mode','fit','--roster',str(roster),'--output',str(out),
-        '--runtime-root',str(tmp_path/'runtime')]) == 0
+        '--runtime-root',str(tmp_path/'runtime')]) == (2 if fail_probe else 0)
     report=json.loads((out/'report.json').read_text())
+    if fail_probe:
+        assert len(report['rows']) == 21 and report['row_errors'] == 3
+        assert report['failed_fit_units'] == ['fit-one']
+        assert all('FIXED_LF_NO_NONZERO_HF_FOUND' in row['error']
+                   for row in report['rows'] if row['variant'] == 'probe2')
+        assert not (out/'allocator.json').exists()
+        return
     labels=[json.loads(row) for row in (out/'labels.jsonl').read_text().splitlines()]
     assert len(report['rows'])==21 and report['row_errors']==0
     assert len(labels)==4 and all(label['reference_variant']=='uniform' for label in labels)

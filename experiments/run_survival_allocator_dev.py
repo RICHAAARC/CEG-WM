@@ -89,6 +89,7 @@ def summarize_separation(rows, planned_units):
             tail[component]={'max':max(component_values) if component_values else None,
                 'empirical_q95':float(np.quantile(component_values,.95)) if component_values else None}
         originals = {r['id']:r for r in selected if r['variant']=='original' and not r['error']}
+        uniforms = {r['id']:r for r in selected if r['variant']=='uniform' and not r['error']}
         for variant in sorted({r['variant'] for r in selected if r['variant']!='clean'}):
             positives = [r for r in selected if r['variant']==variant and not r['error']]
             pairs = [r for r in positives if r['id'] in neg]
@@ -101,6 +102,13 @@ def summarize_separation(rows, planned_units):
                     'positive_registered':r['registered'], 'positive_max16wrong':r['max16wrong'],
                     'negative_registered':neg[r['id']]['registered'], 'negative_max16wrong':neg[r['id']]['max16wrong']} for r in pairs],
                 'quality_matching_claim':False,
+                'allocator_effect_reference':'uniform_with_same_fixed_LF_and_bilinear_HF',
+                'original_comparison_meaning':'historical_system_reference_projection_and_smoothing_differ',
+                'comparisons_to_uniform':[{'id':r['id'],
+                    'score_delta':r['score']-uniforms[r['id']]['score'],
+                    'quality_deltas':{k:r['quality'][k]-uniforms[r['id']]['quality'][k] for k in ('psnr','ssim','lpips')},
+                    'quality_no_worse':all((r['quality'][k]>=uniforms[r['id']]['quality'][k]) if k!='lpips' else (r['quality'][k]<=uniforms[r['id']]['quality'][k]) for k in ('psnr','ssim','lpips'))}
+                    for r in pairs if variant not in ('original','uniform') and r['id'] in uniforms],
                 'comparisons_to_original':[{'id':r['id'],
                     'score_delta':r['score']-originals[r['id']]['score'],
                     'quality_deltas':{k:r['quality'][k]-originals[r['id']]['quality'][k] for k in ('psnr','ssim','lpips')},
@@ -138,7 +146,8 @@ def main(argv=None):
     report = {'stage': args.mode, 'unit_count': len(units), 'planned_images': len(units)*len(variants),
         'planned_score_paths': len(units)*len(variants)*len(CORE_ATTACKS),
         'formal_science_denominator': 0, 'claim': 'development only; no fixed-FPR or robustness conclusion',
-        'allocator_scope':'HF spatial weights only; per-image LF/share/ISS fixed',
+        'allocator_scope':'uniform/probe/survival share actual LF reference; only HF allocation and budget scale vary',
+        'original_role':'historical v2 system reference, not pure allocator attribution',
         'conditions':[a.name for a in CORE_ATTACKS],
         'planned_macro_continuations':len(units)*4 if args.mode=='fit' else 0,
         'label': 'relative to uniform HF: mean attacked max(pre,post) registered-minus-max16wrong increment minus penalty times final LPIPS increment',
@@ -235,4 +244,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
-
