@@ -1,0 +1,42 @@
+[
+  {
+    "id": "parallel-dev-fit-000",
+    "prompt": "A watchmaker sorting steel springs beneath a magnifying lamp",
+    "seed": 2031010000
+  },
+  {
+    "id": "parallel-dev-fit-001",
+    "prompt": "A botanist pressing alpine flowers inside a field notebook",
+    "seed": 2031010001
+  },
+  {
+    "id": "parallel-dev-fit-002",
+    "prompt": "A glassblower shaping a clear vessel beside a glowing furnace",
+    "seed": 2031010002
+  },
+  {
+    "id": "parallel-dev-fit-003",
+    "prompt": "A cartographer annotating river deltas on a broad paper map",
+    "seed": 2031010003
+  },
+  {
+    "id": "parallel-dev-fit-004",
+    "prompt": "A baker scoring round loaves on a flour-dusted oak counter",
+    "seed": 2031010004
+  },
+  {
+    "id": "parallel-dev-fit-005",
+    "prompt": "A marine biologist cataloging shells in a coastal laboratory",
+    "seed": 2031010005
+  },
+  {
+    "id": "parallel-dev-fit-006",
+    "prompt": "A bicycle mechanic truing a silver wheel in a narrow workshop",
+    "seed": 2031010006
+  },
+  {
+    "id": "parallel-dev-fit-007",
+    "prompt": "A conservator cleaning a painted wooden panel under soft light",
+    "seed": 2031010007
+  }
+]

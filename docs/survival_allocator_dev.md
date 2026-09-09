@@ -1,60 +1,62 @@
-# Survival allocator development V1
+# HF survival allocation development
 
-This branch implements an embedding-only allocator change. V2 content carriers,
-ISS host beta, 0.012 joint projection, RGB SyncSeal embedding and continuous RGB
-recovery, and registered-minus-max16wrong content scoring are reused unchanged.
-No geometry score contributes positive evidence. Labels use the same max(pre,post)
-path for baseline and probes; there is no newly calibrated decision threshold.
+Only HF spatial amplitude weights change. Each image retains its original LF
+configuration, LF/HF branch shares, ISS beta, whitening, 0.012 joint projection,
+RGB SyncSeal and complete V2 registered-minus-max16wrong pre/post scoring path.
+The existing LF implementation does not consume LF tile weights. Joint projection
+can still change actual LF amplitude when HF changes; reports retain actual LF,
+HF and combined perturbation measurements rather than claiming identical deltas.
 
-The shared allocator uses 2x2 macroblock DINO saliency, RGB texture and latent
-energy features. Latent energy is a simplified feature, not a perturbation response,
-stability estimate, full generation Jacobian or semantic proof. Its learned linear
-utility is passed through tanh, centered, bilinearly expanded to the existing 4x4
-allocation, and converted into positive unit-mean weights inside (0.5,1.5). LF and
-HF share weights and retain equal branch shares before the existing ISS scaling.
-LF/HF evidence roles remain unproven. No embed mask or features enter detection.
+The three comparison arms are original HF, uniform HF and one learned HF rule.
+Original uses the unchanged nearest interpolation. Uniform, four macroblock
+probes and the fitted candidate use bilinear interpolation at the actual latent
+resolution. Uniform is identical under either interpolation and is the shared
+label reference. The new weights are positive, bounded, unit-mean and spatially
+smooth. This does not establish that their final images have matched quality.
 
-For each fit pair, a full same-seed independent SD3.5 call reaches callback 18;
-four separate macroblock-biased allocator variants are injected there and continue
-through step 19 to final RGB. This is real remaining sampling, not decode/encode
-label substitution. It replays the prefix for simplicity instead of recursively
-calling the active pipeline or saving scheduler internals. Plain, uniform, original
-and probes share seed and old final RGB sync; label increments compare each probe
-to uniform, both with synchronization. All nine attacks use identical noise seeds
-per pair/condition. Candidate original-rule allocation still uses its original
-64 decode/encode probes; these are never called generation-Jacobian labels.
+A low-capacity ridge fit maps 2x2 DINO saliency, texture and latent-energy features
+to bounded allocation logits. Energy is a simplified candidate feature, not a
+perturbation response or generation Jacobian. Features and labels are embedding
+or development inputs only; none enter blind detection. No feature expansion,
+tail coding, PRC, LF/HF reweighting or injection-time optimization is included.
 
-Labels retain per-attack final content score increments, final incremental LPIPS
-and utility = mean(score increments) - cost_penalty * LPIPS_increment.
-The penalty (default 1) is a development hyperparameter with score/LPIPS units;
-it is not evidence of matched quality. PSNR, SSIM, LPIPS and four macroblock MSEs
-are reported against the same-seed plain final image, including content/sync
-interference. Final quality is not inferred from latent L2. Fitted assets store
-feature standardization, shared coefficients and fit ids/seeds. Validation refuses
-fit id or seed reuse, never refits, and needs a separate prompt/seed roster.
+For each fit pair, four separate HF probes replay the same generation seed to
+step 18 and execute remaining step 19. They then undergo final RGB synthesis,
+the unchanged RGB synchronization and clean, AWGN sigma .02 in RGB [0,1] with
+clipping, and JPEG50. Original allocation is computed once per image and reused.
+Its old decode/encode probes are features, never substitutes for continuation.
 
-A roster is a JSON list: [{"id":"fit-000","prompt":"a mountain lake","seed":2030000000}].
-Choose new ids/seeds and independent fit/validation units before external execution.
+Each label stores complete pre/post registered and wrong-key scores for the probe,
+uniform reference and unwatermarked image. Utility is mean complete-path margin
+increment minus a fixed coefficient (default 1) times final LPIPS increment.
+The coefficient has score/LPIPS units. Final PSNR/SSIM/LPIPS and four local MSEs
+include content/synchronization interaction; no quality is inferred from latent L2.
 
+Validation applies a frozen fit asset to independent IDs/seeds, never refits using
+the validation attacks, and reports paired positive-negative separation, negative
+q95/max, per-key components and paired quality differences. A quality comparison
+flag is descriptive only. Poor scores are retained; uniform may win. No same-quality
+gain, .1% FPR, robustness or innovation result exists until real measurements.
+
+From this worktree, using its installed package or `PYTHONPATH=src`:
+
+```bash
+PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode plan --roster configs/parallel_method_dev/fit.json --output unused
+PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode fit --roster configs/parallel_method_dev/fit.json --output fit-output --runtime-root runtime
+PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode validation --roster configs/parallel_method_dev/validation.json --output validation-output --runtime-root runtime --allocator fit-output/allocator.json
 ```
-PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode plan --roster fit.json --output unused
-PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode fit --roster fit.json --output fit-output --runtime-root runtime
-PYTHONPATH=src python -m experiments.run_survival_allocator_dev --mode validation --roster validation.json --output validation-output --runtime-root runtime --allocator fit-output/allocator.json
-```
 
-Plan loads no models. Fit/validation load the existing v2 production runtime and
-need its public model assets plus HF_TOKEN and CEG_WM_ROOT_KEY. They are prepared
-entrypoints, not authorization to run GPU/Colab, push or change Drive. Output paths
-must be new; failure rows and generated images remain. Failed fit labels are not
-silently discarded into a smaller fit population. Reports are written even if
-setup fails. A poor utility or score never suppresses the report or model fitting.
+Fit8: 56 images, 32 HF macroblock continuations and 168 score paths. Validation24:
+96 images and 288 paths. Total: 152 images and 456 paths; no optional second
+amplitude is scheduled. All marked variants replay the 20-step prefix for simple
+scheduler isolation, so 32 labels do not mean only 32 single denoising steps.
+Quality, original allocator probes and ISS host scores are additional internal work.
+The old 264-image/3528-path plan is withdrawn. Model execution is separate from
+code preparation; HF_TOKEN and CEG_WM_ROOT_KEY are needed only for fit/validation.
 
-Fit8 gives 56 images and 504 attack score paths; validation24 gives 96 images and
-864 paths, total 152 images and 1368 logical scoring paths. Each path internally
-uses the existing content keys and pre/post selection. This deliberately reduces
-the earlier suggested budget: four local allocation perturbations per fit pair,
-not nine separate output generations per probe. Original allocator decode/encode
-probes, quality computation and ISS host scores are additional internal work.
-This small development split supports neither .1% FPR nor robustness conclusions.
-Real model quality, survival signal and allocation benefit are still unverified.
-Crop-rescale, JPEG/blur and generative reconstruction remain later research tasks.
+History is a constraint: Content V2-V8 LF wrong-key competition was uneven, while
+V9 joint clean attribution passed its four strata. Content-Curve already measured
+AWGN and HF tail carriers. This candidate therefore asks only whether HF spatial
+allocation adds independent survival at comparable final quality. If it does not,
+retain the outcome and stop adding features. Crop and reconstruction remain later
+research questions. No real model execution has occurred in this implementation.
