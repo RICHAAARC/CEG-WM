@@ -46,3 +46,5 @@ A2/A3独立复核、A4综合后，保留物理报告用 `public_h=N H_rgb N^-1`�
 correct-key reader 完成即原子落盘，再执行外部 wrong-key 查询，防止后续硬中断丢失已有盲峰。全部 JSON 用同目录临时文件加 replace 写入；不引入重试。execution.json 记录源码 exact 与关键文件 SHA256。`negative_evaluated.json` 对既有峰生成 36 项共享阈值后判读（12 非候选正确 key、24 外部 wrong-key），不新增模型调用。Notebook 默认 run 供用户运行全部单元；本轮静态验证不执行。
 
 Notebook 仅 JSON/代码 AST 静态校验，所有 code execution_count=null、outputs=[]，未顶到底执行。使用已推送实现 exact 的入口，与 Notebook 自身承载提交区别记录。WSL 为 torch2.5.1+cpu、CUDA不可用；本地无已配置可用真实模型环境。**本轮未执行的直接原因是用户最新明确停止真实运行，不能把未执行判为机制失败。**
+
+源码实现固定为 `837ffe313a0de7cb2287676a4b6071913242d1cc`（提交 A）；Notebook 与本段源码说明由后续提交 B 承载，运行时仍 checkout A，避免要求 Notebook 自引用其自身提交。A1 唯一实现写入；A2/A3 对同一最终版本独立复核并通过，A4 综合确认必要修复闭合、17 项 CPU 检查支持交付首次 M1 入口，但不支持真实可读窗口成立。A5 已完成最终 Notebook pin 与交付里程碑核对并通过；不另建五份重复报告。
