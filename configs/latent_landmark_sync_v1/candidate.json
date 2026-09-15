@@ -1,0 +1,29 @@
+{
+  "method_id": "latent_landmark_sync_v1_clean_development",
+  "sources": [
+    {"id": "llsv1-m1-01", "seed": 209150101, "prompt": "A ceramic blue teapot beside folded linen and three figs on a pale wooden kitchen table, soft morning window light"},
+    {"id": "llsv1-m1-02", "seed": 209150102, "prompt": "A narrow hillside tram passing ochre apartment facades after rain, overhead wires and wet stone pavement, documentary photograph"},
+    {"id": "llsv1-m1-03", "seed": 209150103, "prompt": "A solitary white heron standing among green reeds in a shallow pond, distant dark pines and ripples, natural wildlife photograph"},
+    {"id": "llsv1-m1-04", "seed": 209150104, "prompt": "An antique brass telescope on a tripod inside a circular observatory, books and a red stool, afternoon light through the dome"}
+  ],
+  "arms": ["plain", "content_only", "main_syncseal", "rms_0.005", "rms_0.010", "rms_0.020"],
+  "rms": [0.005, 0.01, 0.02],
+  "steps": 20,
+  "write_callback_index": 18,
+  "rgb_shape": [512, 512],
+  "latent_shape": [1, 16, 64, 64],
+  "syncseal_residual_multiplier": 0.75,
+  "reference_tau": 1.5545224858704942,
+  "reference_threshold_file": "reference_threshold.json",
+  "threshold_claim": "reference content threshold only; no inherited FPR",
+  "peak_threshold_rule": "single shared strict threshold=max(0, all peak responses of correct-key plain/content_only/main_syncseal and one fixed external-wrong-key query on every image); no per-amplitude optimization",
+  "ambiguity_threshold": 0.0,
+  "ambiguity_rule": "strictly positive count-plus-mean-response advantage over first geometrically distinct runner-up; single hypothesis margin=2",
+  "correct_identity_max_latent_error": 0.125,
+  "clean_control_point_rgb_rmse_max": 1.0,
+  "control_points_rgb": [[0,0],[255.5,0],[511,0],[0,255.5],[255.5,255.5],[511,255.5],[0,511],[255.5,511],[511,511]],
+  "quality": {"psnr_max_loss_vs_main_db": 0.5, "lpips_main_multiplier": 1.1, "lpips_epsilon": 0.0001, "lpips_net": "alex", "local_residual_window_rgb": 57},
+  "selection": "smallest RMS passing all four sources: >=4 correct identities, accepted blind H, RGB control RMSE<=1, quality budgets and no loss of content-only pre>reference_tau",
+  "m1_denominator": {"independent_sources": 4, "planned_images": 24, "external_wrong_key_queries": 24, "correct_key_negative_queries": 12},
+  "m2": "not executed by this entry point; separate authorization required"
+}

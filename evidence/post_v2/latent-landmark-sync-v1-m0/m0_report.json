@@ -1,0 +1,15 @@
+{
+  "stage": "M0",
+  "status": "CPU_ENGINEERING_CHECKS_PASSED",
+  "command": "PYTHONPATH=src:. OMP_NUM_THREADS=1 /home/richar/projects/CEG-WM/alive/CEG-WM/.venv/bin/python -m pytest tests/test_latent_landmark_sync.py -q",
+  "result": "17 passed in 2.21s",
+  "coverage": ["kernel DC and L2", "16x8 orthogonal identities", "total RMS three amplitudes", "signed rotations and translations", "missing points", "wrong identities and duplicate locations", "degenerate and insufficient correspondence", "ambiguous equal hypotheses", "zero signal", "synthetic fractional-kernel localization", "pixel-center conjugation and PIL direction", "actual PIL impulse rotation -10/+10/90 degrees", "content callback ordering", "pre/post statistic value protocol and blind reader invocation count", "fixed denominator shared threshold", "mock complete M1 orchestration"],
+  "scientific_denominator": 0,
+  "real_model_executed": false,
+  "m1_planned_images": 24,
+  "m1_executed_images": 0,
+  "m1_independent_sources": 4,
+  "m1_status": "NOT_EXECUTED_USER_REQUESTED_STOP",
+  "notebook": {"path": "notebooks/latent_landmark_sync_v1_colab.ipynb", "code_cells": 5, "json_valid": true, "python_ast_valid": true, "exact_drive_first_cell": true, "all_outputs_empty": true, "executed": false, "source_exact": "pending_implementation_commit"},
+  "claim_ceiling": "Algorithm and entrypoint engineering only. No carrier survival, clean readable window, physical VAE center, rotation performance or FPR conclusion."
+}

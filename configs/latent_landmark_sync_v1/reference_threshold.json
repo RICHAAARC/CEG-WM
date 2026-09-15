@@ -1,0 +1,13 @@
+{
+  "alpha": 0.001,
+  "calibration_denominator": 2000,
+  "decision_rule": "positive_iff_normalized_score_strictly_greater_than_tau",
+  "equality_decision": "negative",
+  "estimator": "nearest_rank_empirical_quantile",
+  "method_id": "cegwm_continuous_single_h_paper_v2",
+  "producer_exact": "d9ef4adb4f8424f1102f577bb76347fbba112bd9",
+  "rank_one_based": 1998,
+  "schema_version": "cegwm_paper_threshold_v1",
+  "score_id": "max_pre_post_registered_weighted_joint_minus_exact16_wrong_max",
+  "tau": 1.5545224858704942
+}

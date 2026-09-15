@@ -1,0 +1,554 @@
+[
+  {
+    "arm": "plain",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "content_only",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "main_syncseal",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "rms_0.005",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "rms_0.010",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "rms_0.020",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-01"
+  },
+  {
+    "arm": "plain",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "content_only",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "main_syncseal",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "rms_0.005",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "rms_0.010",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "rms_0.020",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-02"
+  },
+  {
+    "arm": "plain",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "content_only",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "main_syncseal",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "rms_0.005",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "rms_0.010",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "rms_0.020",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-03"
+  },
+  {
+    "arm": "plain",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  },
+  {
+    "arm": "content_only",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  },
+  {
+    "arm": "main_syncseal",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  },
+  {
+    "arm": "rms_0.005",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  },
+  {
+    "arm": "rms_0.010",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  },
+  {
+    "arm": "rms_0.020",
+    "control_rgb_rmse": null,
+    "correct_identities": 0,
+    "geometry": {
+      "H_latent": null,
+      "accepted": false,
+      "matches": [],
+      "reason": "reader_or_complete_negative_threshold_unavailable"
+    },
+    "point_errors_latent": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+    },
+    "readable": false,
+    "source_id": "llsv1-m1-04"
+  }
+]

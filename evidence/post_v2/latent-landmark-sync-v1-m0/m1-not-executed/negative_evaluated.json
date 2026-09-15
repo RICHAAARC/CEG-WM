@@ -1,0 +1,254 @@
+[
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.005",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.010",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.020",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-01",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.005",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.010",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.020",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-02",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.005",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.010",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.020",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-03",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "plain",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "content_only",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "main_syncseal",
+    "geometry": null,
+    "query": "correct_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.005",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.010",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  },
+  {
+    "arm": "rms_0.020",
+    "geometry": null,
+    "query": "external_wrong_key_reader",
+    "source_id": "llsv1-m1-04",
+    "status": "NOT_EVALUATED"
+  }
+]
