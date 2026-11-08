@@ -488,6 +488,29 @@ def replay_write(pipeline, settings: GenerationSettings, capture: SourceCapture,
                        callback.after_latents, callback.metrics, remaining)
 
 
+def _restore_source_schedule_devices(scheduler, state, diagnostics):
+    """Restore both schedules, without changing dtype or the saved CPU state.
+
+    Legacy captures save tensors on CPU without recording individual original
+    devices. In the fixed diffusers 0.39 SD3 non-XLA FlowMatch path, set_timesteps
+    receives the execution device and retains BOTH timesteps and sigmas there
+    (pipeline lines 965, 1031--1041; scheduler lines 365--385). The captured
+    latent_device is therefore the restoration device for these two tensors.
+    """
+    target = torch.device(state["latent_device"])
+    diagnostics.update(
+        basis="diffusers_0.39_SD3_non_XLA_FlowMatch_schedule_device_equals_captured_latent_device",
+        inferred_for_legacy_capture=True, captured_latent_device=str(target),
+        scheduler_class=state["scheduler_class"], tensors={},
+    )
+    for name in ("timesteps", "sigmas"):
+        saved = getattr(scheduler, name)
+        diagnostics["tensors"][name] = {"saved": _tensor_layout(saved)}
+        restored = saved.to(device=target)
+        setattr(scheduler, name, restored)
+        diagnostics["tensors"][name]["restored"] = _tensor_layout(restored)
+
+
 def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.Tensor,
                        *, counters=None, diagnostics=None) -> torch.Tensor:
     """One captured official SD3 suffix forward, multiple independent VJPs.
@@ -499,7 +522,8 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
     """
     counters = _ledger(counters)
     diagnostics = {} if diagnostics is None else diagnostics
-    partial = {"before_state": capture.before_state}
+    partial = {"before_state": capture.before_state, "source_suffix_diagnostics": diagnostics,
+               "scheduler_step_outputs": []}
     try:
         _require_frozen(pipeline.transformer, "SD3 transformer")
         _require_frozen(pipeline.vae, "SD3 VAE")
@@ -511,6 +535,8 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
             raise ValueError("suffix adapter does not support joint attention extensions")
         device = next(pipeline.transformer.parameters()).device
         latent = state["latents"].to(device).detach().requires_grad_(True)
+        diagnostics["before_latents"] = _tensor_layout(latent)
+        partial["suffix_before_latents"] = _cpu(latent)
         diagnostics.update(latent_leaf_dtype=str(latent.dtype), forward_latent_dtype=str(latent.dtype),
                            returned_gradient_dtype="torch.float32", gradient_rows=[],
                            zero_gradient_interpretation=(
@@ -519,7 +545,7 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
         scheduler = deepcopy(pipeline.scheduler)
         scheduler.__dict__.clear()
         scheduler.__dict__.update(deepcopy(capture.scheduler_state))
-        scheduler.timesteps = scheduler.timesteps.to(device)
+        _restore_source_schedule_devices(scheduler, state, diagnostics.setdefault("schedule_restore", {}))
         if scheduler.step_index != state["next_step_index"]:
             raise ValueError("captured scheduler index is inconsistent")
         prompt = state["prompt_embeds"].to(device)
@@ -527,6 +553,9 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
         gradients = []
         with torch.enable_grad(), _cpu_saved_tensors(
                 stable_modules=(pipeline.transformer, pipeline.vae)) as saved_tensor_stats:
+            diagnostics["saved_tensors"] = saved_tensor_stats
+            diagnostics["execution"] = _execution_metadata()
+            diagnostics["steps"] = []
             _count(counters, "sd35_suffix_forward_calls")
             current = latent
             for index in capture.remaining_steps:
@@ -540,16 +569,34 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
                     unconditional, conditional = prediction.chunk(2)
                     prediction = unconditional + state["guidance_scale"] * (conditional - unconditional)
                 current = scheduler.step(prediction, t, current, return_dict=False)[0]
+                partial["scheduler_step_outputs"].append({"index": index, "latents": _cpu(current)})
+                diagnostics["steps"].append({"index": index, "timestep": float(t),
+                                              "guided_prediction": _tensor_layout(prediction),
+                                              "scheduler_output": _tensor_layout(current)})
             _count(counters, "sd35_suffix_decode_calls")
-            decoded = pipeline.vae.decode(current / pipeline.vae.config.scaling_factor +
-                                          pipeline.vae.config.shift_factor, return_dict=False)[0]
+            pre_vae = current / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
+            partial["pre_vae_latents"] = _cpu(pre_vae)
+            diagnostics["pre_vae_latents"] = _tensor_layout(pre_vae)
+            decoded = pipeline.vae.decode(pre_vae, return_dict=False)[0]
             _count(counters, "sd35_suffix_decode_returned")
             rgb = pipeline.image_processor.postprocess(decoded, output_type="pt")
             proxy = quantized_rgb_proxy(rgb)
             image = _to_image(proxy)
             partial["image"] = image
             _count(counters, "sd35_suffix_forward_returned")
-            if not np.array_equal(np.asarray(image), np.asarray(capture.image)):
+            actual_pixels, reference_pixels = np.asarray(image), np.asarray(capture.image)
+            equal = np.array_equal(actual_pixels, reference_pixels)
+            comparison = {"exact_equal": equal, "shape_equal": actual_pixels.shape == reference_pixels.shape,
+                          "actual_shape": list(actual_pixels.shape), "reference_shape": list(reference_pixels.shape)}
+            if comparison["shape_equal"]:
+                difference = actual_pixels.astype(np.int16) - reference_pixels.astype(np.int16)
+                comparison.update(changed_components=int(np.count_nonzero(difference)),
+                                  total_components=int(difference.size),
+                                  max_abs_uint8_difference=int(np.abs(difference).max()),
+                                  mean_abs_uint8_difference=float(np.abs(difference).mean()))
+            diagnostics["zero_rgb_comparison"] = comparison
+            diagnostics["postprocessed_rgb"] = _tensor_layout(rgb)
+            if not equal:
                 raise ValueError("gradient suffix RGB does not exactly reproduce captured zero RGB")
             if tuple(rgb_cotangents.shape[1:]) != tuple(proxy.shape):
                 raise ValueError("RGB cotangent shape differs from final RGB")

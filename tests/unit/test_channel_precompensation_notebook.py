@@ -154,17 +154,20 @@ def test_continuation_notebook_is_unexecuted_and_contains_current_source():
         compile("".join(cell["source"]), cell["id"], "exec")
 
 
-def test_continuation_launch_reuses_original_batch_without_overwriting_metadata(tmp_path):
+def test_continuation_launch_reuses_saved_rgb_checkpoint_without_overwriting_metadata(tmp_path):
     scope = continuation_namespace()
     checkout = scope["unpack_source"](source_snapshot(), tmp_path / "source")
     root = tmp_path / "run"
-    original = root / "batch"
+    original = root / scope["RESUME_NAME"]
     original.mkdir(parents=True)
     scope["write_json"](original / "config.json", config())
     scope["write_json"](original / "summary.json", {"stages": {"cleanup": "complete"},
                                                   "actual_calls": {"final_generation_attempted": 4}})
     (root / "environment.json").write_text("original environment")
     (root / "source_snapshot.zip").write_bytes(b"original code")
+    earlier_metadata = root / (scope["RESUME_NAME"] + "_metadata") / "launch_0001"
+    earlier_metadata.mkdir(parents=True)
+    (earlier_metadata / "runner.log").write_text("saved source suffix failure")
     metadata_root = root / (scope["CONTINUATION_NAME"] + "_metadata")
     metadata_root.mkdir()
     (metadata_root / "source_snapshot.zip").write_bytes(b"earlier continuation source")
@@ -184,7 +187,7 @@ def test_continuation_launch_reuses_original_batch_without_overwriting_metadata(
         assert command[command.index("--resume-from") + 1] == str(original)
         assert "--config" not in command
         output = Path(command[command.index("--output") + 1])
-        assert output != original and not output.exists()
+        assert output == root / "continuation_suffix_device_v1" and not output.exists()
         output.mkdir()
         scope["write_json"](output / "summary.json", {"stages": {"cleanup": "complete"}, "sources": []})
         return FakeRunnerProcess(1, "retained numerical outcome\n")
@@ -205,7 +208,7 @@ def test_continuation_early_exit_preserves_both_streams_and_returncode(tmp_path,
 
     scope = continuation_namespace()
     root = tmp_path / "run"
-    original = root / "batch"
+    original = root / scope["RESUME_NAME"]
     original.mkdir(parents=True)
     scope["write_json"](original / "config.json", config())
     scope["write_json"](original / "summary.json", {"actual_calls": {"final_generation_attempted": 4}})
@@ -246,10 +249,18 @@ def test_existing_interrupted_continuation_is_not_rerun_and_keeps_prior_counts(t
     scope = continuation_namespace()
     root = tmp_path / "run"
     (root / "batch").mkdir(parents=True)
-    scope["write_json"](root / "batch/config.json", config())
-    prior = {"actual_calls": {"final_generation_attempted": 4, "reconstruction_attempted": 12}}
-    scope["write_json"](root / "batch/summary.json", prior)
+    scope["write_json"](root / "batch/summary.json", {
+        "actual_calls": {"final_generation_attempted": 4, "reconstruction_attempted": 12}})
     (root / "batch/original_failure.pt").write_bytes(b"retained")
+    checkpoint = root / scope["RESUME_NAME"]
+    checkpoint.mkdir()
+    scope["write_json"](checkpoint / "config.json", config())
+    prior = {"actual_calls": {"final_generation_attempted": 0, "reconstruction_attempted": 4,
+                              "rgb_vjps_attempted": 8},
+             "cumulative_actual_calls": {"final_generation_attempted": 4, "reconstruction_attempted": 16,
+                                         "rgb_vjps_attempted": 15}}
+    scope["write_json"](checkpoint / "summary.json", prior)
+    (checkpoint / "suffix_failure.pt").write_bytes(b"retained suffix failure")
     output = root / scope["CONTINUATION_NAME"]
     output.mkdir()
     pending = {"stages": {"prepare": "started", "cleanup": "not_started"},
@@ -261,10 +272,15 @@ def test_existing_interrupted_continuation_is_not_rerun_and_keeps_prior_counts(t
     assert scope["run_or_show_continuation"](tmp_path, root, b"unused") == pending
     report, archive = scope["package_continuation"](config(), root)
     assert report["actual_calls"] is None and report["cumulative_actual_calls"] is None
-    assert report["prior_actual_calls"] == prior["actual_calls"]
+    assert report["prior_actual_calls"] == prior["cumulative_actual_calls"]
     assert report["last_recorded_calls"] == pending["actual_calls"]
+    assert report["resume_from"] == str(checkpoint)
+    assert report["scope"] == "suffix_device_fix_continuation_of_saved_rgb_gradients"
+    assert archive.name == "run-continuation-suffix-device-v1-results.zip"
     with zipfile.ZipFile(archive) as saved:
         assert "run/batch/original_failure.pt" in saved.namelist()
+        assert "run/continuation_layout_v2/suffix_failure.pt" in saved.namelist()
+        assert "run/continuation_suffix_device_v1_summary.json" in saved.namelist()
     assert not (root / "measurement_summary.json").exists()
 
 
@@ -273,5 +289,20 @@ def test_continuation_requires_saved_batch_before_environment_setup(tmp_path):
     def forbidden(*args):
         raise AssertionError("Missing original must not launch setup or generation")
     scope["ensure_runtime"] = forbidden
-    with pytest.raises(RuntimeError, match="original saved batch"):
+    with pytest.raises(RuntimeError, match="saved continuation_layout_v2 checkpoint"):
         scope["run_or_show_continuation"](tmp_path, tmp_path / "missing", b"unused")
+
+
+def test_suffix_continuation_uses_current_checkpoint_and_documents_cached_work():
+    notebook = build_continuation_notebook()
+    scope = continuation_namespace()
+    assert scope["RESUME_NAME"] == "continuation_layout_v2"
+    assert scope["RESUME_BATCH"] == scope["RUN_ROOT"] / "continuation_layout_v2"
+    assert scope["CONTINUATION_NAME"] == "continuation_suffix_device_v1"
+    intro = "".join(next(cell for cell in notebook["cells"] if cell["id"] == "intro")["source"])
+    assert "8 条 RGB 梯度" in intro and "4 次源末段前向及 8 次潜变量 VJP" in intro
+    assert "16 次正式生成" in intro and "32 次正式重建、48 次公开读出" in intro
+    prepare = "".join(next(cell for cell in notebook["cells"] if cell["id"] == "prepare_source")["source"])
+    assert '"expected_reused_rgb_gradients": 8' in prepare
+    assert '"expected_new_rgb_vjps": 0' in prepare
+    assert '"expected_new_proxy_reconstructions": 0' in prepare

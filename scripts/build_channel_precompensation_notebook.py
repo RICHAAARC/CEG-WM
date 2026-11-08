@@ -259,8 +259,9 @@ files.download(str(RESULTS_ZIP))
 
 
 CONTINUATION_HELPERS = '''
-RESUME_BATCH = RUN_ROOT / "batch"
-CONTINUATION_NAME = "continuation_layout_v2"
+RESUME_NAME = "continuation_layout_v2"
+RESUME_BATCH = RUN_ROOT / RESUME_NAME
+CONTINUATION_NAME = "continuation_suffix_device_v1"
 CONTINUATION_LAUNCH_METADATA = None
 
 
@@ -281,9 +282,9 @@ def run_or_show_continuation(checkout, run_root, payload):
     global CONTINUATION_LAUNCH_METADATA
     CONTINUATION_LAUNCH_METADATA = None
     run_root = Path(run_root)
-    original = run_root / "batch"
+    original = run_root / RESUME_NAME
     if not (original / "config.json").is_file() or not (original / "summary.json").is_file():
-        raise RuntimeError("The original saved batch is required; no zero images will be regenerated.")
+        raise RuntimeError("The saved continuation_layout_v2 checkpoint is required; no zero images will be regenerated.")
     output = run_root / CONTINUATION_NAME
     if output.exists():
         print({"action": "read_only_existing_continuation", "output": str(output)})
@@ -320,7 +321,7 @@ def run_or_show_continuation(checkout, run_root, payload):
                            + "; original evidence is retained.") from error
     print({"runner_exit": returncode, "runner_log": str(log_path),
            "method_summaries": summary.get("method_summaries", {}),
-           "note": "Only saved zero observations are reused; failed or unreachable writes remain in the denominator."})
+           "note": "Saved zero observations and compatible RGB gradients are reused; failed or unreachable writes remain in the denominator."})
     return summary
 
 
@@ -331,12 +332,13 @@ def package_continuation(config, run_root):
         summary = read_json(summary_path) if summary_path.is_file() else {}
     except (OSError, ValueError) as error:
         summary = {"read_error": str(error)}
-    original = read_json(run_root / "batch/summary.json")
+    original = read_json(run_root / RESUME_NAME / "summary.json")
     terminal = terminal_counts(summary)
     rows = {row["source_id"]: row for row in summary.get("sources", [])}
-    report = {"scope": "layout_fix_continuation_of_saved_zero_batch", "config": config,
+    report = {"scope": "suffix_device_fix_continuation_of_saved_rgb_gradients", "config": config,
+              "resume_from": str(run_root / RESUME_NAME),
               "counts_terminal": terminal,
-              "prior_actual_calls": original.get("actual_calls", {}),
+              "prior_actual_calls": original.get("cumulative_actual_calls", original.get("actual_calls", {})),
               "actual_calls": summary.get("actual_calls") if terminal else None,
               "last_recorded_calls": summary.get("actual_calls", {}),
               "cumulative_actual_calls": summary.get("cumulative_actual_calls") if terminal else None,
@@ -346,7 +348,7 @@ def package_continuation(config, run_root):
                           for row in config["sources"]],
               "claim": "Engineering continuation; original failure retained; no scientific PASS."}
     write_json(run_root / (CONTINUATION_NAME + "_summary.json"), report)
-    destination = run_root.parent / (run_root.name + "-continuation-layout-v2-results.zip")
+    destination = run_root.parent / (run_root.name + "-continuation-suffix-device-v1-results.zip")
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(run_root.rglob("*")):
             if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(run_root.resolve()):
@@ -358,17 +360,19 @@ def package_continuation(config, run_root):
 def build_continuation_notebook(payload=None):
     notebook = build_notebook(payload)
     replacements = {
-        "intro": ("# 预补偿验证：从已保存零臂继续\n\n"
-            "本入口修正写端 Tensor/PIL 预处理的内存布局差异，保留原有一致性门槛、读者、码格、预算、"
-            "四个来源和两个重建种子。质量仍只报告。真实 L4 上的修复效果尚未验证。\n\n"
-            "另包含 PyTorch 2.14 对历史 checkpoint 的兼容读取修复，启动输出与报错完整存入 ZIP；"
-            "不重新设计方法或放宽前向门槛。模型执行目录仍为 continuation_layout_v2，"
-            "metadata 下的 launch 编号只区分保存的启动诊断。\n\n"
-            "复用 Drive 中 precompensation-20261108/batch 的 4 个未标记捕获点、12 份零臂 RGB/特征。"
-            "不重新生成基准图或重建零臂；不会覆盖原失败结果。由于旧版本未保存 RGB 梯度，"
-            "本次需补算 8 条 RGB VJP 和 4 次代理重建前向，然后计算尚未执行的潜变量 VJP 与写入。\n\n"
-            "全部可写时新增最多 16 次正式生成、32 次正式重建、48 次公开读出，另有 4 次代理重建"
-            "（新增完整重建前向共 36 次）、4 次源末段前向及 8 次潜变量 VJP。旧调用单独保留并累计。\n\n"
+        "intro": ("# 预补偿验证：复用 RGB 梯度继续源末段\n\n"
+            "本入口修正 SD3 源末段恢复时调度器 sigmas 的设备位置，使其与官方生成路径一致。"
+            "保留逐像素精确前向检查、读者、码格、预算、四个来源和两个重建种子，质量仍只报告。"
+            "真实 L4 上的修复效果尚未验证。\n\n"
+            "从 Drive 中 precompensation-20261108/continuation_layout_v2 恢复 4 个未标记捕获点、"
+            "12 份零臂 RGB/特征及已保存的 8 条 RGB 梯度。当前完整缓存直接复用，不重新生成零臂、"
+            "重算 RGB VJP 或运行 SDXL 代理重建。原 batch、旧续跑和全部启动日志保持原样。\n\n"
+            "本次剩余 4 次源末段前向及 8 次潜变量 VJP；全部可写时，另新增最多 16 次正式生成、"
+            "32 次正式重建、48 次公开读出。通用 runner 的预算仍包括缓存缺失时最多 8 条 RGB VJP"
+            "和 4 次代理重建的保守上限；本次 8 条兼容缓存齐全时，这两项预期新增调用均为 0。"
+            "旧调用从输入 checkpoint 的累计计数接续，本次新增与累计分别报告。\n\n"
+            "新结果仅写入 continuation_suffix_device_v1，启动输出与报错完整存入 ZIP；"
+            "metadata 下的 launch 编号只区分保存的启动诊断，不改变执行目录或重试规则。\n\n"
             "在 Colab 选择 GPU（上次使用 L4），设置 HF_TOKEN 后 Run all。首格仅挂载 Drive。"
             "已完成或已中断的本次续跑仍只读，不自动再次尝试。\n"),
         "helpers": HELPERS + CONTINUATION_HELPERS,
@@ -377,9 +381,11 @@ CHECKOUT = unpack_source(SOURCE_PAYLOAD, Path(tempfile.mkdtemp(prefix="cegwm-pre
 CONFIG = read_json(RESUME_BATCH / "config.json")
 print(json.dumps(CONFIG, indent=2, ensure_ascii=False))
 print({"resume_from": str(RESUME_BATCH), "new_output": str(RUN_ROOT / CONTINUATION_NAME),
-       "quality": "report_only", "regenerate_zero_images": False})
+       "quality": "report_only", "regenerate_zero_images": False,
+       "expected_reused_rgb_gradients": 8, "expected_new_rgb_vjps": 0,
+       "expected_new_proxy_reconstructions": 0})
 ''',
-        "run_info": ("## 执行剩余步骤\n\n原零臂图像、配置和失败文件保持原样。"
+        "run_info": ("## 执行剩余步骤\n\n原零臂图像、RGB 梯度、配置和失败文件保持原样。"
             "新梯度及失败前诊断逐步保存。若仍有前向不一致，会保留证据并停止相应来源，"
             "不会放宽门槛、调参、换来源或隐式重试。\n"),
         "execute": '''try:

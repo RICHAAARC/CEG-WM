@@ -272,6 +272,16 @@ def test_suffix_forward_mismatch_is_not_silently_used():
     with pytest.raises(runtime.RuntimeStageError, match="exactly reproduce") as caught:
         runtime.source_suffix_vjps(pipe, capture, torch.ones(2,1,3,2,2), counters=counts)
     assert "image" in caught.value.partial
+    partial = caught.value.partial
+    assert torch.equal(partial["suffix_before_latents"], capture.before_state["latents"])
+    assert len(partial["scheduler_step_outputs"]) == 1
+    assert partial["scheduler_step_outputs"][0]["index"] == 19
+    assert partial["pre_vae_latents"].dtype == capture.before_state["latents"].dtype
+    diagnostics = partial["source_suffix_diagnostics"]
+    assert diagnostics["schedule_restore"]["captured_latent_device"] == "cpu"
+    assert set(diagnostics["schedule_restore"]["tensors"]) == {"timesteps", "sigmas"}
+    assert not diagnostics["zero_rgb_comparison"]["exact_equal"]
+    assert diagnostics["zero_rgb_comparison"]["max_abs_uint8_difference"] > 0
     assert counts["sd35_suffix_forward_calls"] == 1
     assert counts.get("sd35_suffix_vjp_calls", 0) == 0
 
@@ -556,3 +566,46 @@ def test_obtained_gradient_is_saved_even_if_nonfinite_validation_fails(monkeypat
         runtime.rgb_reader_vjp(image(), vae=VAE(), image_processor=real_processor(), reader_vector=vector())
     assert torch.isnan(caught.value.partial["gradient_rgb"]).all()
     assert caught.value.partial["diagnostics"]["reader_feature_allclose"]
+
+
+def test_source_schedule_restores_both_tensor_devices_without_dtype_changes():
+    # Meta transfers exercise actual .to(device) dispatch without a GPU/model.
+    # A regression restoring only timesteps leaves sigmas on CPU and fails here.
+    timesteps = torch.tensor([3.0, 2.0, 1.0], dtype=torch.float32)
+    sigmas = torch.tensor([0.3, 0.2, 0.1, 0.0], dtype=torch.float32)
+    scheduler = SimpleNamespace(timesteps=timesteps, sigmas=sigmas)
+    diagnostics = {}
+    state = {"latent_device": "meta", "scheduler_class": "test.schedule"}
+    runtime._restore_source_schedule_devices(scheduler, state, diagnostics)
+    assert scheduler.timesteps.device.type == scheduler.sigmas.device.type == "meta"
+    assert scheduler.timesteps.dtype == timesteps.dtype and scheduler.sigmas.dtype == sigmas.dtype
+    assert scheduler.timesteps.stride() == timesteps.stride() and scheduler.sigmas.stride() == sigmas.stride()
+    assert timesteps.device.type == sigmas.device.type == "cpu"
+    assert diagnostics["tensors"]["sigmas"]["saved"]["device"] == "cpu"
+    assert diagnostics["tensors"]["sigmas"]["restored"]["device"] == "meta"
+    assert diagnostics["inferred_for_legacy_capture"] is True
+
+
+def test_actual_flowmatch_schedule_keeps_requested_device_through_set_timesteps():
+    # Actual official scheduler only: no pipeline weights or denoising model.
+    module = pytest.importorskip("diffusers.schedulers.scheduling_flow_match_euler_discrete")
+    scheduler = module.FlowMatchEulerDiscreteScheduler()
+    scheduler.set_timesteps(20, device="meta")
+    assert scheduler.timesteps.device.type == scheduler.sigmas.device.type == "meta"
+
+
+def test_source_diagnostics_preserve_original_capture_schema_and_dtype():
+    pipe = Source(torch.float16)
+    capture = runtime.capture_source(pipe, settings())
+    state_keys = tuple(capture.before_state)
+    scheduler_keys = tuple(capture.scheduler_state)
+    saved_sigmas = capture.scheduler_state["sigmas"].clone()
+    diagnostics = {}
+    result = runtime.source_suffix_vjps(pipe, capture, torch.ones(2, 1, 3, 2, 2), diagnostics=diagnostics)
+    assert result.shape[0] == 2
+    assert diagnostics["before_latents"]["dtype"] == "torch.float16"
+    assert diagnostics["pre_vae_latents"]["dtype"] == "torch.float16"
+    assert diagnostics["steps"][0]["scheduler_output"]["dtype"] == "torch.float16"
+    assert diagnostics["zero_rgb_comparison"]["exact_equal"]
+    assert tuple(capture.before_state) == state_keys and tuple(capture.scheduler_state) == scheduler_keys
+    assert torch.equal(capture.scheduler_state["sigmas"], saved_sigmas)

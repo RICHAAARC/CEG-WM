@@ -8,13 +8,13 @@ The current research candidate on `dev/reconstruction-channel-v1` is
 [one-shot two-channel precompensation](docs/channel_precompensation_v1.md),
 following the retained reconstruction-direction mismatch measurement. Its
 [self-contained Colab notebook](notebooks/channel_precompensation_v1_colab.ipynb)
-has been run by the user; that run stopped at ordinary/proxy forward checks,
-before any marked write. The [continuation notebook](notebooks/channel_precompensation_v1_continue_colab.ipynb)
-reuses its saved zero observations after a writer preprocessing-layout repair.
-It also restores legacy scheduler metadata under PyTorch 2.14's restricted
-checkpoint loader and retains startup logs, including early failures.
-The repair has CPU/fake checks; its effect on the real L4 execution remains
-unverified. No bit-recovery result was collected. Quality is report-only.
+has been run by the user. Following preprocessing-layout and checkpoint-loading
+repairs, the latest run reused all zero observations and saved eight RGB
+sensitivities, then stopped at the source-suffix pixel check. The
+[continuation notebook](notebooks/channel_precompensation_v1_continue_colab.ipynb)
+reuses those observations and sensitivities while repairing omitted scheduler
+`sigmas` device restoration. That latest repair has CPU/fake checks and is not
+yet verified on L4. No bit-recovery result was collected. Quality is report-only.
 
 The validated method completes the content chain:
 

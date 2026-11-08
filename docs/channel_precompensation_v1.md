@@ -129,7 +129,7 @@ Diffusers 0.39.0 的 PIL 预处理给出 channels-last 布局，Tensor 入口经
 布局差异可能改变半精度核的数值行为，但尚不能认定它解释了 L4 上的全部失败。
 现在失败前保存特征、标量差、布局和执行策略；成功求出的 RGB 梯度也立即保存。
 
-本次使用 `notebooks/channel_precompensation_v1_continue_colab.ipynb`，从原
+第一轮布局修复续跑使用 `notebooks/channel_precompensation_v1_continue_colab.ipynb`，从原
 `precompensation-20261108/batch` 读取配置、读者、4 个捕获点及 12 份零臂 RGB/特征。
 原 batch、源码快照和环境记录不覆盖，新结果写入同级 `continuation_layout_v2/`。
 旧版本没有保存梯度，所以本次重新计算 8 条 RGB VJP（含 4 次代理重建），
@@ -173,6 +173,32 @@ Diffusers 0.39.0 的 PIL 预处理给出 channels-last 布局，Tensor 入口经
 连同返回码、当次源码和环境一起打包。编号只用于保留启动诊断，不改变模型输出目录，
 也不允许对已有模型批次自动重试。旧启动错误和源码记录保持原样。
 
+### 源末段调度器设备恢复
+
+后续真实运行已成功恢复 4 个捕获点和 12 份零臂 RGB／特征，并取得、保存全部 8 条
+RGB VJP。四源的干净／设计读者普通与代理特征及标量差均为零，设计代理 RGB 也通过
+原逐像素检查。没有重做零臂生成或正式重建。
+
+四源随后均在 `gradient suffix RGB does not exactly reproduce captured zero RGB`
+停止：4 次源末段前向已返回，但潜变量 VJP 和标记输出仍为 0。不同 RGB 通道值占比
+分别为 1.32%、5.05%、8.94%、4.04%，最大差为 1、2、3、2 个 uint8 级；这些不是
+标记质量或检测效果，不能据此放宽前向门槛。
+
+已确认实现偏差：保存状态时两份调度表都转到 CPU，恢复后只将 `timesteps` 放回原执行
+设备，遗漏了 `sigmas`。[Diffusers 0.39 官方 FlowMatch 路径](https://raw.githubusercontent.com/huggingface/diffusers/v0.39.0/src/diffusers/schedulers/scheduling_flow_match_euler_discrete.py)
+的 `set_timesteps` 将两者保留在指定设备；四份真实捕获的 `latent_device` 均为 CUDA。
+修复同时恢复两份调度表的位置，保持 dtype、值和原始检查点字段不变。失败前另外保存
+调度表布局、每步潜变量、VAE 输入和 RGB 差异诊断。此偏差已证，但修复能否消除全部
+L4 像素差异仍需续跑确认，不能由 CPU 检查推定。
+
+当前续跑 notebook 从 `continuation_layout_v2` 读取，写入新的
+`continuation_suffix_device_v1`。已经验证 8 份 RGB 梯度符合原缓存条件，因此本次预期
+不新增 RGB VJP 或 SDXL 代理重建。剩余工作是 4 次源末段前向和 8 次潜变量 VJP；
+全部可写时再执行原名册中尚未发生的 16 次标记生成、32 次正式重建、48 次公开读出。
+通用 runner 的保守计划仍包含缓存缺失时的辅助调用上限，当前完整缓存的预期新增值为零。
+累计计数承接上轮 `cumulative_actual_calls`；两个旧批次和全部错误记录保留。
+结果包名称为 `precompensation-20261108-continuation-suffix-device-v1-results.zip`。
+
 ## 本地工程验证
 
 在当前 checkout 中：
@@ -204,7 +230,7 @@ python -m pytest -o addopts= \
 
 本地验证包括打包后隔离源码的默认入口、多层假模型的完整反向、实际 dtype、
 普通／代理前向不一致、布局复制的数值和导数、分时装载、计数、检查点恢复和失败保存。
-上述五个测试文件合计 **113 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
+上述五个测试文件合计 **117 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
 及两个 notebook 的 nbformat 验证也通过。本次未执行真实模型或 GPU。
 这不是科学 PASS，也不是完整 OptMark 或多种子 EOT 复现。
 
