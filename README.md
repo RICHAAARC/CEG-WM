@@ -8,8 +8,11 @@ The current research candidate on `dev/reconstruction-channel-v1` is
 [one-shot two-channel precompensation](docs/channel_precompensation_v1.md),
 following the retained reconstruction-direction mismatch measurement. Its
 [self-contained Colab notebook](notebooks/channel_precompensation_v1_colab.ipynb)
-is prepared for user execution. Local CPU/fake checks are engineering evidence;
-the new candidate has not been run on real models. Quality is report-only.
+has been run by the user; that run stopped at ordinary/proxy forward checks,
+before any marked write. The [continuation notebook](notebooks/channel_precompensation_v1_continue_colab.ipynb)
+reuses its saved zero observations after a writer preprocessing-layout repair.
+The repair has CPU/fake checks; its effect on the real L4 execution remains
+unverified. No bit-recovery result was collected. Quality is report-only.
 
 The validated method completes the content chain:
 

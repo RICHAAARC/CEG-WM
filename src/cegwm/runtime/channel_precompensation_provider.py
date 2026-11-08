@@ -31,6 +31,19 @@ def _load_pipeline(config, name):
     return load(config, name)
 
 
+def _load_reader(config):
+    """Load only the fixed SD3 VAE when resuming existing zero observations."""
+    from diffusers import AutoencoderKL
+    from diffusers.image_processor import VaeImageProcessor
+
+    settings = config["generation"]
+    vae = AutoencoderKL.from_pretrained(settings["model_id"], subfolder="vae",
+        revision=settings["revision"], torch_dtype=getattr(torch, settings["dtype"]))
+    # Identical to StableDiffusion3Pipeline.__init__ in diffusers 0.39.0.
+    processor = VaeImageProcessor(vae_scale_factor=2 ** (len(vae.config.block_out_channels) - 1))
+    return vae, processor
+
+
 def _free_memory():
     gc.collect()
     if torch.cuda.is_available():
@@ -51,9 +64,16 @@ class PrecompensationProvider:
     at most once. All counters are attempts/returns, not favorable outcomes.
     """
 
-    def __init__(self, config, *, loader=None, runtime=None, public_reader=None):
+    def __init__(self, config, *, loader=None, runtime=None, public_reader=None,
+                 reader_loader=None, resume_from=None, resume_checkpoint=None):
+        if resume_from is not None and resume_checkpoint is not None:
+            raise ValueError("pass either resume_from or resume_checkpoint")
+        if resume_from is not None:
+            from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
+            resume_checkpoint = load_resume_checkpoint(resume_from, config=config)
         self.config = deepcopy(config)
         self.loader = loader or _load_pipeline
+        self.reader_loader = reader_loader or _load_reader
         self.runtime = runtime or default_runtime
         self.public_reader = public_reader or final_image_feature
         self.spec = ReaderSpec(**config["reader"])
@@ -62,6 +82,13 @@ class PrecompensationProvider:
         self._evaluation_attempted = self._evaluation_returned = 0
         self._source = self._reconstruction = self._vae = self._processor = None
         self._reader_vector = None
+        self._resume = resume_checkpoint
+        if resume_checkpoint is not None:
+            vector = resume_checkpoint.reader_vector
+            expected, phase = make_reader(vector.numel(), self.spec)
+            if not torch.equal(vector, expected) or resume_checkpoint.reader_phase != phase:
+                raise ValueError("resume reader differs from the frozen configured reader")
+            self._reader_vector = vector.detach().cpu().clone()
         self._captures: dict[str, Any] = {}
         self._rgb_gradients: dict[str, dict[str, Any]] = {}
         self._settings = {row["source_id"]: self._generation_settings(row) for row in config["sources"]}
@@ -199,49 +226,111 @@ class PrecompensationProvider:
                 "status": "FAILED", "error": f"{type(error).__name__}: {error}",
                 "partial": getattr(error, "partial", {})}
 
+    @staticmethod
+    def _gradient_event(identifier, phase, result, *, reusable, reused=False):
+        return {"kind": "rgb_gradient", "source_id": identifier, "phase": phase,
+                "status": "OBSERVED", "reused": reused, "reusable": reusable,
+                "compatibility_version": default_runtime.RGB_PROXY_COMPATIBILITY_VERSION,
+                "result": {"image": result.image, "feature": result.feature,
+                           "score": result.score, "gradient_rgb": result.gradient_rgb,
+                           "diagnostics": result.diagnostics}}
+
+    def _cached_gradient(self, identifier, phase, actual_image):
+        if self._resume is None:
+            return None
+        event = getattr(self._resume, "rgb_gradients", {}).get(identifier, {}).get(phase, {})
+        if (event.get("compatibility_version") != default_runtime.RGB_PROXY_COMPATIBILITY_VERSION
+                or event.get("reusable") is not True):
+            return None
+        payload = event.get("result", {})
+        gradient = payload.get("gradient_rgb")
+        feature = payload.get("feature")
+        image = payload.get("image")
+        if (not isinstance(gradient, torch.Tensor) or gradient.device.type != "cpu"
+                or tuple(gradient.shape) != (1, 3, actual_image.height, actual_image.width)
+                or not bool(torch.isfinite(gradient).all())
+                or not isinstance(feature, torch.Tensor) or feature.device.type != "cpu"
+                or feature.shape != self._reader_vector.shape or not bool(torch.isfinite(feature).all())
+                or image is None or not np.array_equal(np.asarray(image), np.asarray(actual_image))):
+            return None
+        if phase == "design" and payload.get("diagnostics", {}).get("design_seed") != self.config["reconstruction"]["design_seed"]:
+            return None
+        return default_runtime.RGBSensitivity(**payload)
+
+    def _resume_baseline_events(self, sources):
+        for source in sources:
+            identifier = source["source_id"]
+            baseline = self._resume.baselines[identifier]
+            self._check_reader(baseline["feature"])
+            self._captures[identifier] = default_runtime.SourceCapture(
+                baseline["image"], baseline["before_state"], baseline["scheduler_state"],
+                tuple(baseline["remaining_steps"]))
+            self._rgb_gradients[identifier] = {}
+            yield {**baseline, "kind": "baseline", "source_id": identifier,
+                   "status": "OBSERVED", "reused": True}
+        for source in sources:
+            identifier = source["source_id"]
+            for name, kind in (("design_seed", "design"), ("holdout_seed", "holdout_zero")):
+                seed = self.config["reconstruction"][name]
+                observed = self._resume.zero_reconstructions[(identifier, seed)]
+                self._check_reader(observed["feature"])
+                yield {**observed, "kind": kind, "source_id": identifier, "seed": seed,
+                       "status": "OBSERVED", "reused": True}
+
     def prepare_sources(self, sources):
         if self._state != "new" or self._closed:
             raise RuntimeError("source preparation is single-use")
         if list(sources) != self.config["sources"]:
             raise ValueError("preparation must use the fixed complete source roster")
         self._state = "preparing"
-        self._load_source()
-        try:
-            for source in sources:
-                identifier = source["source_id"]
-                partial = {}
-                try:
-                    capture = self.runtime.capture_source(self._source, self._settings[identifier], counters=self._raw)
-                    self._captures[identifier] = capture
-                    partial = {"image": capture.image, "before_state": capture.before_state,
+        if self._resume is not None:
+            # No source generation, zero reconstruction or public read is run
+            # merely to import an already observed zero sample.
+            yield from self._resume_baseline_events(sources)
+            self._raw["reader_load_attempted"] = self._raw.get("reader_load_attempted", 0) + 1
+            self._vae, self._processor = self.reader_loader(self.config)
+            self._raw["reader_load_returned"] = self._raw.get("reader_load_returned", 0) + 1
+        else:
+            self._load_source()
+            try:
+                for source in sources:
+                    identifier = source["source_id"]
+                    partial = {}
+                    try:
+                        capture = self.runtime.capture_source(self._source, self._settings[identifier], counters=self._raw)
+                        self._captures[identifier] = capture
+                        partial = {"image": capture.image, "before_state": capture.before_state,
+                                   "scheduler_state": capture.scheduler_state, "remaining_steps": capture.remaining_steps}
+                        feature = self._public_feature(capture.image)
+                        self._rgb_gradients[identifier] = {}
+                        yield {"kind": "baseline", "source_id": identifier, "status": "OBSERVED",
+                               "image": capture.image, "feature": feature, "before_state": capture.before_state,
                                "scheduler_state": capture.scheduler_state, "remaining_steps": capture.remaining_steps}
-                    feature = self._public_feature(capture.image)
-                    self._rgb_gradients[identifier] = {}
-                    yield {"kind": "baseline", "source_id": identifier, "status": "OBSERVED",
-                           "image": capture.image, "feature": feature, "before_state": capture.before_state,
-                           "scheduler_state": capture.scheduler_state, "remaining_steps": capture.remaining_steps}
-                except Exception as error:
-                    if partial:
-                        yield {"kind": "baseline", "source_id": identifier, **partial,
-                               "status": "FAILED", "error": f"{type(error).__name__}: {error}"}
-                    yield self._failure(identifier, "baseline", error)
-        finally:
-            self._release_source()
+                    except Exception as error:
+                        if partial:
+                            yield {"kind": "baseline", "source_id": identifier, **partial,
+                                   "status": "FAILED", "error": f"{type(error).__name__}: {error}"}
+                        yield self._failure(identifier, "baseline", error)
+            finally:
+                self._release_source()
 
         # All downstream gradient phases see only the frozen original reader;
         # no inference offload hooks are left on its encode/decode operations.
         self._prepare_reader()
         for identifier, record in self._rgb_gradients.items():
             try:
-                result = self.runtime.rgb_reader_vjp(self._captures[identifier].image,
-                    vae=self._vae, image_processor=self._processor,
-                    reader_vector=self._reader_vector, counters=self._raw)
+                image = self._captures[identifier].image
+                result = self._cached_gradient(identifier, "clean", image)
+                reused = result is not None
+                if result is None:
+                    result = self.runtime.rgb_reader_vjp(image, vae=self._vae, image_processor=self._processor,
+                        reader_vector=self._reader_vector, counters=self._raw)
                 record["clean"] = result
+                yield self._gradient_event(identifier, "clean", result, reusable=True, reused=reused)
             except Exception as error:
                 yield self._failure(identifier, "clean_rgb_vjp", error)
 
         if self._rgb_gradients:
-            self._load_reconstruction(gradients=True)
             try:
                 for identifier, record in self._rgb_gradients.items():
                     result = actual_image = actual_feature = None
@@ -249,25 +338,38 @@ class PrecompensationProvider:
                         # The actual design baseline follows the same ordinary
                         # no-grad/PIL path as every marked evaluation. Its graph
                         # replay for the VJP is an ADDITIONAL counted forward.
-                        actual_image = self._ordinary_reconstruction(self._captures[identifier].image,
-                            self.config["reconstruction"]["design_seed"])
-                        actual_feature = self._public_feature(actual_image)
-                        yield {"kind": "design", "source_id": identifier, "status": "OBSERVED",
-                               "image": actual_image, "feature": actual_feature}
-                        result = self.runtime.reconstruction_reader_vjp(self._reconstruction,
-                            self._captures[identifier].image, self._reconstruction_settings,
-                            self.config["reconstruction"]["design_seed"], observation_vae=self._vae,
-                            observation_processor=self._processor, reader_vector=self._reader_vector,
-                            counters=self._raw)
+                        if self._resume is not None:
+                            actual = self._resume.zero_reconstructions[(identifier, self.config["reconstruction"]["design_seed"])]
+                            actual_image, actual_feature = actual["image"], actual["feature"]
+                        else:
+                            if self._reconstruction is None:
+                                self._load_reconstruction(gradients=True)
+                            actual_image = self._ordinary_reconstruction(self._captures[identifier].image,
+                                self.config["reconstruction"]["design_seed"])
+                            actual_feature = self._public_feature(actual_image)
+                            yield {"kind": "design", "source_id": identifier, "status": "OBSERVED",
+                                   "image": actual_image, "feature": actual_feature}
+                        result = self._cached_gradient(identifier, "design", actual_image)
+                        reused = result is not None
+                        if result is None:
+                            if self._reconstruction is None:
+                                self._load_reconstruction(gradients=True)
+                            result = self.runtime.reconstruction_reader_vjp(self._reconstruction,
+                                self._captures[identifier].image, self._reconstruction_settings,
+                                self.config["reconstruction"]["design_seed"], observation_vae=self._vae,
+                                observation_processor=self._processor, reader_vector=self._reader_vector,
+                                counters=self._raw)
                         self._check_reader(result.feature)
                         if not np.array_equal(np.asarray(actual_image), np.asarray(result.image)):
                             raise ValueError("gradient SDXL forward does not exactly reproduce ordinary design RGB")
                         record["design"] = result
+                        yield self._gradient_event(identifier, "design", result, reusable=True, reused=reused)
                     except Exception as error:
                         partial = {**getattr(error, "partial", {})}
                         if result is not None:
                             partial.update(proxy_image=result.image, proxy_feature=result.feature,
-                                           proxy_diagnostics=result.diagnostics)
+                                           proxy_diagnostics=result.diagnostics, gradient_rgb=result.gradient_rgb)
+                            yield self._gradient_event(identifier, "design", result, reusable=False)
                         if actual_image is not None:
                             partial.update(ordinary_image=actual_image, ordinary_feature=actual_feature)
                             if actual_feature is None:
@@ -361,12 +463,16 @@ class PrecompensationProvider:
             raise RuntimeError("evaluation requires completed writes")
         self._state = "reconstructing"
         try:
-            if requests:
-                self._load_reconstruction(gradients=False)
             for request in requests:
                 identity = {key: request[key] for key in ("source_id", "method", "bit", "seed")}
                 image = None
                 try:
+                    if self._resume is not None and request["method"] == "zero":
+                        cached = self._resume.zero_reconstructions[(request["source_id"], request["seed"])]
+                        yield {**identity, **cached, "status": "OBSERVED", "reused": True}
+                        continue
+                    if self._reconstruction is None:
+                        self._load_reconstruction(gradients=False)
                     image = self._ordinary_reconstruction(request["image"], request["seed"])
                     yield {**identity, "status": "OBSERVED", "image": image,
                            "feature": self._public_feature(image)}

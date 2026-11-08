@@ -61,10 +61,10 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
-def describe_plan(config: dict[str, Any]) -> dict[str, Any]:
+def describe_plan(config: dict[str, Any], *, resume_checkpoint=None) -> dict[str, Any]:
     validate_config(config)
     count = len(config["sources"])
-    return {
+    plan = {
         "mode": "plan_only", "method": "two_channel_one_shot_interval_precompensation",
         "source_ids": [source["source_id"] for source in config["sources"]],
         "methods": list(METHODS), "bits": list(BITS),
@@ -75,6 +75,7 @@ def describe_plan(config: dict[str, Any]) -> dict[str, Any]:
             "auxiliary_reconstruction_forward_calls": count,
             "total_reconstruction_forward_calls": 11 * count,
             "latent_vjps": 2 * count,
+            "rgb_vjps": 2 * count,
             "auxiliary_calls": (
                 f"The {count} differentiable proxy reconstruction forwards are separate from the "
                 f"{10 * count} formal ordinary-RGB reconstructions. All additional suffix, reader, "
@@ -87,11 +88,26 @@ def describe_plan(config: dict[str, Any]) -> dict[str, Any]:
         "generation": config["generation"], "reconstruction": config["reconstruction"],
         "claim": "Small falsification trial only; no watermark-presence, FPR, or scientific PASS.",
     }
+    if resume_checkpoint is not None:
+        plan["resume_from"] = str(resume_checkpoint.batch_directory)
+        plan["imported_counts"] = dict(resume_checkpoint.reused_counts)
+        plan["prior_actual_calls"] = dict(resume_checkpoint.prior_actual_calls)
+        plan["planned_budget"].update(shared_zero_images=0, final_generation_calls=4 * count,
+            final_reconstruction_calls=8 * count, public_feature_reads=12 * count,
+            total_reconstruction_forward_calls=9 * count,
+            auxiliary_calls=(f"New work only: up to {count} proxy reconstruction forwards, {count} source suffix forwards, "
+                f"{2 * count} latent and {2 * count} RGB VJPs; additional reader forwards remain separate. "
+                "Saved zero images/features are reused. Compatible saved RGB sensitivities may reduce new auxiliary calls."))
+    return plan
 
 
-def load_provider(config):
+def load_provider(config, *, resume_from=None, resume_checkpoint=None):
     """Lazy real-model entry; imported only after explicit execution selection."""
     from cegwm.runtime.channel_precompensation_provider import PrecompensationProvider
+    if resume_checkpoint is not None:
+        return PrecompensationProvider(config, resume_checkpoint=resume_checkpoint)
+    if resume_from is not None:
+        return PrecompensationProvider(config, resume_from=resume_from)
     return PrecompensationProvider(config)
 
 
@@ -187,7 +203,7 @@ def _finalize_trials(summary, config):
     summary["method_summaries"] = aggregates
 
 
-def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) -> dict[str, Any]:
+def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, resume_from=None) -> dict[str, Any]:
     """Collect one create-only batch with a staged real or injected fake provider.
 
     Provider methods yield dictionaries, allowing each observation/failure to be
@@ -199,8 +215,14 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
     import torch
     from cegwm.channel_precompensation import ReaderSpec, make_reader, decode_score, solve_write, evaluate_delta
 
-    plan = describe_plan(config)
+    checkpoint = None
+    if resume_from is not None:
+        from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
+        checkpoint = load_resume_checkpoint(resume_from, config=config)
+    plan = describe_plan(config, resume_checkpoint=checkpoint)
     output = Path(output)
+    if checkpoint is not None and output.resolve().is_relative_to(checkpoint.batch_directory):
+        raise ValueError("continuation output must not modify the original batch directory")
     output.mkdir(parents=True, exist_ok=False)
     _write_json(output / "config.json", config)
     seeds = [config["reconstruction"][name] for name in ("design_seed", "holdout_seed")]
@@ -215,12 +237,29 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
                "fixed_denominators": plan["fixed_denominators"], "sources": rows, "actual_calls": {},
                "stages": {name: "not_started" for name in ("setup", "prepare", "solve", "generate", "reconstruct", "cleanup")},
                "claim": plan["claim"]}
+    if checkpoint is not None:
+        summary.update(resume_from=str(checkpoint.batch_directory),
+            prior_actual_calls=dict(checkpoint.prior_actual_calls), imported_counts=dict(checkpoint.reused_counts),
+            reused_counts={"source_captures": 0, "zero_generation_images": 0, "zero_reconstruction_images": 0,
+                           "public_zero_features": 0, "reader_assets": 1, "rgb_sensitivities": 0},
+            prior_evidence="prior_summary.json")
+        _write_json(output / "prior_summary.json", checkpoint.prior_summary)
     spec = ReaderSpec(**config["reader"])
-    reader_vector = phase = None
+    reader_vector = None if checkpoint is None else checkpoint.reader_vector.clone()
+    phase = None if checkpoint is None else checkpoint.reader_phase
+    if checkpoint is not None:
+        torch.save({"vector": reader_vector, "phase": phase, "spec": config["reader"]}, output / "reader.pt")
+        summary["reader"] = {**config["reader"], "feature_dimension": reader_vector.numel(), "phase": phase}
 
     def persist():
         if provider is not None:
             summary["actual_calls"] = _jsonable(dict(provider.counts))
+        if checkpoint is not None:
+            new, prior = summary["actual_calls"], summary["prior_actual_calls"]
+            if any(type(value) is not int or value < 0 for value in new.values()):
+                raise ValueError("new physical call counters must be nonnegative integers")
+            summary["cumulative_actual_calls"] = {name: prior.get(name, 0) + new.get(name, 0)
+                                                 for name in prior.keys() | new.keys()}
         _finalize_trials(summary, config)
         _write_json(output / "summary.json", summary)
         for row in rows:
@@ -265,7 +304,8 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
         summary["stages"]["setup"] = "started"
         persist()
         if provider is None:
-            provider = load_provider(config)
+            provider = (load_provider(config) if checkpoint is None else
+                        load_provider(config, resume_from=resume_from, resume_checkpoint=checkpoint))
         summary["stages"]["setup"] = "complete"
         summary["stages"]["prepare"] = "started"
         persist()
@@ -278,9 +318,10 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
                 row, context = indexed[identifier], contexts[identifier]
                 try:
                     if kind != "failure":
-                        if (identifier, kind) in prepared_events:
+                        event_key = (identifier, kind, event.get("phase") if kind == "rgb_gradient" else None)
+                        if event_key in prepared_events:
                             raise ValueError("provider repeated a preparation observation")
-                        prepared_events.add((identifier, kind))
+                        prepared_events.add(event_key)
                     if kind == "baseline":
                         context["baseline"] = event
                         row["zero"]["clean"] = observation(event, Path(identifier) / "zero/clean")
@@ -289,10 +330,42 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
                         torch.save({name: value for name, value in event.items() if name not in {"image", "feature"}},
                                    writer_dir / "baseline.pt")
                         row["status"] = "prepared_baseline"
+                        if checkpoint is not None and event.get("reused") and row["zero"]["clean"]["status"] == "OBSERVED":
+                            summary["reused_counts"]["source_captures"] += 1
+                            summary["reused_counts"]["zero_generation_images"] += 1
+                            summary["reused_counts"]["public_zero_features"] += 1
                     elif kind == "design":
                         context["design"] = event
                         row["zero"]["reconstruction"][str(seeds[0])] = observation(
                             event, Path(identifier) / f"zero/reconstruction_{seeds[0]}")
+                        if checkpoint is not None and event.get("reused") and row["zero"]["reconstruction"][str(seeds[0])]["status"] == "OBSERVED":
+                            summary["reused_counts"]["zero_reconstruction_images"] += 1
+                            summary["reused_counts"]["public_zero_features"] += 1
+                    elif kind == "holdout_zero":
+                        if checkpoint is None or event.get("seed", seeds[1]) != seeds[1] or not event.get("reused"):
+                            raise ValueError("holdout_zero is reserved for the saved fixed holdout observation")
+                        row["zero"]["reconstruction"][str(seeds[1])] = observation(
+                            event, Path(identifier) / f"zero/reconstruction_{seeds[1]}")
+                        if row["zero"]["reconstruction"][str(seeds[1])]["status"] == "OBSERVED":
+                            summary["reused_counts"]["zero_reconstruction_images"] += 1
+                            summary["reused_counts"]["public_zero_features"] += 1
+                    elif kind == "rgb_gradient":
+                        gradient_phase = event.get("phase")
+                        if gradient_phase not in {"clean", "design"} or not isinstance(event.get("result"), dict):
+                            raise ValueError("RGB sensitivity event requires a clean/design phase and result")
+                        writer_dir = output / identifier / "writer"
+                        writer_dir.mkdir(exist_ok=True)
+                        result = event["result"]
+                        if result.get("image") is not None:
+                            result["image"].save(writer_dir / f"rgb_gradient_{gradient_phase}.png")
+                        evidence = {**event, "result": {name: value for name, value in result.items() if name != "image"}}
+                        torch.save(evidence, writer_dir / f"rgb_gradient_{gradient_phase}.pt")
+                        row["writer"].setdefault("rgb_gradients", {})[gradient_phase] = {
+                            "file": f"rgb_gradient_{gradient_phase}.pt",
+                            "compatibility_version": event.get("compatibility_version"),
+                            "reusable": event.get("reusable") is True, "reused": event.get("reused") is True}
+                        if checkpoint is not None and event.get("reused"):
+                            summary["reused_counts"]["rgb_sensitivities"] += 1
                     elif kind == "linearization":
                         context["linearization"] = event
                         writer_dir = output / identifier / "writer"
@@ -414,7 +487,8 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
         reconstruction_requests = []
         for identifier, context in contexts.items():
             baseline = context.get("baseline", {})
-            if baseline.get("image") is not None:
+            saved_holdout = indexed[identifier]["zero"]["reconstruction"][str(seeds[1])]
+            if baseline.get("image") is not None and not (saved_holdout and saved_holdout.get("status") == "OBSERVED"):
                 # The design-seed zero image was already collected in prepare.
                 reconstruction_requests.append({"source_id": identifier, "method": "zero", "bit": None,
                                                 "seed": seeds[1], "image": baseline["image"]})
@@ -478,19 +552,28 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None) 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--resume-from", type=Path,
+                        help="read an original pre-write batch checkpoint; requires a new output for execution")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args(argv)
     try:
-        config = json.loads(arguments.config.read_text(encoding="utf-8"))
-        plan = describe_plan(config)
+        if arguments.config is None and arguments.resume_from is None:
+            parser.error("provide --config or --resume-from")
+        config_path = arguments.config if arguments.config is not None else arguments.resume_from / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
         if not arguments.execute:
+            checkpoint = None
+            if arguments.resume_from is not None:
+                from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
+                checkpoint = load_resume_checkpoint(arguments.resume_from, config=config)
+            plan = describe_plan(config, resume_checkpoint=checkpoint)
             print(json.dumps(plan, indent=2, allow_nan=False))
             return 0
         if arguments.output is None:
             parser.error("--execute requires a new output directory")
-        result = execute_measurement(config, arguments.output)
+        result = execute_measurement(config, arguments.output, resume_from=arguments.resume_from)
         print(json.dumps(result, indent=2, allow_nan=False))
         # Numerical infeasibility and wrong decoded bits are retained outcomes;
         # the exit code reports acquisition, not a favorable method result.

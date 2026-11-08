@@ -1,7 +1,8 @@
 # 单次双通道预补偿：首候选实现与最小否定验证
 
-本候选已获用户采纳。当前交付是代码、固定配置和用户运行的 Colab 入口，
-不是新的科学结果。旧 stage-A 单方向测量、负结果和旧 LF/HF 路径均保留。
+本候选已获用户采纳。首次用户运行在写入前的普通／代理前向检查处停止，尚未取得
+标记输出或比特恢复结果。当前交付修正一个已定位的预处理布局差异，并从已保存的
+零臂继续；修复在真实 L4 上的效果尚未验证。旧测量、负结果和旧 LF/HF 路径均保留。
 本轮用户明确选择：**图像质量只报告，不设质量失败门槛、不据此筛除来源。**
 
 ## 具体机制
@@ -106,7 +107,47 @@
 SD3 和 SDXL 大组件分时装载；只有同一个 SD3 VAE 读者跨阶段保留。梯度阶段移除推理
 offload hooks、冻结权重、把保存的激活放到 CPU。稳定冻结权重的 CPU 副本复用；临时改变
 dtype 的 SDXL VAE 不使用这个缓存。SD3 末段求导时文本编码器留在 CPU。
-这与普通推理的内存行为不同：**真实 GPU 可运行性、总体显存和主机 RAM 仍未验证。**
+首次 L4 运行已完成零臂与多数 RGB 反向；**完整写入流程及本次修复后的显存和主机 RAM
+需求仍未验证。**
+
+## 2026-11-08 首次运行与续跑
+
+已读取用户回传的原始结果包。4 次零臂完整生成、8 次正式零臂重建、4 次代理重建及
+12 次公开特征读取均返回；7 条 RGB VJP 返回，潜变量 VJP 为 0。四个来源均在
+`gradient SDXL forward does not exactly reproduce ordinary design RGB` 停止；
+source07 另有干净读者的 ordinary/proxy feature allclose 失败。没有求解或标记图。
+因此两方法的 `failed: 8` 是固定名册内的工程失败，不是实测比特恢复率为零。
+
+普通／代理未标记重建图的 PSNR 为 59.04、49.90、50.44、49.81 dB；对应密钥分数差
+为 +0.01059、−0.00844、+0.01614、−0.02086。这些数值描述两条前向路径的差别，
+不描述水印质量或补偿效果。原记录未保存 source07 失败处的干净特征，不能补造该误差。
+
+Diffusers 0.39.0 的 PIL 预处理给出 channels-last 布局，Tensor 入口经拼接后给出
+连续 NCHW；在本地读取原图验证了像素相同而 stride 不同。修复只把写端预处理输出
+复制到普通 PIL 路径的布局，复制对输入保留恒等导数。shape、dtype 和数值必须相同；
+未改变读者、模型、随机种子、码格、预算、特征 allclose 容差或逐像素检查。
+布局差异可能改变半精度核的数值行为，但尚不能认定它解释了 L4 上的全部失败。
+现在失败前保存特征、标量差、布局和执行策略；成功求出的 RGB 梯度也立即保存。
+
+本次使用 `notebooks/channel_precompensation_v1_continue_colab.ipynb`，从原
+`precompensation-20261108/batch` 读取配置、读者、4 个捕获点及 12 份零臂 RGB/特征。
+原 batch、源码快照和环境记录不覆盖，新结果写入同级 `continuation_layout_v2/`。
+旧版本没有保存梯度，所以本次重新计算 8 条 RGB VJP（含 4 次代理重建），
+随后执行尚未发生的末段求导和标记写入。全部可写时新增上限：
+
+| 工作 | 新增次数 |
+|---|---:|
+| 标记完整生成 | 16 |
+| 正式普通 RGB 重建 | 32 |
+| 正式公开特征读取 | 48 |
+| 求导代理重建 | 4 |
+| 完整重建前向物理合计 | 36 |
+| 源末段前向／潜变量 VJP／RGB VJP | 4 / 8 / 8 |
+
+摘要分别记录旧调用、新调用、累计调用和复用数量；原失败摘要也原样保留。
+每方法 8 个比特试次、4 个双比特来源的分母不变。旧失败不能回写为成功。
+此入口只恢复写入前检查点；若已有标记写入尝试，不会静默重做。已有本次续跑目录
+仍只读，不自动再次运行。打包下载包含原失败批次和本次新增结果。
 
 ## 本地工程验证
 
@@ -120,6 +161,13 @@ PYTHONPATH=src:. python -m experiments.run_channel_precompensation_v1 \
 默认仅显示计划，不加载模型、不创建结果目录。真实执行必须显式添加
 `--execute --output <new-directory>`；本轮交付未执行该模式。
 
+只读检查已有结果的续跑计划：
+
+```bash
+PYTHONPATH=src:. python -m experiments.run_channel_precompensation_v1 \
+  --resume-from <original-run>/batch
+```
+
 ```bash
 python scripts/build_channel_precompensation_notebook.py
 python -m pytest -o addopts= \
@@ -130,8 +178,10 @@ python -m pytest -o addopts= \
   tests/integration/test_channel_precompensation_provider.py -q
 ```
 
-本轮针对上述文件的 **84 项 CPU/static/fake 检查通过**，含打包后隔离源码的默认入口、
-多层假模型的完整反向、实际 dtype、普通／代理前向不一致、分时装载、计数和失败保存。
+本地验证包括打包后隔离源码的默认入口、多层假模型的完整反向、实际 dtype、
+普通／代理前向不一致、布局复制的数值和导数、分时装载、计数、检查点恢复和失败保存。
+上述五个测试文件合计 **109 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
+及两个 notebook 的 nbformat 验证也通过。本次未执行真实模型或 GPU。
 这不是科学 PASS，也不是完整 OptMark 或多种子 EOT 复现。
 
 ## 结果判读和停止条件

@@ -36,6 +36,9 @@ from cegwm.runtime.reconstruction_channel_sd35 import (
 )
 
 
+RGB_PROXY_COMPATIBILITY_VERSION = "rgb-pil-layout-v2"
+
+
 @dataclass
 class SourceCapture:
     image: Image.Image
@@ -94,6 +97,86 @@ def image_tensor(image: Image.Image, *, device="cpu") -> torch.Tensor:
     # rather than introducing a potentially different CUDA division rounding.
     pixels = np.array(image, dtype=np.float32, copy=True) / np.float32(255.0)
     return torch.from_numpy(pixels).permute(2, 0, 1).unsqueeze(0).to(device=device)
+
+
+def _tensor_layout(value):
+    return {"shape": list(value.shape), "stride": list(value.stride()),
+            "dtype": str(value.dtype), "device": str(value.device),
+            "storage_offset": value.storage_offset(), "contiguous": value.is_contiguous(),
+            "channels_last": value.ndim == 4 and value.is_contiguous(memory_format=torch.channels_last)}
+
+
+def _execution_metadata():
+    # These are enabled policies, not a claim about the kernel actually selected.
+    cuda = torch.backends.cuda
+    sdpa = {}
+    for name in ("flash_sdp_enabled", "mem_efficient_sdp_enabled", "math_sdp_enabled", "cudnn_sdp_enabled"):
+        getter = getattr(cuda, name, None)
+        sdpa[name] = bool(getter()) if callable(getter) else None
+    return {"torch_version": str(torch.__version__), "grad_enabled": torch.is_grad_enabled(),
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "cudnn_enabled": torch.backends.cudnn.enabled,
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+            "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+            "cuda_matmul_allow_tf32": cuda.matmul.allow_tf32,
+            "sdpa_enabled_policies_not_selected_kernel": sdpa}
+
+
+def _canonical_preprocessed_pixels(proxy, ordinary, *, diagnostics):
+    """Copy only layout; reject changed values, shape or dtype before inference.
+
+    PIL preprocessing normally produces a channels-last tensor, while the
+    Tensor branch's cat/interpolate can produce contiguous NCHW. Equal values
+    alone do not ensure the same convolution execution in half precision.
+    ``copy_`` into the observed ordinary stride is differentiable and has the
+    identity derivative; no rounding, value replacement or tolerance is added.
+    """
+    if not isinstance(proxy, torch.Tensor) or not isinstance(ordinary, torch.Tensor):
+        raise TypeError("PIL and Tensor preprocessing must both return tensors")
+    diagnostics.update(ordinary=_tensor_layout(ordinary), proxy_before=_tensor_layout(proxy))
+    _finite(ordinary, "ordinary preprocessed pixels")
+    _finite(proxy, "proxy preprocessed pixels")
+    diagnostics.update(shape_equal=proxy.shape == ordinary.shape, dtype_equal=proxy.dtype == ordinary.dtype)
+    if proxy.shape != ordinary.shape or proxy.dtype != ordinary.dtype:
+        raise ValueError("PIL/Tensor preprocessing shape or dtype differs")
+    diagnostics["values_equal"] = torch.equal(proxy.detach().cpu(), ordinary.detach().cpu())
+    diagnostics["max_abs_error"] = float((proxy.detach().double().cpu() - ordinary.detach().double().cpu()).abs().max())
+    if not diagnostics["values_equal"]:
+        raise ValueError("PIL/Tensor input preprocessing does not agree exactly")
+    if proxy.stride() == ordinary.stride():
+        canonical = proxy
+    else:
+        canonical = torch.empty_strided(proxy.shape, ordinary.stride(), dtype=proxy.dtype,
+                                        device=proxy.device).copy_(proxy)
+    diagnostics["proxy_after"] = _tensor_layout(canonical)
+    if canonical.stride() != ordinary.stride():
+        raise ValueError("could not preserve the ordinary PIL preprocessing layout")
+    return canonical
+
+
+@contextmanager
+def _canonical_pipeline_preprocess(processor, rgb, ordinary_image, diagnostics):
+    """Wrap only this official pipeline input; always restore the original API."""
+    original = processor.preprocess
+    had_instance_attribute = "preprocess" in processor.__dict__
+
+    def preprocess(value, *args, **kwargs):
+        processed = original(value, *args, **kwargs)
+        if value is not rgb:
+            return processed
+        with torch.no_grad():
+            ordinary = original(ordinary_image, *args, **kwargs)
+        return _canonical_preprocessed_pixels(processed, ordinary, diagnostics=diagnostics)
+
+    processor.preprocess = preprocess
+    try:
+        yield
+    finally:
+        if had_instance_attribute:
+            processor.preprocess = original
+        else:
+            delattr(processor, "preprocess")
 
 
 def quantized_rgb_proxy(rgb: torch.Tensor) -> torch.Tensor:
@@ -191,13 +274,17 @@ def _require_frozen(module, name):
 
 
 @contextmanager
-def _count_method(module, method, prefix, counters):
+def _count_method(module, method, prefix, counters, *, input_diagnostics=None):
     """Count actual calls, including failures, without changing their graph."""
     original = getattr(module, method)
     had_instance_attribute = method in module.__dict__
 
     def counted(*args, **kwargs):
         _count(counters, prefix + "_attempted")
+        if input_diagnostics is not None:
+            first = args[0] if args else kwargs.get("x")
+            input_diagnostics.append({"tensor": _tensor_layout(first) if isinstance(first, torch.Tensor) else None,
+                                      "execution": _execution_metadata()})
         result = original(*args, **kwargs)
         _count(counters, prefix + "_returned")
         return result
@@ -212,12 +299,19 @@ def _count_method(module, method, prefix, counters):
             delattr(module, method)
 
 
-def _reader_graph(rgb, vae, image_processor, counters):
+def _reader_graph(rgb, vae, image_processor, counters, *, ordinary_image, diagnostics):
     _require_frozen(vae, "observation VAE")
     device, dtype = _vae_device_dtype(vae)
     # The same frozen public processor is used; the writer's Tensor entry retains
     # autograd, whereas the independently read public feature uses PIL below.
-    pixels = image_processor.preprocess(rgb).to(device=device, dtype=dtype)
+    with torch.no_grad():
+        ordinary_pixels = image_processor.preprocess(ordinary_image)
+    pixels = _canonical_preprocessed_pixels(image_processor.preprocess(rgb), ordinary_pixels,
+                                            diagnostics=diagnostics.setdefault("reader_preprocess", {}))
+    pixels = pixels.to(device=device, dtype=dtype)
+    diagnostics["reader_vae_input"] = _tensor_layout(pixels)
+    diagnostics["reader_ordinary_vae_input"] = _tensor_layout(ordinary_pixels.to(device=device, dtype=dtype))
+    diagnostics["reader_proxy_execution"] = _execution_metadata()
     _count(counters, "reader_proxy_forward_calls")
     mode = vae.encode(pixels).latent_dist.mode()
     scale = _vae_config_number(vae.config, "scaling_factor", positive=True)
@@ -235,43 +329,63 @@ def _score(feature, vector):
     return torch.dot(feature.double(), vector.to(feature.device, torch.float64))
 
 
-def _actual_read(image, proxy_feature, vae, image_processor, vector, counters):
-    _count(counters, "reader_ordinary_forward_calls")
-    actual = _cpu(encode_final_rgb_image(image, image_processor, vae)).reshape(-1)
-    _count(counters, "reader_ordinary_forward_returned")
+def _actual_read(image, proxy_feature, vae, image_processor, vector, counters, *, partial=None, diagnostics=None):
+    partial = {} if partial is None else partial
+    diagnostics = {} if diagnostics is None else diagnostics
+    diagnostics["compatibility_version"] = RGB_PROXY_COMPATIBILITY_VERSION
+    partial["reader_diagnostics"] = diagnostics
     proxy = _cpu(proxy_feature)
+    partial["reader_proxy_feature"] = proxy
+    _count(counters, "reader_ordinary_forward_calls")
+    with torch.no_grad():
+        diagnostics["reader_ordinary_execution"] = _execution_metadata()
+        actual = _cpu(encode_final_rgb_image(image, image_processor, vae)).reshape(-1)
+    partial["reader_ordinary_feature"] = actual
+    _count(counters, "reader_ordinary_forward_returned")
     # Grad-enabled kernels can differ slightly from their no-grad counterparts.
     # Fixed dtype-based numerical check, never fitted to source or outcome.
     tolerance = {torch.float16: (0.002, 0.002), torch.bfloat16: (0.02, 0.02)}.get(
         actual.dtype, (1e-5, 1e-6)
     )
-    if actual.shape != proxy.shape or not torch.allclose(actual, proxy, rtol=tolerance[0], atol=tolerance[1]):
-        raise ValueError("ordinary RGB feature and differentiable reader forward disagree")
-    ordinary_score = float(_score(actual, vector))
-    proxy_score = float(_score(proxy, vector))
-    return actual, ordinary_score, {
-        "reader_proxy_max_abs_error": float((actual.double() - proxy.double()).abs().max()),
+    shape_equal = actual.shape == proxy.shape
+    diagnostics.update({
+        "reader_feature_shape_equal": shape_equal,
         "reader_proxy_rtol": tolerance[0], "reader_proxy_atol": tolerance[1],
         # Per-coordinate allclose is not a bound at the QIM decision scale.
+        "reader_forward_check": "feature_allclose_only_not_scalar_equivalence",
+    })
+    if shape_equal:
+        diagnostics["reader_proxy_max_abs_error"] = float((actual.double() - proxy.double()).abs().max())
+    # Preserve score errors before the allclose guard, including on failure.
+    ordinary_score = float(_score(actual, vector))
+    proxy_score = float(_score(proxy, vector))
+    diagnostics.update({
         "reader_proxy_score": proxy_score, "reader_ordinary_score": ordinary_score,
         "reader_proxy_score_difference": proxy_score - ordinary_score,
         "reader_proxy_score_abs_error": abs(proxy_score - ordinary_score),
-        "reader_forward_check": "feature_allclose_only_not_scalar_equivalence",
-    }
+        "reader_feature_allclose": shape_equal and torch.allclose(actual, proxy, rtol=tolerance[0], atol=tolerance[1]),
+    })
+    if not diagnostics["reader_feature_allclose"]:
+        raise ValueError("ordinary RGB feature and differentiable reader forward disagree")
+    return actual, ordinary_score, diagnostics
 
 
 def rgb_reader_vjp(image, *, vae, image_processor, reader_vector, counters=None) -> RGBSensitivity:
     counters = _ledger(counters)
     partial = {"image": require_ordinary_rgb_image(image)}
+    diagnostics = {"compatibility_version": RGB_PROXY_COMPATIBILITY_VERSION}
+    partial["reader_diagnostics"] = diagnostics
     try:
         device, _ = _vae_device_dtype(vae)
         rgb = image_tensor(image, device=device).requires_grad_(True)
         with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(vae,)):
-            feature = _reader_graph(rgb, vae, image_processor, counters)
-            actual, score, diagnostics = _actual_read(image, feature, vae, image_processor, reader_vector, counters)
+            feature = _reader_graph(rgb, vae, image_processor, counters, ordinary_image=image, diagnostics=diagnostics)
+            actual, score, diagnostics = _actual_read(image, feature, vae, image_processor, reader_vector, counters,
+                                                      partial=partial, diagnostics=diagnostics)
             partial.update(feature=actual, score=score)
             _count(counters, "reader_vjp_calls")
             gradient, = torch.autograd.grad(_score(feature, reader_vector), rgb)
+            partial.update(gradient_rgb=_cpu(gradient), diagnostics=diagnostics)
         _finite(gradient, "reader RGB sensitivity")
         _count(counters, "reader_vjp_returned")
         return RGBSensitivity(partial["image"], actual, score, _cpu(gradient), diagnostics)
@@ -472,6 +586,9 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
     """
     counters = _ledger(counters)
     partial = {"input_image": require_ordinary_rgb_image(image)}
+    diagnostics = {"compatibility_version": RGB_PROXY_COMPATIBILITY_VERSION,
+                   "sdxl_input_preprocess": {}}
+    partial["reader_diagnostics"] = diagnostics
     try:
         if type(seed) is not int or seed < 0:
             raise ValueError("design seed must be a nonnegative integer")
@@ -486,13 +603,6 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
         if not callable(unwrapped):
             raise TypeError("SDXL pipeline must expose its torch.no_grad __wrapped__ call")
         rgb = image_tensor(image, device=settings.device).requires_grad_(True)
-        # Prove the tensor entry takes the same ordinary-RGB preprocessing path.
-        # This rejects resize/conversion discrepancies before using the proxy.
-        with torch.no_grad():
-            from_pil = pipeline.image_processor.preprocess(image).cpu()
-            from_tensor = pipeline.image_processor.preprocess(rgb.detach()).cpu()
-        if from_pil.shape != from_tensor.shape or not torch.equal(from_pil, from_tensor):
-            raise ValueError("SDXL tensor/PIL input preprocessing does not agree exactly")
         generator = torch.Generator(device=settings.device).manual_seed(seed)
         initial_rng = _cpu(generator.get_state())
         actual_steps = []
@@ -503,16 +613,21 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
             return kwargs
 
         with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(pipeline.unet, observation_vae)), \
-             _count_method(pipeline.vae, "encode", "sdxl_input_vae_encode", counters), \
+             _canonical_pipeline_preprocess(pipeline.image_processor, rgb, image, diagnostics["sdxl_input_preprocess"]), \
+             _count_method(pipeline.vae, "encode", "sdxl_input_vae_encode", counters,
+                           input_diagnostics=diagnostics.setdefault("sdxl_vae_encode_inputs", [])), \
              _count_method(pipeline.vae, "decode", "sdxl_output_vae_decode", counters), \
              _count_method(pipeline.unet, "forward", "sdxl_unet_forward", counters):
             _count(counters, "sdxl_reconstruction_forward_calls")
+            diagnostics["sdxl_proxy_execution"] = _execution_metadata()
             result = unwrapped(pipeline, prompt=settings.prompt, image=rgb,
                 strength=settings.strength, guidance_scale=settings.guidance_scale,
                 num_inference_steps=settings.num_inference_steps, generator=generator,
                 output_type="pt", callback_on_step_end=counted_step,
                 callback_on_step_end_tensor_inputs=["latents"])
             _count(counters, "sdxl_reconstruction_forward_returned")
+            if not diagnostics["sdxl_input_preprocess"].get("values_equal", False):
+                raise ValueError("official SDXL did not preprocess the expected RGB input")
             pixels = result.images
             if not isinstance(pixels, torch.Tensor) or not pixels.requires_grad:
                 raise ValueError("official SDXL RGB output is detached from the input")
@@ -521,13 +636,16 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
             proxy = quantized_rgb_proxy(pixels)
             reconstructed = _to_image(proxy)
             partial["image"] = reconstructed
-            feature = _reader_graph(proxy, observation_vae, observation_processor, counters)
+            feature = _reader_graph(proxy, observation_vae, observation_processor, counters,
+                                    ordinary_image=reconstructed, diagnostics=diagnostics)
             actual, score, diagnostics = _actual_read(reconstructed, feature, observation_vae,
-                                                     observation_processor, reader_vector, counters)
+                                                     observation_processor, reader_vector, counters,
+                                                     partial=partial, diagnostics=diagnostics)
             partial.update(feature=actual, score=score)
             _count(counters, "sdxl_reconstruction_vjp_calls")
             _count(counters, "reader_vjp_calls")
             gradient, = torch.autograd.grad(_score(feature, reader_vector), rgb)
+            partial.update(gradient_rgb=_cpu(gradient), diagnostics=diagnostics)
         _finite(gradient, "reconstruction RGB sensitivity")
         _count(counters, "sdxl_reconstruction_vjp_returned")
         _count(counters, "reader_vjp_returned")

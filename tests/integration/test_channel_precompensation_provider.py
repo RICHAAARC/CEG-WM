@@ -4,6 +4,7 @@ import gc
 import json
 from pathlib import Path
 import weakref
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -11,10 +12,11 @@ import torch
 
 from cegwm.runtime import channel_precompensation_sd35 as runtime
 from cegwm.runtime.channel_precompensation_provider import PrecompensationProvider
+from cegwm.channel_precompensation import ReaderSpec, make_reader
 from cegwm.runtime.reconstruction_channel_sd35 import final_image_feature
 
 # Reuse the actual multilayer differentiable fakes, rather than stubbing VJPs.
-from test_channel_precompensation_runtime import Source, Reconstruction
+from test_channel_precompensation_runtime import Source, Reconstruction, VAE, Processor
 
 
 pytestmark = pytest.mark.integration
@@ -169,7 +171,10 @@ def test_constructor_is_inert_and_full_real_provider_has_fixed_counts_and_stagin
     assert not loader.log and provider._reader_vector is None
     assert provider.counts["final_generation_attempted"] == 0
     preparation = list(provider.prepare_sources(specification["sources"]))
-    assert [event["kind"] for event in preparation] == ["baseline"]*4 + ["design"]*4 + ["linearization"]*4
+    assert [event["kind"] for event in preparation if event["kind"] != "rgb_gradient"] == ["baseline"]*4 + ["design"]*4 + ["linearization"]*4
+    saved_gradients = [event for event in preparation if event["kind"] == "rgb_gradient"]
+    assert len(saved_gradients) == 8 and all(event["reusable"] and not event["reused"] for event in saved_gradients)
+    assert all(event["result"]["gradient_rgb"].device.type == "cpu" for event in saved_gradients)
     original_vae, original_processor = id(provider._vae), id(provider._processor)
     assert id(provider._source.vae) == original_vae
     for event in preparation:
@@ -275,12 +280,15 @@ def test_ordinary_and_gradient_reconstruction_mismatch_preserves_both_and_blocks
     specification, loader = config(1), Loader(gradient_offset=2 / 255)
     provider = PrecompensationProvider(specification, loader=loader)
     events = list(provider.prepare_sources(specification["sources"]))
-    assert [event["kind"] for event in events] == ["baseline", "design", "failure"]
+    assert [event["kind"] for event in events if event["kind"] != "rgb_gradient"] == ["baseline", "design", "failure"]
     failure = events[-1]
     assert "exactly reproduce ordinary design RGB" in failure["error"]
     partial = failure["partial"]
     assert not np.array_equal(np.asarray(partial["ordinary_image"]), np.asarray(partial["proxy_image"]))
     assert partial["ordinary_feature"].numel() == partial["proxy_feature"].numel() == 12
+    gradient_events = [event for event in events if event["kind"] == "rgb_gradient"]
+    assert [(event["phase"], event["reusable"]) for event in gradient_events] == [("clean", True), ("design", False)]
+    assert torch.equal(partial["gradient_rgb"], gradient_events[-1]["result"]["gradient_rgb"])
     counts = provider.counts
     assert counts["final_reconstruction_returned"] == counts["auxiliary_reconstruction_forward_returned"] == 1
     assert counts["reconstruction_returned"] == 2 and counts["public_feature_reads_returned"] == 2
@@ -335,3 +343,110 @@ def test_runtime_failed_capture_still_counts_a_returned_full_pipeline(monkeypatc
         runtime.capture_source(pipe, settings, counters=counts)
     assert counts["sd35_full_generation_calls"] == counts["sd35_full_generation_returned"] == 1
     assert caught.value.partial["image"].mode == "RGB"
+
+
+def checkpoint(specification, *, with_gradients=False):
+    """A completed zero-only CPU run, retaining the same real provider events."""
+    provider = PrecompensationProvider(specification, loader=Loader())
+    preparation = list(provider.prepare_sources(specification["sources"]))
+    assert not any(event["kind"] == "failure" for event in preparation)
+    assert list(provider.generate_writes([])) == []
+    holdouts = list(provider.reconstruct_outputs(evaluations(preparation, [], specification)))
+    baselines = {event["source_id"]: event for event in preparation if event["kind"] == "baseline"}
+    reconstructions = {(event["source_id"], specification["reconstruction"]["design_seed"]): event
+                       for event in preparation if event["kind"] == "design"}
+    reconstructions.update({(event["source_id"], event["seed"]): event for event in holdouts})
+    gradients = {}
+    if with_gradients:
+        for event in preparation:
+            if event["kind"] == "rgb_gradient":
+                gradients.setdefault(event["source_id"], {})[event["phase"]] = event
+    vector, phase = make_reader(next(iter(baselines.values()))["feature"].numel(), ReaderSpec(**specification["reader"]))
+    provider.close()
+    return SimpleNamespace(baselines=baselines, zero_reconstructions=reconstructions,
+                           reader_vector=vector, reader_phase=phase, rgb_gradients=gradients), preparation
+
+
+class ReaderLoader:
+    def __init__(self):
+        self.calls = []
+        self.vae = self.processor = None
+
+    def __call__(self, specification):
+        self.calls.append(specification["generation"])
+        self.vae, self.processor = VAE(), Processor()
+        return self.vae, self.processor
+
+
+def test_resume_reuses_all_zero_assets_without_new_zero_calls_and_preserves_frozen_reader():
+    specification = config()
+    saved, original = checkpoint(specification)
+    loader, reader_loader, reader = Loader(), ReaderLoader(), PublicReader()
+    provider = PrecompensationProvider(specification, loader=loader, reader_loader=reader_loader,
+                                      public_reader=reader, resume_checkpoint=saved)
+    assert not loader.log and not reader_loader.calls
+    preparation = list(provider.prepare_sources(specification["sources"]))
+    reused = [event for event in preparation if event.get("reused")]
+    assert len(reused) == 12
+    assert {kind: sum(event["kind"] == kind for event in reused)
+            for kind in ("baseline", "design", "holdout_zero")} == {"baseline": 4, "design": 4, "holdout_zero": 4}
+    assert provider.counts["final_generation_attempted"] == provider.counts["final_reconstruction_attempted"] == 0
+    assert provider.counts["public_feature_reads_attempted"] == 0
+    assert len(reader_loader.calls) == 1 and loader.counts == {"generation": 1, "reconstruction": 1}
+    assert provider._source.vae is reader_loader.vae
+    original_gradients = {event["source_id"]: event["gradients"] for event in original if event["kind"] == "linearization"}
+    for event in preparation:
+        if event["kind"] == "linearization":
+            torch.testing.assert_close(event["gradients"], original_gradients[event["source_id"]])
+    marked = list(provider.generate_writes(writes(preparation)))
+    # Even accidental repeated zero requests are served from saved observations.
+    observed = list(provider.reconstruct_outputs(evaluations(preparation, marked, specification)))
+    assert len(marked) == 16 and len(observed) == 36
+    assert sum(event.get("reused", False) for event in observed) == 4
+    counts = provider.counts
+    for name, expected in (("final_generation", 16), ("final_reconstruction", 32), ("reconstruction", 36),
+                           ("auxiliary_reconstruction_forward", 4), ("public_feature_reads", 48),
+                           ("latent_vjps", 8), ("rgb_vjps", 8), ("autograd_calls", 16)):
+        assert counts[name + "_attempted"] == counts[name + "_returned"] == expected
+    assert all(call[:2] == (id(reader_loader.vae), id(reader_loader.processor)) for call in reader.calls)
+    gradient_calls = [event for event in loader.log if event[0] == "reconstruction_call" and event[3]]
+    assert len(gradient_calls) == 4
+    assert {event[2] for event in gradient_calls} == {specification["reconstruction"]["design_seed"]}
+    provider.close()
+
+
+def test_resume_reuses_compatible_successful_gradients_but_never_holdout_gradients():
+    specification = config(1)
+    saved, _ = checkpoint(specification, with_gradients=True)
+    loader = Loader()
+    provider = PrecompensationProvider(specification, loader=loader, reader_loader=ReaderLoader(), resume_checkpoint=saved)
+    events = list(provider.prepare_sources(specification["sources"]))
+    assert len([event for event in events if event["kind"] == "linearization"]) == 1
+    gradients = [event for event in events if event["kind"] == "rgb_gradient"]
+    assert len(gradients) == 2 and all(event["reused"] for event in gradients)
+    assert provider.counts["rgb_vjps_attempted"] == provider.counts["reconstruction_attempted"] == 0
+    assert provider.counts["latent_vjps_returned"] == 2
+    assert loader.counts == {"generation": 1, "reconstruction": 0}
+    provider.close()
+
+
+@pytest.mark.parametrize("invalid", ["layout", "failed_guard", "holdout_seed"])
+def test_resume_recomputes_design_gradient_if_cache_is_incompatible_or_not_accepted(invalid):
+    specification = config(1)
+    saved, _ = checkpoint(specification, with_gradients=True)
+    identifier = specification["sources"][0]["source_id"]
+    cached = saved.rgb_gradients[identifier]["design"]
+    if invalid == "layout":
+        cached["compatibility_version"] = "old-layout"
+    elif invalid == "failed_guard":
+        cached["reusable"] = False
+    else:
+        cached["result"]["diagnostics"]["design_seed"] = specification["reconstruction"]["holdout_seed"]
+    provider = PrecompensationProvider(specification, loader=Loader(), reader_loader=ReaderLoader(), resume_checkpoint=saved)
+    events = list(provider.prepare_sources(specification["sources"]))
+    assert not any(event["kind"] == "failure" for event in events)
+    gradients = [event for event in events if event["kind"] == "rgb_gradient"]
+    assert [(event["phase"], event["reused"]) for event in gradients] == [("clean", True), ("design", False)]
+    assert provider.counts["rgb_vjps_returned"] == provider.counts["auxiliary_reconstruction_forward_returned"] == 1
+    assert provider.counts["final_generation_attempted"] == provider.counts["final_reconstruction_attempted"] == 0
+    provider.close()

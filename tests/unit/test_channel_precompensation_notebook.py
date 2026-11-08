@@ -10,7 +10,8 @@ import zipfile
 import pytest
 
 from scripts.build_channel_precompensation_notebook import (
-    ROOT, OUTPUT, SOURCE_FILES, build_notebook, source_snapshot,
+    ROOT, OUTPUT, CONTINUATION_OUTPUT, SOURCE_FILES, build_notebook,
+    build_continuation_notebook, source_snapshot,
 )
 
 pytestmark = pytest.mark.unit
@@ -118,3 +119,90 @@ def test_bundle_can_execute_plan_in_isolated_python_path(tmp_path):
     plan = json.loads(completed.stdout)
     assert plan["planned_budget"]["final_generation_calls"] == 20
     assert plan["quality"]["minimum_psnr_db"] is None
+
+
+def continuation_namespace():
+    notebook = build_continuation_notebook()
+    scope = {}
+    source = next(cell for cell in notebook["cells"] if cell["id"] == "helpers")["source"]
+    exec(compile("".join(source), "continuation:helpers", "exec"), scope)
+    return scope
+
+
+def test_continuation_notebook_is_unexecuted_and_contains_current_source():
+    expected = build_continuation_notebook()
+    assert json.loads(CONTINUATION_OUTPUT.read_text()) == expected
+    code = [cell for cell in expected["cells"] if cell["cell_type"] == "code"]
+    assert "".join(code[0]["source"]) == "from google.colab import drive\ndrive.mount('/content/drive')\n"
+    for cell in code:
+        assert cell["execution_count"] is None and cell["outputs"] == []
+        compile("".join(cell["source"]), cell["id"], "exec")
+
+
+def test_continuation_launch_reuses_original_batch_without_overwriting_metadata(tmp_path):
+    scope = continuation_namespace()
+    checkout = scope["unpack_source"](source_snapshot(), tmp_path / "source")
+    root = tmp_path / "run"
+    original = root / "batch"
+    original.mkdir(parents=True)
+    scope["write_json"](original / "config.json", config())
+    scope["write_json"](original / "summary.json", {"stages": {"cleanup": "complete"},
+                                                  "actual_calls": {"final_generation_attempted": 4}})
+    (root / "environment.json").write_text("original environment")
+    (root / "source_snapshot.zip").write_bytes(b"original code")
+    before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    calls = []
+    def ensure(checkout, metadata_dir):
+        assert metadata_dir != root and metadata_dir.parent == root
+        scope["write_json"](metadata_dir / "environment.json", {"kind": "continuation"})
+        return {"HF_TOKEN": "fake-only"}
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        assert command[command.index("--resume-from") + 1] == str(original)
+        assert "--config" not in command
+        output = Path(command[command.index("--output") + 1])
+        assert output != original and not output.exists()
+        output.mkdir()
+        scope["write_json"](output / "summary.json", {"stages": {"cleanup": "complete"}, "sources": []})
+        return types.SimpleNamespace(returncode=1)
+    scope["ensure_runtime"] = ensure
+    scope["subprocess"] = types.SimpleNamespace(run=run)
+    scope["run_or_show_continuation"](checkout, root, source_snapshot())
+    assert len(calls) == 1
+    for relative, content in before.items():
+        assert (root / relative).read_bytes() == content
+
+
+def test_existing_interrupted_continuation_is_not_rerun_and_keeps_prior_counts(tmp_path):
+    scope = continuation_namespace()
+    root = tmp_path / "run"
+    (root / "batch").mkdir(parents=True)
+    scope["write_json"](root / "batch/config.json", config())
+    prior = {"actual_calls": {"final_generation_attempted": 4, "reconstruction_attempted": 12}}
+    scope["write_json"](root / "batch/summary.json", prior)
+    (root / "batch/original_failure.pt").write_bytes(b"retained")
+    output = root / scope["CONTINUATION_NAME"]
+    output.mkdir()
+    pending = {"stages": {"prepare": "started", "cleanup": "not_started"},
+               "actual_calls": {"rgb_vjps_attempted": 2}, "sources": []}
+    scope["write_json"](output / "summary.json", pending)
+    def forbidden(*args):
+        raise AssertionError("Interrupted continuation must not be retried")
+    scope["ensure_runtime"] = forbidden
+    assert scope["run_or_show_continuation"](tmp_path, root, b"unused") == pending
+    report, archive = scope["package_continuation"](config(), root)
+    assert report["actual_calls"] is None and report["cumulative_actual_calls"] is None
+    assert report["prior_actual_calls"] == prior["actual_calls"]
+    assert report["last_recorded_calls"] == pending["actual_calls"]
+    with zipfile.ZipFile(archive) as saved:
+        assert "run/batch/original_failure.pt" in saved.namelist()
+    assert not (root / "measurement_summary.json").exists()
+
+
+def test_continuation_requires_saved_batch_before_environment_setup(tmp_path):
+    scope = continuation_namespace()
+    def forbidden(*args):
+        raise AssertionError("Missing original must not launch setup or generation")
+    scope["ensure_runtime"] = forbidden
+    with pytest.raises(RuntimeError, match="original saved batch"):
+        scope["run_or_show_continuation"](tmp_path, tmp_path / "missing", b"unused")

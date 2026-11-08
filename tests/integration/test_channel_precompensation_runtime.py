@@ -404,3 +404,155 @@ def test_half_precision_zero_vjp_is_reported_as_numerical_proxy_limitation():
     full_gradient = runtime.source_suffix_vjps(full_precision, full_capture,
                                               torch.full((1, 1, 3, 2, 2), 1e-12))
     assert torch.count_nonzero(full_gradient) == full_gradient.numel()
+
+
+def real_processor():
+    # This initializes only the actual preprocessing class, never a model.
+    module = pytest.importorskip("diffusers.image_processor")
+    return module.VaeImageProcessor(vae_scale_factor=1)
+
+
+def test_real_pil_tensor_layout_canonicalization_preserves_values_and_derivative():
+    processor = real_processor()
+    picture = Image.fromarray(np.arange(8 * 8 * 3, dtype=np.uint8).reshape(8, 8, 3))
+    rgb = runtime.image_tensor(picture).requires_grad_(True)
+    ordinary = processor.preprocess(picture)
+    processed = processor.preprocess(rgb)
+    diagnostics = {}
+    canonical = runtime._canonical_preprocessed_pixels(processed, ordinary, diagnostics=diagnostics)
+    assert ordinary.is_contiguous(memory_format=torch.channels_last)
+    assert canonical.stride() == ordinary.stride()
+    assert torch.equal(canonical.detach(), ordinary)
+    assert diagnostics["proxy_before"]["stride"] == list(processed.stride())
+    weights = torch.linspace(-1, 1, rgb.numel()).reshape_as(rgb)
+    derivative, = torch.autograd.grad((canonical * weights).sum(), rgb)
+    torch.testing.assert_close(derivative, 2 * weights, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("change", ["values", "dtype", "shape"])
+def test_layout_canonicalization_never_repairs_wrong_preprocessed_values(change):
+    processor = real_processor()
+    ordinary = processor.preprocess(image())
+    proxy = processor.preprocess(runtime.image_tensor(image()).requires_grad_(True))
+    if change == "values":
+        proxy = proxy + 0.01
+    elif change == "dtype":
+        proxy = proxy.half()
+    else:
+        proxy = proxy[:, :, :1, :]
+    diagnostics = {}
+    with pytest.raises(ValueError, match="preprocessing"):
+        runtime._canonical_preprocessed_pixels(proxy, ordinary, diagnostics=diagnostics)
+    assert "ordinary" in diagnostics and "proxy_before" in diagnostics
+    if change == "values":
+        assert not diagnostics["values_equal"]
+        assert diagnostics["max_abs_error"] > 0.009
+
+
+def test_real_processor_clean_reader_uses_identical_pil_layout_without_changing_public_read():
+    class RecordingVAE(VAE):
+        def __init__(self):
+            super().__init__()
+            self.input_records = []
+
+        def encode(self, pixels):
+            self.input_records.append((pixels.stride(), pixels.dtype, torch.is_grad_enabled()))
+            return super().encode(pixels)
+
+    vae, processor = RecordingVAE(), real_processor()
+    observed = runtime.rgb_reader_vjp(image(), vae=vae, image_processor=processor, reader_vector=vector())
+    expected_stride = processor.preprocess(image()).stride()
+    assert vae.input_records == [(expected_stride, torch.float32, True),
+                                 (expected_stride, torch.float32, False)]
+    assert observed.diagnostics["reader_vae_input"]["stride"] == list(expected_stride)
+    assert observed.diagnostics["reader_proxy_score_abs_error"] == 0
+    assert observed.diagnostics["compatibility_version"] == runtime.RGB_PROXY_COMPATIBILITY_VERSION
+    assert observed.diagnostics["reader_ordinary_execution"]["grad_enabled"] is False
+    assert torch.count_nonzero(observed.gradient_rgb) == observed.gradient_rgb.numel()
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_real_processor_sdxl_wrapper_canonicalizes_input_and_restores_method(fail):
+    pipe = Reconstruction(fail_at=1 if fail else None)
+    pipe.image_processor = real_processor()
+    original_preprocess = pipe.image_processor.preprocess
+    expected = original_preprocess(image())
+    original_encode = pipe.vae.encode
+    seen = []
+
+    def recording_encode(pixels):
+        seen.append((pixels.stride(), pixels.detach().clone(), pixels.requires_grad))
+        return original_encode(pixels)
+
+    pipe.vae.encode = recording_encode
+    kwargs = dict(observation_vae=VAE(), observation_processor=real_processor(), reader_vector=vector())
+    if fail:
+        with pytest.raises(runtime.RuntimeStageError, match="fake denoising failure") as caught:
+            runtime.reconstruction_reader_vjp(pipe, image(), recon_settings(), 17, **kwargs)
+        diagnostics = caught.value.partial["reader_diagnostics"]
+    else:
+        result = runtime.reconstruction_reader_vjp(pipe, image(), recon_settings(), 17, **kwargs)
+        diagnostics = result.diagnostics
+        assert torch.count_nonzero(result.gradient_rgb) > 0
+    assert seen[0][0] == expected.stride()
+    assert torch.equal(seen[0][1], expected)
+    assert seen[0][2]
+    assert diagnostics["sdxl_input_preprocess"]["proxy_after"]["stride"] == list(expected.stride())
+    assert diagnostics["sdxl_vae_encode_inputs"][0]["tensor"]["stride"] == list(expected.stride())
+    assert diagnostics["sdxl_vae_encode_inputs"][0]["execution"]["grad_enabled"]
+    assert pipe.image_processor.preprocess == original_preprocess
+    assert "preprocess" not in pipe.image_processor.__dict__
+
+
+def test_sdxl_wrong_tensor_preprocessing_still_fails_and_restores_existing_method():
+    pipe = Reconstruction()
+    processor = real_processor()
+    original = processor.preprocess
+
+    def wrong_preprocess(value, *args, **kwargs):
+        result = original(value, *args, **kwargs)
+        return result + 0.01 if isinstance(value, torch.Tensor) else result
+
+    processor.preprocess = wrong_preprocess
+    pipe.image_processor = processor
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError, match="does not agree exactly") as caught:
+        runtime.reconstruction_reader_vjp(pipe, image(), recon_settings(), 17,
+            observation_vae=VAE(), observation_processor=real_processor(), reader_vector=vector(), counters=counters)
+    assert processor.preprocess is wrong_preprocess
+    assert counters.get("sdxl_input_vae_encode_attempted", 0) == 0
+    assert caught.value.partial["reader_diagnostics"]["sdxl_input_preprocess"]["values_equal"] is False
+
+
+def test_reader_allclose_failure_preserves_features_score_error_and_input_metadata():
+    class ExecutionDriftVAE(VAE):
+        def encode(self, pixels):
+            value = super().encode(pixels).latent_dist.mode()
+            if torch.is_grad_enabled():
+                value = value + 0.01
+            return SimpleNamespace(latent_dist=SimpleNamespace(mode=lambda: value))
+
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError, match="reader forward disagree") as caught:
+        runtime.rgb_reader_vjp(image(), vae=ExecutionDriftVAE(), image_processor=real_processor(),
+                               reader_vector=vector(), counters=counters)
+    partial = caught.value.partial
+    assert partial["reader_proxy_feature"].shape == partial["reader_ordinary_feature"].shape
+    diagnostics = partial["reader_diagnostics"]
+    assert diagnostics["reader_proxy_max_abs_error"] > 0.01
+    assert diagnostics["reader_proxy_score_abs_error"] > 0
+    assert not diagnostics["reader_feature_allclose"]
+    assert diagnostics["reader_preprocess"]["values_equal"]
+    assert "sdpa_enabled_policies_not_selected_kernel" in diagnostics["reader_proxy_execution"]
+    assert counters.get("reader_vjp_calls", 0) == 0
+
+
+def test_obtained_gradient_is_saved_even_if_nonfinite_validation_fails(monkeypatch):
+    def invalid_gradient(output, inputs, **kwargs):
+        return (torch.full_like(inputs, float("nan")),)
+
+    monkeypatch.setattr(torch.autograd, "grad", invalid_gradient)
+    with pytest.raises(runtime.RuntimeStageError, match="reader RGB sensitivity") as caught:
+        runtime.rgb_reader_vjp(image(), vae=VAE(), image_processor=real_processor(), reader_vector=vector())
+    assert torch.isnan(caught.value.partial["gradient_rgb"]).all()
+    assert caught.value.partial["diagnostics"]["reader_feature_allclose"]

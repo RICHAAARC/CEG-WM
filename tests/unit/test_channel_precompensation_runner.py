@@ -8,6 +8,7 @@ from PIL import Image
 
 from experiments import run_channel_precompensation_v1 as runner
 from cegwm.channel_precompensation import ReaderSpec, make_reader
+from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
 
 pytestmark = pytest.mark.unit
 
@@ -66,22 +67,42 @@ class FakeProvider:
         self.counts["final_reconstruction_attempted"] += 1
         self.counts["final_reconstruction_returned"] += 1
 
+    def _capture(self, source):
+        steps = self.settings["generation"]["num_inference_steps"]
+        injection = self.settings["generation"]["injection_step"]
+        timesteps = torch.arange(steps, 0, -1, dtype=torch.float32)
+        sigmas = torch.linspace(1, 0, steps + 1)
+        state = {"latents": self.base.clone(), "prompt_embeds": torch.ones(1, 2, 3),
+            "pooled_prompt_embeds": torch.ones(1, 4), "timesteps": timesteps, "sigmas": sigmas,
+            "generator_state": torch.Generator().manual_seed(source["seed"]).get_state(),
+            "next_step_index": injection + 1, "guidance_scale": 1.0, "do_classifier_free_guidance": False,
+            "latent_device": "cpu", "timestep": timesteps[injection], "interval_start_sigma": sigmas[injection],
+            "latent_sigma": sigmas[injection + 1], "next_sigma": sigmas[injection + 2], "begin_index": None,
+            "scheduler_class": "fake.Flow", "scheduler_config": {}, "clip_skip": None, "joint_attention_kwargs": None}
+        scheduler = {"timesteps": timesteps, "sigmas": sigmas, "_step_index": injection + 1,
+                     "_begin_index": None, "num_inference_steps": steps, "_internal_dict": {}}
+        return state, scheduler, tuple(range(injection + 1, steps))
+
     def prepare_sources(self, sources):
         for source in sources:
             identifier = source["source_id"]
             self._generation()
-            yield {"kind": "baseline", "source_id": identifier, "image": Image.new("RGB", (4, 4), (80, 90, 100)),
-                   "feature": self._feature(self.phase + 0.1), "before_state": {"latents": self.base.clone()}}
+            state, scheduler, remaining = self._capture(source)
+            yield {"kind": "baseline", "source_id": identifier, "status": "OBSERVED",
+                   "image": Image.new("RGB", (32, 32), (80, 90, 100)),
+                   "feature": self._feature(self.phase + 0.1), "before_state": state,
+                   "scheduler_state": scheduler, "remaining_steps": remaining}
             if identifier == self.preparation_failure:
                 yield {"kind": "failure", "source_id": identifier, "stage": "design", "error": "fake design failure",
-                       "partial": {"image": Image.new("RGB", (4, 4), (82, 90, 100)),
+                       "partial": {"image": Image.new("RGB", (32, 32), (82, 90, 100)),
                                    "before_state": {"latents": self.base.clone()},
                                    "completed_gradients": (self.gradients[0].clone(),)}}
                 continue
             score = self.phase + (1.1 if identifier == self.infeasible_source else 0.2)
             self.design_scores[identifier] = score
             self._reconstruction()
-            yield {"kind": "design", "source_id": identifier, "image": Image.new("RGB", (4, 4), (82, 90, 100)),
+            yield {"kind": "design", "source_id": identifier, "status": "OBSERVED",
+                   "image": Image.new("RGB", (32, 32), (82, 90, 100)),
                    "feature": self._feature(score)}
             self.counts["auxiliary_reconstruction_forward_attempted"] += 1
             self.counts["auxiliary_reconstruction_forward_returned"] += 1
@@ -108,7 +129,7 @@ class FakeProvider:
             score = self.phase + 0.1 + float(torch.sum(self.gradients[0] * delta))
             fail = (identifier, method, bit) == self.feature_failure
             yield {"source_id": identifier, "method": method, "bit": bit,
-                   "image": Image.new("RGB", (4, 4), (80 + 40 * bit, 90, 100)),
+                   "image": Image.new("RGB", (32, 32), (80 + 40 * bit, 90, 100)),
                    "feature": self._feature(score, fail), "actual_delta": delta, "after_latents": after,
                    "matched_state": not self.mismatched_state, "status": "FAILED" if fail else "OBSERVED",
                    "error": "fake feature read failure" if fail else None}
@@ -289,3 +310,150 @@ def test_setup_failure_keeps_roster_and_fixed_denominators(tmp_path, monkeypatch
     assert len(result["sources"]) == 4
     assert all(result["method_summaries"][method]["expected_bit_trials"] == 8 for method in runner.METHODS)
     assert result["stages"]["setup"] == "failed"
+
+
+class PreWriteProvider(FakeProvider):
+    def generate_writes(self, requests):
+        # Completed zero observations with no physically attempted marked writes.
+        self.write_requests = list(requests)
+        yield from ()
+
+
+class ResumeProvider(FakeProvider):
+    def __init__(self, settings, checkpoint, *, prewrite_only=False, reusable_gradients=True):
+        super().__init__(settings)
+        self.checkpoint = checkpoint
+        self.prewrite_only = prewrite_only
+        self.reusable_gradients = reusable_gradients
+
+    def prepare_sources(self, sources):
+        for source in sources:
+            identifier = source["source_id"]
+            yield {**self.checkpoint.baselines[identifier], "kind": "baseline", "source_id": identifier, "reused": True}
+            for name, kind in (("design_seed", "design"), ("holdout_seed", "holdout_zero")):
+                seed = self.settings["reconstruction"][name]
+                observed = self.checkpoint.zero_reconstructions[(identifier, seed)]
+                yield {**observed, "kind": kind, "source_id": identifier, "seed": seed, "reused": True}
+            self.design_scores[identifier] = float(torch.dot(
+                self.checkpoint.zero_reconstructions[(identifier, self.settings["reconstruction"]["design_seed"])]["feature"], self.vector))
+            for phase in ("clean", "design"):
+                observed = (self.checkpoint.baselines[identifier] if phase == "clean" else
+                            self.checkpoint.zero_reconstructions[(identifier, self.settings["reconstruction"]["design_seed"])])
+                self.counts["rgb_vjps_attempted"] += 1
+                self.counts["rgb_vjps_returned"] += 1
+                yield {"kind": "rgb_gradient", "source_id": identifier, "phase": phase,
+                    "compatibility_version": "rgb-pil-layout-v2", "reusable": self.reusable_gradients, "reused": False,
+                    "result": {"image": observed["image"], "feature": observed["feature"],
+                        "score": float(torch.dot(observed["feature"], self.vector)),
+                        "gradient_rgb": torch.zeros(1, 3, 32, 32),
+                        "diagnostics": {"design_seed": self.settings["reconstruction"]["design_seed"]}}}
+            self.counts["auxiliary_reconstruction_forward_attempted"] += 1
+            self.counts["auxiliary_reconstruction_forward_returned"] += 1
+            self.counts["reconstruction_attempted"] += 1
+            self.counts["reconstruction_returned"] += 1
+            self.counts["latent_vjps_attempted"] += 2
+            self.counts["latent_vjps_returned"] += 2
+            yield {"kind": "linearization", "source_id": identifier, "gradients": self.gradients.clone()}
+
+    def generate_writes(self, requests):
+        if self.prewrite_only:
+            self.write_requests = list(requests)
+            yield from ()
+        else:
+            yield from super().generate_writes(requests)
+
+
+def make_prewrite_checkpoint(path):
+    result = runner.execute_measurement(config(), path, provider=PreWriteProvider(config()))
+    assert result["actual_calls"]["generation_attempted"] == 4
+    assert result["actual_calls"]["final_reconstruction_attempted"] == 8
+    return load_resume_checkpoint(path)
+
+
+def test_resume_plan_reads_saved_config_without_loading_models(tmp_path, monkeypatch, capsys):
+    checkpoint = make_prewrite_checkpoint(tmp_path / "original")
+    monkeypatch.setattr(runner, "load_provider", lambda *args, **kwargs: pytest.fail("resume plan loaded models"))
+    assert runner.main(["--resume-from", str(checkpoint.batch_directory)]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["planned_budget"]["final_generation_calls"] == 16
+    assert plan["planned_budget"]["final_reconstruction_calls"] == 32
+    assert plan["planned_budget"]["public_feature_reads"] == 48
+    assert plan["planned_budget"]["total_reconstruction_forward_calls"] == 36
+    assert plan["imported_counts"]["public_zero_features"] == 12
+
+
+def test_resume_reuses_zero_observations_and_preserves_prior_failures_and_counts(tmp_path):
+    original = tmp_path / "original"
+    checkpoint = make_prewrite_checkpoint(original)
+    original_bytes = {path.relative_to(original): path.read_bytes() for path in original.rglob("*") if path.is_file()}
+    provider = ResumeProvider(config(), checkpoint)
+    output = tmp_path / "continuation"
+    result = runner.execute_measurement(config(), output, provider=provider, resume_from=original)
+    assert all(source["collection_complete"] for source in result["sources"])
+    assert result["actual_calls"]["generation_attempted"] == 16
+    assert result["actual_calls"]["final_reconstruction_attempted"] == 32
+    assert result["actual_calls"]["reconstruction_attempted"] == 36
+    assert result["actual_calls"]["public_feature_reads_attempted"] == 48
+    assert result["cumulative_actual_calls"]["generation_attempted"] == 20
+    assert result["cumulative_actual_calls"]["final_reconstruction_attempted"] == 40
+    assert result["cumulative_actual_calls"]["reconstruction_attempted"] == 48
+    assert result["cumulative_actual_calls"]["public_feature_reads_attempted"] == 60
+    assert result["reused_counts"] == {"source_captures": 4, "zero_generation_images": 4,
+        "zero_reconstruction_images": 8, "public_zero_features": 12, "reader_assets": 1, "rgb_sensitivities": 0}
+    assert all(request["method"] != "zero" for request in provider.reconstruction_requests)
+    assert json.loads((output / "prior_summary.json").read_text()) == checkpoint.prior_summary
+    assert checkpoint.prior_summary["method_summaries"]["joint"]["collected_bit_trials"] == 0
+    assert len(list(output.rglob("rgb_gradient_*.pt"))) == 8
+    assert all((original / relative).read_bytes() == value for relative, value in original_bytes.items())
+    assert result["method_summaries"]["joint"]["expected_bit_trials"] == 8
+
+
+def test_resume_loader_rejects_semantic_changes_but_accepts_explanatory_metadata(tmp_path):
+    checkpoint = make_prewrite_checkpoint(tmp_path / "original")
+    settings = config()
+    settings["purpose"] = "new explanation only"
+    assert load_resume_checkpoint(checkpoint.batch_directory, config=settings).config["purpose"] == settings["purpose"]
+    for section, field, changed in (("reader", "delta", 2), ("reconstruction", "holdout_seed", 42),
+                                     ("write", "relative_l2_budget", 0.02)):
+        settings = config()
+        settings[section][field] = changed
+        with pytest.raises(ValueError, match="changes fixed method fields"):
+            load_resume_checkpoint(checkpoint.batch_directory, config=settings)
+
+
+def test_resume_never_overwrites_original_or_restarts_already_attempted_marked_writes(tmp_path):
+    checkpoint = make_prewrite_checkpoint(tmp_path / "original")
+    with pytest.raises(ValueError, match="original batch"):
+        runner.execute_measurement(config(), checkpoint.batch_directory / "new", resume_from=checkpoint.batch_directory)
+    assert not (checkpoint.batch_directory / "new").exists()
+    complete = tmp_path / "completed"
+    runner.execute_measurement(config(), complete, provider=FakeProvider(config()))
+    with pytest.raises(ValueError, match="pre-write checkpoints only"):
+        load_resume_checkpoint(complete)
+
+
+def test_resume_loader_rejects_missing_or_nonfinite_saved_evidence(tmp_path):
+    checkpoint = make_prewrite_checkpoint(tmp_path / "original")
+    path = checkpoint.batch_directory / "new_source_0/zero/clean.pt"
+    record = torch.load(path, weights_only=True)
+    record["feature"][0] = float("nan")
+    torch.save(record, path)
+    with pytest.raises(ValueError, match="finite"):
+        load_resume_checkpoint(checkpoint.batch_directory)
+
+
+def test_second_prewrite_continuation_carries_cumulative_counts_and_safe_gradient_cache(tmp_path):
+    original = tmp_path / "original"
+    checkpoint = make_prewrite_checkpoint(original)
+    first = tmp_path / "first"
+    result = runner.execute_measurement(config(), first,
+        provider=ResumeProvider(config(), checkpoint, prewrite_only=True), resume_from=original)
+    restored = load_resume_checkpoint(first)
+    assert restored.prior_actual_calls == result["cumulative_actual_calls"]
+    assert restored.reused_counts["rgb_sensitivities"] == 8
+    second = runner.execute_measurement(config(), tmp_path / "second",
+        provider=ResumeProvider(config(), restored, prewrite_only=True, reusable_gradients=False), resume_from=first)
+    assert second["cumulative_actual_calls"]["generation_attempted"] == 4
+    assert second["cumulative_actual_calls"]["final_reconstruction_attempted"] == 8
+    assert second["cumulative_actual_calls"]["reconstruction_attempted"] == 20
+    assert second["cumulative_actual_calls"]["public_feature_reads_attempted"] == 12

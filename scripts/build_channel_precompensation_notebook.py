@@ -16,6 +16,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "notebooks/channel_precompensation_v1_colab.ipynb"
+CONTINUATION_OUTPUT = ROOT / "notebooks/channel_precompensation_v1_continue_colab.ipynb"
 SOURCE_FILES = (
     "configs/channel_precompensation_v1_colab.json",
     "requirements-reconstruction-channel-colab.txt",
@@ -29,6 +30,7 @@ SOURCE_FILES = (
     "src/cegwm/runtime/reconstruction_channel_sd35.py",
     "src/cegwm/runtime/channel_precompensation_sd35.py",
     "src/cegwm/runtime/channel_precompensation_provider.py",
+    "src/cegwm/runtime/channel_precompensation_resume.py",
     "src/cegwm/shared/__init__.py",
     "src/cegwm/shared/prg.py",
     "src/cegwm/shared/keys.py",
@@ -256,8 +258,132 @@ files.download(str(RESULTS_ZIP))
         "colab": {"name": OUTPUT.name, "provenance": []}}, "cells": cells}
 
 
+CONTINUATION_HELPERS = '''
+RESUME_BATCH = RUN_ROOT / "batch"
+CONTINUATION_NAME = "continuation_layout_v2"
+
+
+def run_or_show_continuation(checkout, run_root, payload):
+    run_root = Path(run_root)
+    original = run_root / "batch"
+    if not (original / "config.json").is_file() or not (original / "summary.json").is_file():
+        raise RuntimeError("The original saved batch is required; no zero images will be regenerated.")
+    output = run_root / CONTINUATION_NAME
+    if output.exists():
+        print({"action": "read_only_existing_continuation", "output": str(output)})
+        return read_json(output / "summary.json")
+    metadata_dir = run_root / (CONTINUATION_NAME + "_metadata")
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    (metadata_dir / "source_snapshot.zip").write_bytes(payload)
+    # Keep the original environment/config/source snapshot and failed batch.
+    environment = ensure_runtime(checkout, metadata_dir)
+    command = [sys.executable, "-m", "experiments.run_channel_precompensation_v1",
+               "--resume-from", str(original), "--execute", "--output", str(output)]
+    try:
+        completed = subprocess.run(command, cwd=checkout, env=environment, check=False)
+    except BaseException as error:
+        write_json(metadata_dir / "launch_error.json", {"error": type(error).__name__ + ": " + str(error)})
+        raise
+    if not (output / "summary.json").is_file():
+        raise RuntimeError("Continuation produced no readable summary; original evidence is retained.")
+    summary = read_json(output / "summary.json")
+    print({"runner_exit": completed.returncode, "method_summaries": summary.get("method_summaries", {}),
+           "note": "Only saved zero observations are reused; failed or unreachable writes remain in the denominator."})
+    return summary
+
+
+def package_continuation(config, run_root):
+    run_root = Path(run_root)
+    summary_path = run_root / CONTINUATION_NAME / "summary.json"
+    try:
+        summary = read_json(summary_path) if summary_path.is_file() else {}
+    except (OSError, ValueError) as error:
+        summary = {"read_error": str(error)}
+    original = read_json(run_root / "batch/summary.json")
+    terminal = terminal_counts(summary)
+    rows = {row["source_id"]: row for row in summary.get("sources", [])}
+    report = {"scope": "layout_fix_continuation_of_saved_zero_batch", "config": config,
+              "counts_terminal": terminal,
+              "prior_actual_calls": original.get("actual_calls", {}),
+              "actual_calls": summary.get("actual_calls") if terminal else None,
+              "last_recorded_calls": summary.get("actual_calls", {}),
+              "cumulative_actual_calls": summary.get("cumulative_actual_calls") if terminal else None,
+              "reused_counts": summary.get("reused_counts", {}),
+              "method_summaries": summary.get("method_summaries", {}),
+              "sources": [rows.get(row["source_id"], {"source_id": row["source_id"], "status": "not_observed"})
+                          for row in config["sources"]],
+              "claim": "Engineering continuation; original failure retained; no scientific PASS."}
+    write_json(run_root / (CONTINUATION_NAME + "_summary.json"), report)
+    destination = run_root.parent / (run_root.name + "-continuation-layout-v2-results.zip")
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(run_root.rglob("*")):
+            if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(run_root.resolve()):
+                archive.write(path, Path(run_root.name) / path.relative_to(run_root))
+    return report, destination
+'''
+
+
+def build_continuation_notebook(payload=None):
+    notebook = build_notebook(payload)
+    replacements = {
+        "intro": ("# 预补偿验证：从已保存零臂继续\n\n"
+            "本入口修正写端 Tensor/PIL 预处理的内存布局差异，保留原有一致性门槛、读者、码格、预算、"
+            "四个来源和两个重建种子。质量仍只报告。真实 L4 上的修复效果尚未验证。\n\n"
+            "复用 Drive 中 precompensation-20261108/batch 的 4 个未标记捕获点、12 份零臂 RGB/特征。"
+            "不重新生成基准图或重建零臂；不会覆盖原失败结果。由于旧版本未保存 RGB 梯度，"
+            "本次需补算 8 条 RGB VJP 和 4 次代理重建前向，然后计算尚未执行的潜变量 VJP 与写入。\n\n"
+            "全部可写时新增最多 16 次正式生成、32 次正式重建、48 次公开读出，另有 4 次代理重建"
+            "（新增完整重建前向共 36 次）、4 次源末段前向及 8 次潜变量 VJP。旧调用单独保留并累计。\n\n"
+            "在 Colab 选择 GPU（上次使用 L4），设置 HF_TOKEN 后 Run all。首格仅挂载 Drive。"
+            "已完成或已中断的本次续跑仍只读，不自动再次尝试。\n"),
+        "helpers": HELPERS + CONTINUATION_HELPERS,
+        "prepare_source": '''SOURCE_PAYLOAD = base64.b64decode(SOURCE_BUNDLE_B64)
+CHECKOUT = unpack_source(SOURCE_PAYLOAD, Path(tempfile.mkdtemp(prefix="cegwm-precomp-continue-")) / "source")
+CONFIG = read_json(RESUME_BATCH / "config.json")
+print(json.dumps(CONFIG, indent=2, ensure_ascii=False))
+print({"resume_from": str(RESUME_BATCH), "new_output": str(RUN_ROOT / CONTINUATION_NAME),
+       "quality": "report_only", "regenerate_zero_images": False})
+''',
+        "run_info": ("## 执行剩余步骤\n\n原零臂图像、配置和失败文件保持原样。"
+            "新梯度及失败前诊断逐步保存。若仍有前向不一致，会保留证据并停止相应来源，"
+            "不会放宽门槛、调参、换来源或隐式重试。\n"),
+        "execute": '''try:
+    SUMMARY = run_or_show_continuation(CHECKOUT, RUN_ROOT, SOURCE_PAYLOAD)
+except Exception as error:
+    metadata_dir = RUN_ROOT / (CONTINUATION_NAME + "_metadata")
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    write_json(metadata_dir / "notebook_error.json", {"error": type(error).__name__ + ": " + str(error)})
+    print({"execution_stopped": type(error).__name__ + ": " + str(error), "original_retained": str(RESUME_BATCH)})
+finally:
+    AGGREGATE, RESULTS_ZIP = package_continuation(CONFIG, RUN_ROOT)
+''',
+        "return_info": ("## 汇总与回传\n\n本格仅打包现有文件，包含原失败批次和本次续跑。"
+            "无需重新运行上面的模型格；回传下载的 ZIP 即可。\n"),
+        "package": '''AGGREGATE, RESULTS_ZIP = package_continuation(CONFIG, RUN_ROOT)
+print(json.dumps({"counts_terminal": AGGREGATE["counts_terminal"],
+                  "prior_actual_calls": AGGREGATE["prior_actual_calls"],
+                  "actual_calls": AGGREGATE["actual_calls"],
+                  "cumulative_actual_calls": AGGREGATE["cumulative_actual_calls"],
+                  "reused_counts": AGGREGATE["reused_counts"],
+                  "method_summaries": AGGREGATE["method_summaries"],
+                  "sources": [{"source_id": row["source_id"], "status": row.get("status")}
+                              for row in AGGREGATE["sources"]],
+                  "results_zip": str(RESULTS_ZIP)}, indent=2, ensure_ascii=False))
+from google.colab import files
+files.download(str(RESULTS_ZIP))
+''',
+    }
+    for entry in notebook["cells"]:
+        if entry["id"] in replacements:
+            entry["source"] = replacements[entry["id"]].splitlines(keepends=True)
+    notebook["metadata"]["colab"]["name"] = CONTINUATION_OUTPUT.name
+    return notebook
+
+
 if __name__ == "__main__":
-    notebook = build_notebook()
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(OUTPUT)
+    payload = source_snapshot()
+    for path, notebook in ((OUTPUT, build_notebook(payload)),
+                           (CONTINUATION_OUTPUT, build_continuation_notebook(payload))):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(path)
