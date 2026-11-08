@@ -13,8 +13,11 @@ repairs, the latest run reused all zero observations and saved eight RGB
 sensitivities, then stopped at the source-suffix pixel check. The
 [continuation notebook](notebooks/channel_precompensation_v1_continue_colab.ipynb)
 reuses those observations and sensitivities while repairing omitted scheduler
-`sigmas` device restoration. That latest repair has CPU/fake checks and is not
-yet verified on L4. No bit-recovery result was collected. Quality is report-only.
+`sigmas` device restoration. The user run confirmed both schedule tensors on
+CUDA, but all four sources still failed the pixel check. The adopted next step
+is the [single-source NG1 / NG2 / G diagnostic](docs/channel_suffix_diagnostic_v1.md),
+with its [independent Colab notebook](notebooks/channel_suffix_diagnostic_v1_colab.ipynb).
+No bit-recovery result was collected. Quality is report-only.
 
 The validated method completes the content chain:
 

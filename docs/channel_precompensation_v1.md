@@ -188,16 +188,20 @@ RGB VJP。四源的干净／设计读者普通与代理特征及标量差均为�
 设备，遗漏了 `sigmas`。[Diffusers 0.39 官方 FlowMatch 路径](https://raw.githubusercontent.com/huggingface/diffusers/v0.39.0/src/diffusers/schedulers/scheduling_flow_match_euler_discrete.py)
 的 `set_timesteps` 将两者保留在指定设备；四份真实捕获的 `latent_device` 均为 CUDA。
 修复同时恢复两份调度表的位置，保持 dtype、值和原始检查点字段不变。失败前另外保存
-调度表布局、每步潜变量、VAE 输入和 RGB 差异诊断。此偏差已证，但修复能否消除全部
-L4 像素差异仍需续跑确认，不能由 CPU 检查推定。
+调度表布局、每步潜变量、VAE 输入和 RGB 差异诊断。随后真实续跑已确认两份调度表均
+恢复 CUDA，但四源仍在同一像素检查处停止，差异量级接近修复前；该修复不足以解决
+剩余失配，仍无潜变量 VJP 或标记输出。
 
-当前续跑 notebook 从 `continuation_layout_v2` 读取，写入新的
+这一轮续跑 notebook 从 `continuation_layout_v2` 读取，写入新的
 `continuation_suffix_device_v1`。已经验证 8 份 RGB 梯度符合原缓存条件，因此本次预期
 不新增 RGB VJP 或 SDXL 代理重建。剩余工作是 4 次源末段前向和 8 次潜变量 VJP；
 全部可写时再执行原名册中尚未发生的 16 次标记生成、32 次正式重建、48 次公开读出。
 通用 runner 的保守计划仍包含缓存缺失时的辅助调用上限，当前完整缓存的预期新增值为零。
 累计计数承接上轮 `cumulative_actual_calls`；两个旧批次和全部错误记录保留。
 结果包名称为 `precompensation-20261108-continuation-suffix-device-v1-results.zip`。
+
+用户现已同意先执行[单来源 NG1／NG2／G 三次末段定位](channel_suffix_diagnostic_v1.md)，
+从该结果的捕获状态继续读取，不再执行整轮标记生成或 SDXL；生产像素检查不变。
 
 ## 本地工程验证
 
@@ -230,7 +234,7 @@ python -m pytest -o addopts= \
 
 本地验证包括打包后隔离源码的默认入口、多层假模型的完整反向、实际 dtype、
 普通／代理前向不一致、布局复制的数值和导数、分时装载、计数、检查点恢复和失败保存。
-上述五个测试文件合计 **117 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
+源设备修复交付时，上述五个测试文件合计 **117 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
 及两个 notebook 的 nbformat 验证也通过。本次未执行真实模型或 GPU。
 这不是科学 PASS，也不是完整 OptMark 或多种子 EOT 复现。
 

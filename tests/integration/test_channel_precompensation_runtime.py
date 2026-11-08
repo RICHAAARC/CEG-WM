@@ -609,3 +609,121 @@ def test_source_diagnostics_preserve_original_capture_schema_and_dtype():
     assert diagnostics["zero_rgb_comparison"]["exact_equal"]
     assert tuple(capture.before_state) == state_keys and tuple(capture.scheduler_state) == scheduler_keys
     assert torch.equal(capture.scheduler_state["sigmas"], saved_sigmas)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+def test_trace_ng_ng_g_preserves_inputs_layers_and_never_calls_backward(dtype, monkeypatch):
+    pipe = Source(dtype)
+    capture = runtime.capture_source(pipe, settings())
+    original_latents = capture.before_state["latents"].clone()
+    original_sigma = capture.scheduler_state["sigmas"].clone()
+    original_live_step = pipe.scheduler.step_index
+    original_grad_mode = torch.is_grad_enabled()
+    counters = {}
+    monkeypatch.setattr(torch.autograd, "grad", lambda *args, **kwargs: pytest.fail("trace performed a VJP"))
+    results = [runtime.trace_source_suffix(pipe, capture, grad_enabled=enabled, counters=counters)
+               for enabled in (False, False, True)]
+    for result, enabled in zip(results, (False, False, True)):
+        assert result["metadata"]["leaf_requires_grad"] is True
+        assert result["metadata"]["grad_enabled"] is enabled
+        assert result["metadata"]["execution"]["grad_enabled"] is enabled
+        assert result["metadata"]["decoded_requires_grad"] is enabled
+        assert result["metadata"]["steps"][0]["guided_prediction_requires_grad"] is enabled
+        assert result["metadata"]["scheduler_step_index_before"] == 19
+        assert result["metadata"]["scheduler_step_index_after"] == 20
+        assert result["metadata"]["zero_rgb_comparison"]["exact_equal"]
+        assert result["metadata"]["module_modes"] == {
+            "transformer_training": False, "vae_training": False,
+            "transformer_parameters_require_grad": False, "vae_parameters_require_grad": False}
+        assert torch.equal(result["before_latents"], original_latents)
+        assert result["before_latents"].stride() == original_latents.stride()
+        for name in ("before_latents", "pre_vae_latents", "decoded", "postprocessed_rgb"):
+            tensor = result[name]
+            assert tensor.device.type == "cpu" and tensor.dtype == dtype and not tensor.requires_grad
+            assert torch.equal(tensor, results[0][name])
+        for name in ("guided_prediction", "scheduler_output"):
+            tensor = result["steps"][0][name]
+            assert tensor.device.type == "cpu" and tensor.dtype == dtype and not tensor.requires_grad
+            assert torch.equal(tensor, results[0]["steps"][0][name])
+        assert result["steps"][0]["timestep"].dtype == capture.before_state["timesteps"].dtype
+        assert result["uint8_rgb"].dtype == torch.uint8 and result["uint8_rgb"].shape == (2, 2, 3)
+        assert np.array_equal(result["uint8_rgb"].numpy(), np.asarray(result["image"]))
+    assert results[0]["metadata"]["saved_tensors"]["stable_parameter_cpu_copies"] == 0
+    assert results[2]["metadata"]["saved_tensors"]["stable_parameter_cpu_copies"] > 0
+    assert pipe.scheduler.step_index == original_live_step
+    assert torch.equal(capture.before_state["latents"], original_latents)
+    assert torch.equal(capture.scheduler_state["sigmas"], original_sigma)
+    assert torch.is_grad_enabled() is original_grad_mode
+    assert counters == {"sd35_suffix_forward_calls": 3, "sd35_suffix_denoising_steps": 3,
+                        "sd35_suffix_decode_calls": 3, "sd35_suffix_decode_returned": 3,
+                        "sd35_suffix_forward_returned": 3}
+
+
+def test_trace_keeps_mismatched_rgb_while_production_uses_same_forward_and_still_rejects():
+    pipe = Source(torch.float16)
+    capture = runtime.capture_source(pipe, settings())
+    capture.image = Image.new("RGB", (2, 2), (0, 0, 0))
+    trace = runtime.trace_source_suffix(pipe, capture, grad_enabled=True)
+    assert not trace["metadata"]["zero_rgb_comparison"]["exact_equal"]
+    assert "decoded" in trace and "uint8_rgb" in trace
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError, match="exactly reproduce") as caught:
+        runtime.source_suffix_vjps(pipe, capture, torch.ones(2, 1, 3, 2, 2), counters=counters)
+    partial = caught.value.partial
+    for name in ("before_latents", "pre_vae_latents", "decoded", "postprocessed_rgb", "uint8_rgb"):
+        assert torch.equal(trace[name], partial[name])
+    assert torch.equal(trace["steps"][0]["guided_prediction"], partial["steps"][0]["guided_prediction"])
+    assert counters.get("sd35_suffix_vjp_calls", 0) == 0
+
+
+def test_trace_failure_preserves_prediction_before_failed_scheduler_step(monkeypatch):
+    pipe = Source()
+    capture = runtime.capture_source(pipe, settings())
+    prior_mode = torch.is_grad_enabled()
+
+    def fail_step(*args, **kwargs):
+        raise RuntimeError("fake scheduler execution failure")
+
+    monkeypatch.setattr(Scheduler, "step", fail_step)
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError, match="fake scheduler execution failure") as caught:
+        runtime.trace_source_suffix(pipe, capture, grad_enabled=False, counters=counters)
+    assert caught.value.stage == "source_suffix_trace"
+    partial = caught.value.partial
+    assert partial["before_latents"].device.type == "cpu"
+    assert partial["steps"][0]["guided_prediction"].device.type == "cpu"
+    assert "scheduler_output" not in partial["steps"][0]
+    assert "decoded" not in partial
+    assert partial["metadata"]["grad_enabled"] is False
+    assert torch.is_grad_enabled() is prior_mode
+    assert counters == {"sd35_suffix_forward_calls": 1, "sd35_suffix_denoising_steps": 1}
+
+
+def test_trace_failure_preserves_pre_vae_latents_before_decode_error(monkeypatch):
+    pipe = Source()
+    capture = runtime.capture_source(pipe, settings())
+
+    def fail_decode(*args, **kwargs):
+        raise RuntimeError("fake VAE decode failure")
+
+    monkeypatch.setattr(pipe.vae, "decode", fail_decode)
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError, match="fake VAE decode failure") as caught:
+        runtime.trace_source_suffix(pipe, capture, grad_enabled=True, counters=counters)
+    assert "scheduler_output" in caught.value.partial["steps"][0]
+    assert "pre_vae_latents" in caught.value.partial and "decoded" not in caught.value.partial
+    assert counters["sd35_suffix_decode_calls"] == 1
+    assert counters.get("sd35_suffix_decode_returned", 0) == 0
+    assert counters.get("sd35_suffix_vjp_calls", 0) == 0
+
+
+@pytest.mark.parametrize("invalid", ["mode", "steps"])
+def test_trace_rejects_unplanned_mode_or_suffix_before_forward(invalid):
+    pipe = Source()
+    capture = runtime.capture_source(pipe, settings())
+    if invalid == "steps":
+        capture.remaining_steps = (18, 19)
+    counters = {}
+    with pytest.raises(runtime.RuntimeStageError):
+        runtime.trace_source_suffix(pipe, capture, grad_enabled=0 if invalid == "mode" else True, counters=counters)
+    assert counters == {}

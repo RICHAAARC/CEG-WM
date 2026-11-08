@@ -511,92 +511,126 @@ def _restore_source_schedule_devices(scheduler, state, diagnostics):
         diagnostics["tensors"][name]["restored"] = _tensor_layout(restored)
 
 
+def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial):
+    """The production suffix, shared verbatim by VJP and forward-only tracing.
+
+    The caller controls torch grad mode and the CPU saved-tensor context. The
+    input leaf always requires grad, including when that context disables it.
+    Only detached snapshots are added to ``partial``; the returned tensors keep
+    the live graph for the production VJP caller.
+    """
+    _require_frozen(pipeline.transformer, "SD3 transformer")
+    _require_frozen(pipeline.vae, "SD3 VAE")
+    state = capture.before_state
+    if state["joint_attention_kwargs"] is not None:
+        raise ValueError("suffix adapter does not support joint attention extensions")
+    device = next(pipeline.transformer.parameters()).device
+    latent = state["latents"].to(device).detach().requires_grad_(True)
+    diagnostics.update(
+        before_latents=_tensor_layout(latent), latent_leaf_dtype=str(latent.dtype),
+        forward_latent_dtype=str(latent.dtype), leaf_requires_grad=latent.requires_grad,
+        grad_enabled=torch.is_grad_enabled(), execution=_execution_metadata(), steps=[],
+        module_modes={"transformer_training": pipeline.transformer.training,
+                      "vae_training": pipeline.vae.training,
+                      "transformer_parameters_require_grad": any(p.requires_grad for p in pipeline.transformer.parameters()),
+                      "vae_parameters_require_grad": any(p.requires_grad for p in pipeline.vae.parameters())},
+    )
+    partial["before_latents"] = _cpu(latent)
+    partial["suffix_before_latents"] = partial["before_latents"]  # Existing failure artifact name.
+    partial["steps"] = []
+    partial["scheduler_step_outputs"] = []
+    scheduler = deepcopy(pipeline.scheduler)
+    scheduler.__dict__.clear()
+    scheduler.__dict__.update(deepcopy(capture.scheduler_state))
+    _restore_source_schedule_devices(scheduler, state, diagnostics.setdefault("schedule_restore", {}))
+    if scheduler.step_index != state["next_step_index"]:
+        raise ValueError("captured scheduler index is inconsistent")
+    diagnostics["scheduler_step_index_before"] = scheduler.step_index
+    prompt = state["prompt_embeds"].to(device)
+    pooled = state["pooled_prompt_embeds"].to(device)
+    diagnostics["prompt_embeds"] = _tensor_layout(prompt)
+    diagnostics["pooled_prompt_embeds"] = _tensor_layout(pooled)
+    _count(counters, "sd35_suffix_forward_calls")
+    current = latent
+    for index in capture.remaining_steps:
+        t = scheduler.timesteps[index]
+        inputs = torch.cat([current] * 2) if state["do_classifier_free_guidance"] else current
+        _count(counters, "sd35_suffix_denoising_steps")
+        prediction = pipeline.transformer(hidden_states=inputs, timestep=t.expand(inputs.shape[0]),
+            encoder_hidden_states=prompt, pooled_projections=pooled,
+            joint_attention_kwargs=None, return_dict=False)[0]
+        if state["do_classifier_free_guidance"]:
+            unconditional, conditional = prediction.chunk(2)
+            prediction = unconditional + state["guidance_scale"] * (conditional - unconditional)
+        step = {"index": index, "timestep": _cpu(t), "guided_prediction": _cpu(prediction)}
+        partial["steps"].append(step)
+        step_metadata = {"index": index, "timestep": float(t), "transformer_input": _tensor_layout(inputs),
+                         "guided_prediction": _tensor_layout(prediction),
+                         "guided_prediction_requires_grad": prediction.requires_grad}
+        diagnostics["steps"].append(step_metadata)
+        current = scheduler.step(prediction, t, current, return_dict=False)[0]
+        step["scheduler_output"] = _cpu(current)
+        partial["scheduler_step_outputs"].append({"index": index, "latents": step["scheduler_output"]})
+        step_metadata.update(scheduler_output=_tensor_layout(current),
+                             scheduler_output_requires_grad=current.requires_grad)
+    diagnostics["scheduler_step_index_after"] = scheduler.step_index
+    _count(counters, "sd35_suffix_decode_calls")
+    pre_vae = current / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
+    partial["pre_vae_latents"] = _cpu(pre_vae)
+    diagnostics["pre_vae_latents"] = _tensor_layout(pre_vae)
+    decoded = pipeline.vae.decode(pre_vae, return_dict=False)[0]
+    partial["decoded"] = _cpu(decoded)
+    diagnostics["decoded"] = _tensor_layout(decoded)
+    diagnostics["decoded_requires_grad"] = decoded.requires_grad
+    _count(counters, "sd35_suffix_decode_returned")
+    rgb = pipeline.image_processor.postprocess(decoded, output_type="pt")
+    partial["postprocessed_rgb"] = _cpu(rgb)
+    diagnostics["postprocessed_rgb"] = _tensor_layout(rgb)
+    diagnostics["postprocessed_rgb_requires_grad"] = rgb.requires_grad
+    proxy = quantized_rgb_proxy(rgb)
+    image = _to_image(proxy)
+    partial["image"] = image
+    actual_pixels, reference_pixels = np.asarray(image), np.asarray(capture.image)
+    partial["uint8_rgb"] = torch.from_numpy(np.array(image, copy=True))
+    _count(counters, "sd35_suffix_forward_returned")
+    comparison = {"exact_equal": np.array_equal(actual_pixels, reference_pixels),
+                  "shape_equal": actual_pixels.shape == reference_pixels.shape,
+                  "actual_shape": list(actual_pixels.shape), "reference_shape": list(reference_pixels.shape)}
+    if comparison["shape_equal"]:
+        difference = actual_pixels.astype(np.int16) - reference_pixels.astype(np.int16)
+        comparison.update(changed_components=int(np.count_nonzero(difference)),
+                          total_components=int(difference.size),
+                          max_abs_uint8_difference=int(np.abs(difference).max()),
+                          mean_abs_uint8_difference=float(np.abs(difference).mean()))
+    diagnostics["zero_rgb_comparison"] = comparison
+    return latent, proxy
+
+
 def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.Tensor,
                        *, counters=None, diagnostics=None) -> torch.Tensor:
     """One captured official SD3 suffix forward, multiple independent VJPs.
 
     Cotangents are write-side auxiliaries; they are never supplied to the reader.
-    A pixel-exact ordinary RGB match to full zero replay is mandatory. Optional
-    ``diagnostics`` records dtype/zero counts without treating a finite zero
-    floating-point proxy gradient as evidence of a zero true channel response.
+    A pixel-exact ordinary RGB match to full zero replay remains mandatory.
     """
     counters = _ledger(counters)
     diagnostics = {} if diagnostics is None else diagnostics
-    partial = {"before_state": capture.before_state, "source_suffix_diagnostics": diagnostics,
-               "scheduler_step_outputs": []}
+    partial = {"before_state": capture.before_state, "source_suffix_diagnostics": diagnostics}
     try:
-        _require_frozen(pipeline.transformer, "SD3 transformer")
-        _require_frozen(pipeline.vae, "SD3 VAE")
         _finite(rgb_cotangents, "RGB cotangents")
         if rgb_cotangents.ndim != 5 or len(rgb_cotangents) < 1:
             raise ValueError("RGB cotangents must have shape [K,1,3,H,W]")
-        state = capture.before_state
-        if state["joint_attention_kwargs"] is not None:
-            raise ValueError("suffix adapter does not support joint attention extensions")
-        device = next(pipeline.transformer.parameters()).device
-        latent = state["latents"].to(device).detach().requires_grad_(True)
-        diagnostics["before_latents"] = _tensor_layout(latent)
-        partial["suffix_before_latents"] = _cpu(latent)
-        diagnostics.update(latent_leaf_dtype=str(latent.dtype), forward_latent_dtype=str(latent.dtype),
-                           returned_gradient_dtype="torch.float32", gradient_rows=[],
+        diagnostics.update(returned_gradient_dtype="torch.float32", gradient_rows=[],
                            zero_gradient_interpretation=(
                                "A finite zero proxy gradient is not proof of zero channel sensitivity; "
                                "internal floating-point backward casts can underflow or round."))
-        scheduler = deepcopy(pipeline.scheduler)
-        scheduler.__dict__.clear()
-        scheduler.__dict__.update(deepcopy(capture.scheduler_state))
-        _restore_source_schedule_devices(scheduler, state, diagnostics.setdefault("schedule_restore", {}))
-        if scheduler.step_index != state["next_step_index"]:
-            raise ValueError("captured scheduler index is inconsistent")
-        prompt = state["prompt_embeds"].to(device)
-        pooled = state["pooled_prompt_embeds"].to(device)
         gradients = []
         with torch.enable_grad(), _cpu_saved_tensors(
                 stable_modules=(pipeline.transformer, pipeline.vae)) as saved_tensor_stats:
             diagnostics["saved_tensors"] = saved_tensor_stats
-            diagnostics["execution"] = _execution_metadata()
-            diagnostics["steps"] = []
-            _count(counters, "sd35_suffix_forward_calls")
-            current = latent
-            for index in capture.remaining_steps:
-                t = scheduler.timesteps[index]
-                inputs = torch.cat([current] * 2) if state["do_classifier_free_guidance"] else current
-                _count(counters, "sd35_suffix_denoising_steps")
-                prediction = pipeline.transformer(hidden_states=inputs, timestep=t.expand(inputs.shape[0]),
-                    encoder_hidden_states=prompt, pooled_projections=pooled,
-                    joint_attention_kwargs=None, return_dict=False)[0]
-                if state["do_classifier_free_guidance"]:
-                    unconditional, conditional = prediction.chunk(2)
-                    prediction = unconditional + state["guidance_scale"] * (conditional - unconditional)
-                current = scheduler.step(prediction, t, current, return_dict=False)[0]
-                partial["scheduler_step_outputs"].append({"index": index, "latents": _cpu(current)})
-                diagnostics["steps"].append({"index": index, "timestep": float(t),
-                                              "guided_prediction": _tensor_layout(prediction),
-                                              "scheduler_output": _tensor_layout(current)})
-            _count(counters, "sd35_suffix_decode_calls")
-            pre_vae = current / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
-            partial["pre_vae_latents"] = _cpu(pre_vae)
-            diagnostics["pre_vae_latents"] = _tensor_layout(pre_vae)
-            decoded = pipeline.vae.decode(pre_vae, return_dict=False)[0]
-            _count(counters, "sd35_suffix_decode_returned")
-            rgb = pipeline.image_processor.postprocess(decoded, output_type="pt")
-            proxy = quantized_rgb_proxy(rgb)
-            image = _to_image(proxy)
-            partial["image"] = image
-            _count(counters, "sd35_suffix_forward_returned")
-            actual_pixels, reference_pixels = np.asarray(image), np.asarray(capture.image)
-            equal = np.array_equal(actual_pixels, reference_pixels)
-            comparison = {"exact_equal": equal, "shape_equal": actual_pixels.shape == reference_pixels.shape,
-                          "actual_shape": list(actual_pixels.shape), "reference_shape": list(reference_pixels.shape)}
-            if comparison["shape_equal"]:
-                difference = actual_pixels.astype(np.int16) - reference_pixels.astype(np.int16)
-                comparison.update(changed_components=int(np.count_nonzero(difference)),
-                                  total_components=int(difference.size),
-                                  max_abs_uint8_difference=int(np.abs(difference).max()),
-                                  mean_abs_uint8_difference=float(np.abs(difference).mean()))
-            diagnostics["zero_rgb_comparison"] = comparison
-            diagnostics["postprocessed_rgb"] = _tensor_layout(rgb)
-            if not equal:
+            latent, proxy = _source_suffix_forward(pipeline, capture, counters=counters,
+                                                    diagnostics=diagnostics, partial=partial)
+            if not diagnostics["zero_rgb_comparison"]["exact_equal"]:
                 raise ValueError("gradient suffix RGB does not exactly reproduce captured zero RGB")
             if tuple(rgb_cotangents.shape[1:]) != tuple(proxy.shape):
                 raise ValueError("RGB cotangent shape differs from final RGB")
@@ -619,6 +653,33 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
         return torch.stack(gradients)
     except Exception as error:
         raise RuntimeStageError("source_suffix_vjp", error, partial, counters) from error
+
+
+def trace_source_suffix(pipeline, capture: SourceCapture, *, grad_enabled: bool, counters=None) -> dict[str, Any]:
+    """Trace exactly the captured step-19 suffix, with no VJP or match gate.
+
+    NG/G use the same leaf.requires_grad=True, saved-tensor policy, frozen models,
+    captured input values/layout/dtype and freshly restored scheduler. Only torch
+    grad mode changes. The ordinary zero-image comparison is diagnostic here;
+    production ``source_suffix_vjps`` retains its strict pixel-exact guard.
+    """
+    counters = _ledger(counters)
+    diagnostics = {}
+    partial = {"before_state": capture.before_state, "metadata": diagnostics}
+    try:
+        if type(grad_enabled) is not bool:
+            raise TypeError("grad_enabled must be an explicit bool")
+        if tuple(capture.remaining_steps) != (19,) or capture.before_state["next_step_index"] != 19:
+            raise ValueError("diagnostic trace requires exactly the captured step-19 suffix")
+        with torch.set_grad_enabled(grad_enabled), _cpu_saved_tensors(
+                stable_modules=(pipeline.transformer, pipeline.vae)) as saved_tensor_stats:
+            diagnostics["saved_tensors"] = saved_tensor_stats
+            _source_suffix_forward(pipeline, capture, counters=counters,
+                                    diagnostics=diagnostics, partial=partial)
+        return {name: partial[name] for name in ("image", "uint8_rgb", "before_latents", "steps",
+                                                 "pre_vae_latents", "decoded", "postprocessed_rgb", "metadata")}
+    except Exception as error:
+        raise RuntimeStageError("source_suffix_trace", error, partial, counters) from error
 
 
 def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings, seed: int,
