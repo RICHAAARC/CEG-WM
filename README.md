@@ -4,6 +4,13 @@ CEG-WM is a method-first research repository for keyed watermark attribution in 
 
 ## Current scope
 
+The current research candidate on `dev/reconstruction-channel-v1` is
+[one-shot two-channel precompensation](docs/channel_precompensation_v1.md),
+following the retained reconstruction-direction mismatch measurement. Its
+[self-contained Colab notebook](notebooks/channel_precompensation_v1_colab.ipynb)
+is prepared for user execution. Local CPU/fake checks are engineering evidence;
+the new candidate has not been run on real models. Quality is report-only.
+
 The validated method completes the content chain:
 
 - simultaneous content-adaptive LF+HF embedding;

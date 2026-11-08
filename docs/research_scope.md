@@ -1,5 +1,18 @@
 # Research Scope
 
+## Adopted one-shot precompensation candidate (2026-11-08)
+
+After the real single-direction measurement showed reconstruction-direction
+mismatch, the user adopted a separate fixed-reader, host-conditioned write-side
+candidate. It uses clean/design-reconstruction proxy sensitivities to solve two
+fixed QIM inner-cell constraints once, with a matched-information gradient-ray
+control. Four new sources, both bits, and a separate reconstruction seed are the
+minimal falsification roster. The ordinary-RGB reader remains blind. Quality is
+reported without an eligibility gate, as explicitly selected by the user.
+Implementation and CPU/static/fake checks do not establish actual one-bit
+transmission, attribution, FPR, or general regeneration robustness. See
+`channel_precompensation_v1.md`. The stage-A code and results below are retained.
+
 ## Reconstruction-channel candidate (2026-11-08)
 
 The adopted next work on `dev/reconstruction-channel-v1` is a stage-A measurement prototype: compare no-write and signed probes from the same pre-injection state using complete same-seed generation replays, then read only ordinary RGB images before and after reconstruction. Measure actual-dtype perturbations, finite-amplitude response, nonlinear residual, host drift, and image quality. This does not establish a shared subspace, bit transmission, watermark presence, attribution, or FPR. See `reconstruction_channel_v1.md` for the candidate boundary and invocation.
