@@ -1,5 +1,11 @@
 # Research Scope
 
+## Reconstruction-channel candidate (2026-11-08)
+
+The adopted next work on `dev/reconstruction-channel-v1` is a stage-A measurement prototype: compare no-write and signed probes from the same pre-injection state using complete same-seed generation replays, then read only ordinary RGB images before and after reconstruction. Measure actual-dtype perturbations, finite-amplitude response, nonlinear residual, host drift, and image quality. This does not establish a shared subspace, bit transmission, watermark presence, attribution, or FPR. See `reconstruction_channel_v1.md` for the candidate boundary and invocation.
+
+The historical LF/HF content-chain specification below remains the baseline. The new path does not require its carrier decomposition, allocation, fusion score, or threshold. The blind image-only reading boundary remains in force. No geometry module or full watermark encoder is added in this stage.
+
 ## Research question
 
 Can a generated image carry a key-specific content watermark whose evidence remains detectable from the ordinary image through the frozen content-adaptive simultaneous LF+HF embedding and its clean joint statistic?

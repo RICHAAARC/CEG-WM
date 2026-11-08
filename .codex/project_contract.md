@@ -2,6 +2,9 @@
 
 ## Current authorization
 
+- Candidate branch `dev/reconstruction-channel-v1`: on 2026-11-08 the user adopted advancement of the stage-A measurement prototype. Implement controlled full same-seed replay, ordinary-RGB feature reading, and channel measurements, with CPU/static/fake validation. Model execution needs an explicitly selected run configuration and is not performed by engineering checks. Shared-map fitting and watermark coding remain later stages.
+- The user subsequently selected the fixed four-source Colab delivery and authorized committing and pushing this candidate branch. The notebook obtains published candidate code automatically; real model/GPU/Colab execution remains user-run. This does not authorize merging into main or expanding the measurement roster.
+- The LF/HF status below describes the retained historical method, not the new candidate.
 - Project stage: `content_chain_method_complete`.
 - The calibrated weighted-joint method and its independent 8/8/32/32 stability strata complete the content chain.
 - This stage does not claim geometry completion, fixed-FPR calibration, attack robustness, paper readiness, or completion of the full CEG-WM system.

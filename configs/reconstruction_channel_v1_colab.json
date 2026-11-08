@@ -1,0 +1,55 @@
+{
+  "measurement_id": "reconstruction-channel-v1-20261108",
+  "purpose": "Four-source single-direction finite-response diagnostic, not a watermark benchmark",
+  "generation": {
+    "model_id": "stabilityai/stable-diffusion-3.5-medium",
+    "revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+    "dtype": "float16",
+    "device": "cuda",
+    "memory_mode": "model_cpu_offload",
+    "height": 512,
+    "width": 512,
+    "num_inference_steps": 20,
+    "guidance_scale": 7.0,
+    "injection_step": 18
+  },
+  "probe": {
+    "seed": 2026110800,
+    "relative_l2": 0.01
+  },
+  "feature": "full_vae_mode",
+  "reconstruction": {
+    "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+    "revision": "462165984030d82259a11f4367a4eed129e94a7b",
+    "dtype": "float16",
+    "device": "cuda",
+    "memory_mode": "model_cpu_offload",
+    "strength": 0.3,
+    "num_inference_steps": 20,
+    "guidance_scale": 1.0,
+    "prompt": "",
+    "seeds": [2026110810]
+  },
+  "sources": [
+    {
+      "source_id": "source01_plain_object",
+      "prompt": "A studio photograph of a matte white ceramic bowl on a plain light gray table, soft diffuse lighting, minimal composition, no text.",
+      "seed": 2026110801
+    },
+    {
+      "source_id": "source02_fur_fabric",
+      "prompt": "A close-up photograph of a tabby cat sitting on a patterned woven blanket, detailed fur and fabric textures, natural window light, no text.",
+      "seed": 2026110802
+    },
+    {
+      "source_id": "source03_natural_scene",
+      "prompt": "A landscape photograph of a mountain lake reflecting pine trees under a cloudy sky, detailed natural textures, no text.",
+      "seed": 2026110803
+    },
+    {
+      "source_id": "source04_street_structure",
+      "prompt": "A street photograph of a red bicycle beside a brick wall and a metal fence, strong straight lines, late afternoon light, no text.",
+      "seed": 2026110804
+    }
+  ]
+}
