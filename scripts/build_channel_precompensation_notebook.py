@@ -261,9 +261,25 @@ files.download(str(RESULTS_ZIP))
 CONTINUATION_HELPERS = '''
 RESUME_BATCH = RUN_ROOT / "batch"
 CONTINUATION_NAME = "continuation_layout_v2"
+CONTINUATION_LAUNCH_METADATA = None
+
+
+def new_continuation_metadata(run_root):
+    root = Path(run_root) / (CONTINUATION_NAME + "_metadata")
+    root.mkdir(parents=True, exist_ok=True)
+    index = 1
+    while True:
+        destination = root / ("launch_" + str(index).zfill(4))
+        try:
+            destination.mkdir()
+            return destination
+        except FileExistsError:
+            index += 1
 
 
 def run_or_show_continuation(checkout, run_root, payload):
+    global CONTINUATION_LAUNCH_METADATA
+    CONTINUATION_LAUNCH_METADATA = None
     run_root = Path(run_root)
     original = run_root / "batch"
     if not (original / "config.json").is_file() or not (original / "summary.json").is_file():
@@ -272,22 +288,38 @@ def run_or_show_continuation(checkout, run_root, payload):
     if output.exists():
         print({"action": "read_only_existing_continuation", "output": str(output)})
         return read_json(output / "summary.json")
-    metadata_dir = run_root / (CONTINUATION_NAME + "_metadata")
-    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir = new_continuation_metadata(run_root)
+    CONTINUATION_LAUNCH_METADATA = metadata_dir
     (metadata_dir / "source_snapshot.zip").write_bytes(payload)
     # Keep the original environment/config/source snapshot and failed batch.
     environment = ensure_runtime(checkout, metadata_dir)
-    command = [sys.executable, "-m", "experiments.run_channel_precompensation_v1",
+    command = [sys.executable, "-u", "-m", "experiments.run_channel_precompensation_v1",
                "--resume-from", str(original), "--execute", "--output", str(output)]
+    log_path = metadata_dir / "runner.log"
     try:
-        completed = subprocess.run(command, cwd=checkout, env=environment, check=False)
+        with log_path.open("w", encoding="utf-8") as runner_log:
+            with subprocess.Popen(command, cwd=checkout, env=environment,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  text=True, encoding="utf-8", errors="replace", bufsize=1) as process:
+                for line in process.stdout:
+                    print(line, end="", flush=True)
+                    runner_log.write(line)
+                    runner_log.flush()
+                returncode = process.wait()
+        write_json(metadata_dir / "runner_process.json",
+                   {"returncode": returncode, "log_path": str(log_path)})
     except BaseException as error:
-        write_json(metadata_dir / "launch_error.json", {"error": type(error).__name__ + ": " + str(error)})
+        write_json(metadata_dir / "launch_error.json",
+                   {"error": type(error).__name__ + ": " + str(error), "log_path": str(log_path)})
         raise
-    if not (output / "summary.json").is_file():
-        raise RuntimeError("Continuation produced no readable summary; original evidence is retained.")
-    summary = read_json(output / "summary.json")
-    print({"runner_exit": completed.returncode, "method_summaries": summary.get("method_summaries", {}),
+    try:
+        summary = read_json(output / "summary.json")
+    except (OSError, ValueError) as error:
+        raise RuntimeError("Continuation produced no readable summary; runner return code "
+                           + str(returncode) + "; log: " + str(log_path)
+                           + "; original evidence is retained.") from error
+    print({"runner_exit": returncode, "runner_log": str(log_path),
+           "method_summaries": summary.get("method_summaries", {}),
            "note": "Only saved zero observations are reused; failed or unreachable writes remain in the denominator."})
     return summary
 
@@ -329,6 +361,9 @@ def build_continuation_notebook(payload=None):
         "intro": ("# 预补偿验证：从已保存零臂继续\n\n"
             "本入口修正写端 Tensor/PIL 预处理的内存布局差异，保留原有一致性门槛、读者、码格、预算、"
             "四个来源和两个重建种子。质量仍只报告。真实 L4 上的修复效果尚未验证。\n\n"
+            "另包含 PyTorch 2.14 对历史 checkpoint 的兼容读取修复，启动输出与报错完整存入 ZIP；"
+            "不重新设计方法或放宽前向门槛。模型执行目录仍为 continuation_layout_v2，"
+            "metadata 下的 launch 编号只区分保存的启动诊断。\n\n"
             "复用 Drive 中 precompensation-20261108/batch 的 4 个未标记捕获点、12 份零臂 RGB/特征。"
             "不重新生成基准图或重建零臂；不会覆盖原失败结果。由于旧版本未保存 RGB 梯度，"
             "本次需补算 8 条 RGB VJP 和 4 次代理重建前向，然后计算尚未执行的潜变量 VJP 与写入。\n\n"
@@ -350,8 +385,7 @@ print({"resume_from": str(RESUME_BATCH), "new_output": str(RUN_ROOT / CONTINUATI
         "execute": '''try:
     SUMMARY = run_or_show_continuation(CHECKOUT, RUN_ROOT, SOURCE_PAYLOAD)
 except Exception as error:
-    metadata_dir = RUN_ROOT / (CONTINUATION_NAME + "_metadata")
-    metadata_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir = CONTINUATION_LAUNCH_METADATA or new_continuation_metadata(RUN_ROOT)
     write_json(metadata_dir / "notebook_error.json", {"error": type(error).__name__ + ": " + str(error)})
     print({"execution_stopped": type(error).__name__ + ": " + str(error), "original_retained": str(RESUME_BATCH)})
 finally:

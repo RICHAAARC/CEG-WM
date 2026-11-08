@@ -149,6 +149,30 @@ Diffusers 0.39.0 的 PIL 预处理给出 channels-last 布局，Tensor 入口经
 此入口只恢复写入前检查点；若已有标记写入尝试，不会静默重做。已有本次续跑目录
 仍只读，不自动再次运行。打包下载包含原失败批次和本次新增结果。
 
+### 续跑启动兼容修复
+
+用户回传的 `precompensation-20261108-continuation-layout-v2-results.zip` 包含原批次和
+新增环境／源码／外层错误，但没有 `continuation_layout_v2/` 内的批次文件。
+`actual_calls: null` 表示没有终态计数，不能替换成零；`not_observed` 也不是方法负结果。
+原子进程错误未被旧 notebook 保存，且页面已关闭，不能恢复其原始 traceback。
+
+已在原始捕获文件上复现一个足以阻断启动的兼容问题：
+[PyTorch 2.14.1 受限加载器](https://raw.githubusercontent.com/pytorch/pytorch/v2.14.1/torch/_weights_only_unpickler.py)
+仅允许向确切的 dict、OrderedDict 或 Counter 类型执行 SETITEMS。
+历史检查点中的 Diffusers FrozenDict 即使在 safe_globals 内仍会被拒绝。
+该读取发生在新输出目录创建和模型加载之前；但缺少原 console，不能宣称这是本次唯一错误。
+
+修复只将历史 FrozenDict 的序列化全局名映射到返回 OrderedDict 的安全构造函数；
+仍使用 `weights_only=True`，无不安全加载回退。配置的键值、顺序和属性保持不变，
+潜变量和其他张量不转换，原文件不修改。复现使用官方 2.14.1 受限加载逻辑，
+仅借用本地 2.5 的内置 Torch 类型注册表以适配本地版本；它不是完整 2.14.1／L4 执行。
+四份真实 baseline 均完成上述核验：旧读取触发该错误，修复后完整记录无数值差异，
+配置属性和 FP16 dtype 均保留。
+
+启动 stdout/stderr 现实时显示并保存至 metadata 内独立的 `launch_000N/runner.log`，
+连同返回码、当次源码和环境一起打包。编号只用于保留启动诊断，不改变模型输出目录，
+也不允许对已有模型批次自动重试。旧启动错误和源码记录保持原样。
+
 ## 本地工程验证
 
 在当前 checkout 中：
@@ -180,7 +204,7 @@ python -m pytest -o addopts= \
 
 本地验证包括打包后隔离源码的默认入口、多层假模型的完整反向、实际 dtype、
 普通／代理前向不一致、布局复制的数值和导数、分时装载、计数、检查点恢复和失败保存。
-上述五个测试文件合计 **109 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
+上述五个测试文件合计 **113 项 CPU/static/fake 检查通过**；原始结果 ZIP 的只读恢复加载
 及两个 notebook 的 nbformat 验证也通过。本次未执行真实模型或 GPU。
 这不是科学 PASS，也不是完整 OptMark 或多种子 EOT 复现。
 

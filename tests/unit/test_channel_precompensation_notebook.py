@@ -129,6 +129,21 @@ def continuation_namespace():
     return scope
 
 
+class FakeRunnerProcess:
+    def __init__(self, returncode, output=""):
+        self.returncode = returncode
+        self.stdout = io.StringIO(output)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stdout.close()
+
+    def wait(self):
+        return self.returncode
+
+
 def test_continuation_notebook_is_unexecuted_and_contains_current_source():
     expected = build_continuation_notebook()
     assert json.loads(CONTINUATION_OUTPUT.read_text()) == expected
@@ -150,10 +165,18 @@ def test_continuation_launch_reuses_original_batch_without_overwriting_metadata(
                                                   "actual_calls": {"final_generation_attempted": 4}})
     (root / "environment.json").write_text("original environment")
     (root / "source_snapshot.zip").write_bytes(b"original code")
+    metadata_root = root / (scope["CONTINUATION_NAME"] + "_metadata")
+    metadata_root.mkdir()
+    (metadata_root / "source_snapshot.zip").write_bytes(b"earlier continuation source")
+    (metadata_root / "environment.json").write_text("earlier continuation environment")
+    (metadata_root / "notebook_error.json").write_text("earlier continuation error")
+    previous_launch = metadata_root / "launch_0001"
+    previous_launch.mkdir()
+    (previous_launch / "runner.log").write_text("retained early launch error")
     before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     calls = []
     def ensure(checkout, metadata_dir):
-        assert metadata_dir != root and metadata_dir.parent == root
+        assert metadata_dir == metadata_root / "launch_0002"
         scope["write_json"](metadata_dir / "environment.json", {"kind": "continuation"})
         return {"HF_TOKEN": "fake-only"}
     def run(command, **kwargs):
@@ -164,13 +187,59 @@ def test_continuation_launch_reuses_original_batch_without_overwriting_metadata(
         assert output != original and not output.exists()
         output.mkdir()
         scope["write_json"](output / "summary.json", {"stages": {"cleanup": "complete"}, "sources": []})
-        return types.SimpleNamespace(returncode=1)
+        return FakeRunnerProcess(1, "retained numerical outcome\n")
     scope["ensure_runtime"] = ensure
-    scope["subprocess"] = types.SimpleNamespace(run=run)
+    scope["subprocess"] = types.SimpleNamespace(Popen=run, PIPE=-1, STDOUT=-2)
     scope["run_or_show_continuation"](checkout, root, source_snapshot())
     assert len(calls) == 1
+    metadata = metadata_root / "launch_0002"
+    assert scope["read_json"](metadata / "runner_process.json")["returncode"] == 1
+    assert (metadata / "runner.log").read_text() == "retained numerical outcome\n"
     for relative, content in before.items():
         assert (root / relative).read_bytes() == content
+
+
+def test_continuation_early_exit_preserves_both_streams_and_returncode(tmp_path, capsys):
+    import subprocess
+    import sys
+
+    scope = continuation_namespace()
+    root = tmp_path / "run"
+    original = root / "batch"
+    original.mkdir(parents=True)
+    scope["write_json"](original / "config.json", config())
+    scope["write_json"](original / "summary.json", {"actual_calls": {"final_generation_attempted": 4}})
+    scope["ensure_runtime"] = lambda *args: {}
+    calls = []
+
+    def launch(command, **kwargs):
+        calls.append(command)
+        assert command[1:4] == ["-u", "-m", "experiments.run_channel_precompensation_v1"]
+        # A tiny subprocess exercises stdout/stderr capture; no project runner,
+        # model import, GPU work or network call is executed.
+        return subprocess.Popen(
+            [sys.executable, "-u", "-c",
+             "import sys; print('checkpoint loading'); print('saved failure detail', file=sys.stderr); sys.exit(7)"],
+            **kwargs,
+        )
+
+    scope["subprocess"] = types.SimpleNamespace(Popen=launch, PIPE=subprocess.PIPE, STDOUT=subprocess.STDOUT)
+    metadata = root / (scope["CONTINUATION_NAME"] + "_metadata") / "launch_0001"
+    with pytest.raises(RuntimeError, match="runner return code 7") as caught:
+        scope["run_or_show_continuation"](tmp_path, root, b"retained source snapshot")
+    assert len(calls) == 1
+    assert str(metadata / "runner.log") in str(caught.value)
+    log = (metadata / "runner.log").read_text()
+    assert "checkpoint loading" in log and "saved failure detail" in log
+    visible = capsys.readouterr().out
+    assert "checkpoint loading" in visible and "saved failure detail" in visible
+    assert scope["read_json"](metadata / "runner_process.json") == {
+        "returncode": 7, "log_path": str(metadata / "runner.log")}
+    assert not (root / scope["CONTINUATION_NAME"]).exists()
+    report, archive = scope["package_continuation"](config(), root)
+    assert report["counts_terminal"] is False and report["actual_calls"] is None
+    with zipfile.ZipFile(archive) as saved:
+        assert saved.read("run/" + str(metadata.relative_to(root)) + "/runner.log").decode() == log
 
 
 def test_existing_interrupted_continuation_is_not_rerun_and_keeps_prior_counts(tmp_path):

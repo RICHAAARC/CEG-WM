@@ -11,6 +11,8 @@ following the retained reconstruction-direction mismatch measurement. Its
 has been run by the user; that run stopped at ordinary/proxy forward checks,
 before any marked write. The [continuation notebook](notebooks/channel_precompensation_v1_continue_colab.ipynb)
 reuses its saved zero observations after a writer preprocessing-layout repair.
+It also restores legacy scheduler metadata under PyTorch 2.14's restricted
+checkpoint loader and retains startup logs, including early failures.
 The repair has CPU/fake checks; its effect on the real L4 execution remains
 unverified. No bit-recovery result was collected. Quality is report-only.
 

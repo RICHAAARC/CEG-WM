@@ -8,6 +8,7 @@ missing. The runner always writes continuation evidence to a new directory.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 import json
 import math
@@ -55,12 +56,28 @@ def validate_same_method(saved: dict[str, Any], requested: dict[str, Any]) -> No
         raise ValueError("resume configuration changes fixed method fields: " + ", ".join(differences))
 
 
-def _load_tensor_record(path: Path) -> dict[str, Any]:
-    # The captured scheduler contains Diffusers' known FrozenDict config type.
-    # No arbitrary globals or weights_only=False fallback are accepted.
-    from diffusers.configuration_utils import FrozenDict
+def _legacy_frozen_dict_metadata(*args, **kwargs):
+    """Restore legacy config data as a safe built-in mapping, without model code.
 
-    with torch.serialization.safe_globals([FrozenDict]):
+    Torch 2.14 permits SETITEMS only on exact dict/OrderedDict/Counter types,
+    including when the original mapping subclass was explicitly allowlisted.
+    OrderedDict also accepts pickle BUILD's attribute state, preserving the
+    scheduler's ``config.stochastic_sampling`` and other attribute reads.
+    """
+    return OrderedDict(*args, **kwargs)
+
+
+# A callable registered under the one historical pickle name works with both
+# old safe_globals APIs and newer (callable, name) APIs. No arbitrary checkpoint
+# global is resolved, and the callable can only construct OrderedDict metadata.
+_legacy_frozen_dict_metadata.__module__ = "diffusers.configuration_utils"
+_legacy_frozen_dict_metadata.__name__ = "FrozenDict"
+_legacy_frozen_dict_metadata.__qualname__ = "FrozenDict"
+
+
+def _load_tensor_record(path: Path) -> dict[str, Any]:
+    # No unrestricted pickle fallback, model construction, or tensor conversion.
+    with torch.serialization.safe_globals([_legacy_frozen_dict_metadata]):
         value = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(value, dict):
         raise ValueError(f"checkpoint {path.name} must contain a dictionary")

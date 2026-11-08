@@ -1,6 +1,9 @@
 """CPU fake-provider checks for planning, fixed denominators, and saved failures."""
 
+from collections import OrderedDict
 import json
+import pickle
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -8,7 +11,7 @@ from PIL import Image
 
 from experiments import run_channel_precompensation_v1 as runner
 from cegwm.channel_precompensation import ReaderSpec, make_reader
-from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
+from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint, _load_tensor_record
 
 pytestmark = pytest.mark.unit
 
@@ -457,3 +460,61 @@ def test_second_prewrite_continuation_carries_cumulative_counts_and_safe_gradien
     assert second["cumulative_actual_calls"]["final_reconstruction_attempted"] == 8
     assert second["cumulative_actual_calls"]["reconstruction_attempted"] == 20
     assert second["cumulative_actual_calls"]["public_feature_reads_attempted"] == 12
+
+
+def test_legacy_frozen_config_reads_as_exact_ordered_dict_with_scheduler_attributes(tmp_path):
+    FrozenDict = pytest.importorskip("diffusers.configuration_utils").FrozenDict
+    path = tmp_path / "legacy.pt"
+    original = FrozenDict(stochastic_sampling=False, shift=1.25, use_dynamic_shifting=False)
+    latent = torch.tensor([0.125, -0.25], dtype=torch.float16)
+    torch.save({"scheduler": {"_internal_dict": original}, "latent": latent}, path)
+    allowed_before = list(torch.serialization.get_safe_globals())
+    restored = _load_tensor_record(path)
+    metadata = restored["scheduler"]["_internal_dict"]
+    # The exact built-in type is necessary for Torch 2.14's SETITEMS guard.
+    assert type(metadata) is OrderedDict
+    assert dict(metadata) == dict(original)
+    assert vars(metadata) == vars(original)
+    assert metadata.stochastic_sampling is False and metadata.shift == 1.25
+    assert torch.equal(restored["latent"], latent) and restored["latent"].dtype == latent.dtype
+    assert torch.serialization.get_safe_globals() == allowed_before
+    # Re-saving a continuation uses the compatible built-in type directly.
+    torch.save(restored, tmp_path / "continued.pt")
+    again = torch.load(tmp_path / "continued.pt", map_location="cpu", weights_only=True)
+    assert vars(again["scheduler"]["_internal_dict"]) == vars(original)
+
+
+def test_all_four_legacy_scheduler_configs_load_without_model_or_zero_reexecution(tmp_path):
+    FrozenDict = pytest.importorskip("diffusers.configuration_utils").FrozenDict
+    checkpoint = make_prewrite_checkpoint(tmp_path / "original")
+    before = {}
+    for identifier in checkpoint.baselines:
+        path = checkpoint.batch_directory / identifier / "writer/baseline.pt"
+        record = torch.load(path, map_location="cpu", weights_only=True)
+        metadata = FrozenDict(stochastic_sampling=False, shift=1.0, solver_order=1)
+        record["scheduler_state"]["_internal_dict"] = metadata
+        before[identifier] = record["before_state"]["latents"].clone()
+        torch.save(record, path)
+    restored = load_resume_checkpoint(checkpoint.batch_directory)
+    assert restored.prior_actual_calls == checkpoint.prior_actual_calls
+    assert restored.reused_counts["public_zero_features"] == 12
+    for identifier, record in restored.baselines.items():
+        metadata = record["scheduler_state"]["_internal_dict"]
+        assert type(metadata) is OrderedDict and metadata.stochastic_sampling is False
+        assert torch.equal(record["before_state"]["latents"], before[identifier])
+
+
+def test_safe_legacy_metadata_reader_never_falls_back_for_unknown_globals(tmp_path, monkeypatch):
+    path = tmp_path / "unsupported.pt"
+    torch.save({"unknown": SimpleNamespace(value=1)}, path)
+    original_load = torch.load
+    calls = []
+
+    def checked_load(*args, **kwargs):
+        calls.append(kwargs.get("weights_only"))
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", checked_load)
+    with pytest.raises(pickle.UnpicklingError, match="Unsupported global"):
+        _load_tensor_record(path)
+    assert calls == [True]
