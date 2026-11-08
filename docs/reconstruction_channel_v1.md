@@ -9,6 +9,8 @@ The concrete four-source user-run Colab configuration is
 `configs/reconstruction_channel_v1_colab.json`. Its complete fixed roster, probe
 amplitude, model revisions, generation parameters and reconstruction seed are
 explicit; there is no additional preflight source outside this roster.
+See [the Colab instructions](reconstruction_channel_v1_colab.md) for the published
+Run-all notebook, which obtains the fixed candidate code without file uploads.
 
 ## Mechanism
 
