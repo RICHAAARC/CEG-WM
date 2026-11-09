@@ -511,7 +511,8 @@ def _restore_source_schedule_devices(scheduler, state, diagnostics):
         diagnostics["tensors"][name]["restored"] = _tensor_layout(restored)
 
 
-def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial, delta=None):
+def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial, delta=None,
+                           after_step=None):
     """The production suffix, shared verbatim by VJP and forward-only tracing.
 
     The caller controls torch grad mode and the CPU saved-tensor context. The
@@ -585,6 +586,8 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial,
         partial["scheduler_step_outputs"].append({"index": index, "latents": step["scheduler_output"]})
         step_metadata.update(scheduler_output=_tensor_layout(current),
                              scheduler_output_requires_grad=current.requires_grad)
+        if after_step is not None:
+            after_step(index, current, scheduler)
     diagnostics["scheduler_step_index_after"] = scheduler.step_index
     _count(counters, "sd35_suffix_decode_calls")
     pre_vae = current / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor

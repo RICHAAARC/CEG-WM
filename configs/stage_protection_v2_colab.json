@@ -1,0 +1,67 @@
+{
+  "measurement_id": "stage-protection-v2-20261109",
+  "purpose": "Two-content dual-bit stage-protection V2 canary; P1 engineering, user-selected P2 only",
+  "generation": {
+    "model_id": "stabilityai/stable-diffusion-3.5-medium",
+    "revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+    "dtype": "float16",
+    "device": "cuda",
+    "memory_mode": "model_cpu_offload",
+    "height": 512,
+    "width": 512,
+    "num_inference_steps": 20,
+    "guidance_scale": 7.0,
+    "injection_step": 8
+  },
+  "feature": "full_vae_mode",
+  "reader": {
+    "key_seed": 2026110830,
+    "delta": 1.0,
+    "inner_fraction": 0.25
+  },
+  "write": {
+    "relative_l2_budget": 0.01
+  },
+  "quality": {
+    "minimum_psnr_db": null
+  },
+  "reconstruction": {
+    "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+    "revision": "462165984030d82259a11f4367a4eed129e94a7b",
+    "dtype": "float16",
+    "device": "cuda",
+    "memory_mode": "model_cpu_offload",
+    "strength": 0.3,
+    "num_inference_steps": 20,
+    "guidance_scale": 1.0,
+    "prompt": "",
+    "design_seed": 2026110920,
+    "holdout_seed": 2026110921
+  },
+  "sources": [
+    {
+      "source_id": "source06_fur_knit",
+      "prompt": "A close-up photograph of a golden retriever resting on a blue knitted cushion, detailed fur and wool stitches, soft daylight, no text.",
+      "seed": 2026110911
+    },
+    {
+      "source_id": "source07_coastal_scene",
+      "prompt": "A landscape photograph of rocky coastal cliffs above turquoise ocean waves, green grass, overcast sky, detailed natural textures, no text.",
+      "seed": 2026110912
+    }
+  ],
+  "stages": {
+    "arms": [
+      "A",
+      "B",
+      "C"
+    ],
+    "early_step": 8,
+    "late_step": 18,
+    "bits": [
+      0,
+      1
+    ],
+    "early_updates": 2
+  }
+}

@@ -2,6 +2,25 @@
 
 ## Current authorization
 
+- On 2026-11-09 the user subsequently authorized committing/pushing V2 and a
+  validation notebook that executes the fixed P2 with Run all, without a run
+  checkbox, source upload or file edits. GPU metadata, fixed output, credential
+  reuse and durable stdout/stderr are part of this delivery. The source audit
+  chat owns final review, commit/push and remote-link verification; this
+  implementation chat prepares and CPU-checks the change without model runs.
+  This supersedes the earlier notebook plan-only/publication restriction for
+  V2, but does not authorize merge or automatic P3/P4.
+
+- On 2026-11-09 the user subsequently authorized implementation of the audited
+  cross-generation-stage evidence-protection V2, in this separate implementation
+  chat. Implement P1 and the fixed two-content/dual-bit P2 entry with CPU/static/
+  fake checks and a Colab notebook. This supersedes older method-scope wording
+  for this independent path. Actual model/GPU execution remains user-selected;
+  this handoff does not authorize push, merge, P3 or P4. Authority:
+  `D:/CodexData/research-audits/ceg-full-plan-review-20261109/PLAN_V2.txt`
+  and `AUDIT_DECISION.txt`, plus the subsequent implementation instruction.
+  See `docs/stage_protection_v2.md`. Preserve the old one-shot and LF/HF paths.
+
 - On 2026-11-09 the user explicitly prioritized actual method validation over further forward-only diagnosis, and authorized implementation, targeted checks, candidate-branch push and a directly runnable Colab notebook. The fixed first source now uses a new runtime suffix zero as its baseline; recompute both RGB sensitivities at that image and use the same suffix for latent VJPs and all four joint/gradient × bit0/bit1 writes. Historical pixel mismatch is diagnostic only, not an admission gate. Keep the fixed blind reader, code cells, one-shot solves, actual-dtype budget, quality reporting only, and the four-source roster (other three unmeasured in this scope). Preserve all previous evidence; do not reuse sensitivities at a different basepoint. Actual writes also supply the finite-budget response check. No extra search, new source, full-prefix generation or model execution by the agent. This supersedes the preceding diagnostic-only restriction for this new entry.
 
 - After the source-suffix device repair still failed the pixel check, the user explicitly approved a separate single-source diagnostic on 2026-11-08: select the existing first source (source05), run NG1 / NG2 / G suffix forwards in that fixed order with independently restored scheduler state, and compare recorded stages. Implement and publish its user-run Colab notebook with CPU/static/fake checks. This authorizes no full generation, SDXL reconstruction, public feature read, VJP, watermark write, parameter search, or relaxation of the production pixel-exact guard. Real execution remains user-run; preserve all prior evidence.

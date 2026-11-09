@@ -1,5 +1,20 @@
 # Research Scope
 
+## Cross-generation-stage evidence protection V2 (2026-11-09)
+
+The user authorized the separately audited V2 implementation and engineering
+checks. Two fixed contents branch independently to bit0/bit1, with an early
+write after step8, a freshly rendered common late reference after step18, and
+minimum-norm A/B/C proposals under separate actual-cast stage budgets. The
+retained full-VAE/Rademacher/QIM reader is unchanged. This is a one-bit mechanism
+canary, not attribution, FPR, scientific success or established novelty.
+The old single-source and one-shot evidence below remains historical evidence.
+The user subsequently authorized publication and a notebook whose Run all
+directly executes fixed P2 with preset settings. The source audit chat owns
+commit/push and remote-link verification. Implementation checks do not run real
+models, and P3/P4 remain separate.
+See `stage_protection_v2.md` for the frozen protocol mapping and run entry.
+
 ## Single-source method validation (2026-11-09)
 
 The user adopted direct method validation after NG1=NG2=G matched internally but
