@@ -511,7 +511,7 @@ def _restore_source_schedule_devices(scheduler, state, diagnostics):
         diagnostics["tensors"][name]["restored"] = _tensor_layout(restored)
 
 
-def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial):
+def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial, delta=None):
     """The production suffix, shared verbatim by VJP and forward-only tracing.
 
     The caller controls torch grad mode and the CPU saved-tensor context. The
@@ -525,7 +525,19 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial)
     if state["joint_attention_kwargs"] is not None:
         raise ValueError("suffix adapter does not support joint attention extensions")
     device = next(pipeline.transformer.parameters()).device
-    latent = state["latents"].to(device).detach().requires_grad_(True)
+    original = state["latents"].to(device).detach()
+    if delta is None:
+        updated = original
+    else:
+        _finite(delta, "requested suffix write")
+        if delta.shape != original.shape:
+            raise ValueError("requested suffix write shape differs from captured latent")
+        updated = (original.float() + delta.to(device=device, dtype=torch.float32)).to(original.dtype)
+        _finite(updated, "actual-dtype suffix write")
+    latent = updated.detach().requires_grad_(True)
+    if delta is not None:
+        partial["actual_delta"] = _cpu(updated.double() - original.double())
+        partial["after_latents"] = _cpu(updated)
     diagnostics.update(
         before_latents=_tensor_layout(latent), latent_leaf_dtype=str(latent.dtype),
         forward_latent_dtype=str(latent.dtype), leaf_requires_grad=latent.requires_grad,
@@ -590,9 +602,14 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial)
     proxy = quantized_rgb_proxy(rgb)
     image = _to_image(proxy)
     partial["image"] = image
-    actual_pixels, reference_pixels = np.asarray(image), np.asarray(capture.image)
     partial["uint8_rgb"] = torch.from_numpy(np.array(image, copy=True))
     _count(counters, "sd35_suffix_forward_returned")
+    diagnostics["zero_rgb_comparison"] = _rgb_comparison(image, capture.image)
+    return latent, proxy
+
+
+def _rgb_comparison(image, reference):
+    actual_pixels, reference_pixels = np.asarray(image), np.asarray(reference)
     comparison = {"exact_equal": np.array_equal(actual_pixels, reference_pixels),
                   "shape_equal": actual_pixels.shape == reference_pixels.shape,
                   "actual_shape": list(actual_pixels.shape), "reference_shape": list(reference_pixels.shape)}
@@ -602,21 +619,74 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial)
                           total_components=int(difference.size),
                           max_abs_uint8_difference=int(np.abs(difference).max()),
                           mean_abs_uint8_difference=float(np.abs(difference).mean()))
-    diagnostics["zero_rgb_comparison"] = comparison
-    return latent, proxy
+    return comparison
+
+
+def replay_suffix_write(pipeline, capture: SourceCapture, delta=None, *, counters=None,
+                        diagnostics=None) -> WriteReplay:
+    """Render a zero or write from the fixed capture through the same suffix.
+
+    ``delta=None`` defines a new runtime suffix baseline, independently of the
+    retained historical full-generation image. Writes use FP32 addition and the
+    captured latent dtype, without clipping, budget repair, retries or a full
+    generation. This is a distinct synthesis path from ``replay_write``.
+    """
+    counters = _ledger(counters)
+    diagnostics = {} if diagnostics is None else diagnostics
+    diagnostics["write_path"] = "fixed_capture_suffix"
+    partial = {"before_state": capture.before_state, "source_suffix_diagnostics": diagnostics}
+    try:
+        _count(counters, "sd35_suffix_write_calls")
+        with torch.no_grad(), _cpu_saved_tensors(
+                stable_modules=(pipeline.transformer, pipeline.vae)) as saved_tensor_stats:
+            diagnostics["saved_tensors"] = saved_tensor_stats
+            _source_suffix_forward(pipeline, capture, counters=counters,
+                                   diagnostics=diagnostics, partial=partial, delta=delta)
+        original = capture.before_state["latents"].detach().cpu()
+        after = partial["before_latents"]
+        actual = after.double() - original.double()
+        original_norm = float(torch.linalg.vector_norm(original.double()))
+        actual_norm = float(torch.linalg.vector_norm(actual))
+        metrics = {"latent_dtype": str(after.dtype),
+                   "requested_l2": 0.0 if delta is None else float(torch.linalg.vector_norm(delta.detach().double())),
+                   "actual_l2": actual_norm,
+                   "actual_relative_l2": actual_norm / original_norm if original_norm else None,
+                   "nonzero_elements": int(torch.count_nonzero(actual))}
+        partial.update(actual_delta=actual, after_latents=after, injection_metrics=metrics)
+        diagnostics["injection_metrics"] = metrics
+        _count(counters, "sd35_suffix_write_returned")
+        return WriteReplay(partial["image"], capture.before_state, actual, after,
+                           metrics, capture.remaining_steps)
+    except Exception as error:
+        raise RuntimeStageError("source_suffix_write", error, partial, counters) from error
 
 
 def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.Tensor,
-                       *, counters=None, diagnostics=None) -> torch.Tensor:
+                       *, counters=None, diagnostics=None, basepoint_mode="historical_capture",
+                       reference_image=None) -> torch.Tensor:
     """One captured official SD3 suffix forward, multiple independent VJPs.
 
     Cotangents are write-side auxiliaries; they are never supplied to the reader.
-    A pixel-exact ordinary RGB match to full zero replay remains mandatory.
+    By default, the historical full zero image remains the exact-match gate.
+    Explicit ``runtime_suffix`` mode instead requires the independently rendered
+    current suffix zero image. Both modes retain an exact reference check before
+    backward; a caller must derive its cotangents at the selected RGB basepoint.
     """
     counters = _ledger(counters)
     diagnostics = {} if diagnostics is None else diagnostics
     partial = {"before_state": capture.before_state, "source_suffix_diagnostics": diagnostics}
     try:
+        if basepoint_mode not in ("historical_capture", "runtime_suffix"):
+            raise ValueError("unknown suffix basepoint mode")
+        if basepoint_mode == "historical_capture":
+            if reference_image is not None:
+                raise ValueError("historical capture mode does not accept a replacement reference")
+            reference = capture.image
+        else:
+            if reference_image is None:
+                raise ValueError("runtime suffix mode requires its independently rendered zero reference")
+            reference = require_ordinary_rgb_image(reference_image)
+        diagnostics["basepoint_mode"] = basepoint_mode
         _finite(rgb_cotangents, "RGB cotangents")
         if rgb_cotangents.ndim != 5 or len(rgb_cotangents) < 1:
             raise ValueError("RGB cotangents must have shape [K,1,3,H,W]")
@@ -630,8 +700,11 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
             diagnostics["saved_tensors"] = saved_tensor_stats
             latent, proxy = _source_suffix_forward(pipeline, capture, counters=counters,
                                                     diagnostics=diagnostics, partial=partial)
-            if not diagnostics["zero_rgb_comparison"]["exact_equal"]:
-                raise ValueError("gradient suffix RGB does not exactly reproduce captured zero RGB")
+            comparison = _rgb_comparison(partial["image"], reference)
+            diagnostics["basepoint_rgb_comparison"] = comparison
+            if not comparison["exact_equal"]:
+                description = "captured zero RGB" if basepoint_mode == "historical_capture" else "runtime suffix zero RGB"
+                raise ValueError(f"gradient suffix RGB does not exactly reproduce {description}")
             if tuple(rgb_cotangents.shape[1:]) != tuple(proxy.shape):
                 raise ValueError("RGB cotangent shape differs from final RGB")
             for index, cotangent in enumerate(rgb_cotangents):

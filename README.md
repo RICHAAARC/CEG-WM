@@ -1,5 +1,14 @@
 # CEG-WM
 
+## Single-source method validation (2026-11-09)
+
+[Run the fixed source05 method trial in Colab](https://colab.research.google.com/github/RICHAAARC/CEG-WM/blob/dev/reconstruction-channel-v1/notebooks/channel_precompensation_single_source_v1_colab.ipynb).
+It reuses the existing Drive capture, builds a coherent current suffix baseline,
+and attempts joint/gradient writes for both bits with ordinary RGB evaluation.
+Historical image mismatch is diagnostic only; gradients are recomputed at the new
+basepoint. See [method and fixed budget](docs/channel_precompensation_single_source_v1.md).
+Engineering delivery only; actual model execution remains user-run.
+
 CEG-WM is a method-first research repository for keyed watermark attribution in generated images.
 
 ## Current scope

@@ -286,6 +286,132 @@ def test_suffix_forward_mismatch_is_not_silently_used():
     assert counts.get("sd35_suffix_vjp_calls", 0) == 0
 
 
+def test_runtime_suffix_basepoint_is_explicit_independent_and_shares_two_vjps():
+    pipe = Source()
+    capture = runtime.capture_source(pipe, settings())
+    historical = Image.new("RGB", (2, 2), (0, 0, 0))
+    capture.image = historical
+    zero_counts, zero_diagnostics = {}, {}
+    zero = runtime.replay_suffix_write(pipe, capture, counters=zero_counts, diagnostics=zero_diagnostics)
+    assert capture.image is historical
+    assert not zero_diagnostics["zero_rgb_comparison"]["exact_equal"]
+    assert torch.equal(zero.after_latents, capture.before_state["latents"])
+    assert zero.actual_delta.dtype == torch.float64
+    assert torch.count_nonzero(zero.actual_delta) == 0
+    assert zero.injection_metrics["requested_l2"] == zero.injection_metrics["actual_l2"] == 0
+    assert zero_counts["sd35_suffix_write_calls"] == zero_counts["sd35_suffix_write_returned"] == 1
+    assert zero_counts["sd35_suffix_forward_calls"] == 1
+    assert zero_counts.get("sd35_full_generation_calls", 0) == 0
+
+    cotangents = torch.stack([torch.ones(1, 3, 2, 2), torch.full((1, 3, 2, 2), 0.3)])
+    counts, diagnostics = {}, {}
+    gradients = runtime.source_suffix_vjps(pipe, capture, cotangents, counters=counts,
+        diagnostics=diagnostics, basepoint_mode="runtime_suffix", reference_image=zero.image)
+    # Analytic derivative of this fake last Euler step and tanh decoder;
+    # uint8 rounding alone has the adopted straight-through derivative.
+    x = capture.before_state["latents"]
+    predicted = x * 0.2 + (0.1 + 7 * (0.3 - 0.1)) * 0.01
+    final = x - predicted * 0.05
+    expected = 0.5 * 0.8 / 1.3 * (1 - torch.tanh((final / 1.3 + 0.04) * 0.8).square()) * 0.99
+    torch.testing.assert_close(gradients[0], expected)
+    torch.testing.assert_close(gradients[1], expected * 0.3)
+    assert diagnostics["basepoint_mode"] == "runtime_suffix"
+    assert diagnostics["basepoint_rgb_comparison"]["exact_equal"]
+    assert not diagnostics["zero_rgb_comparison"]["exact_equal"]
+    assert counts["sd35_suffix_forward_calls"] == counts["sd35_suffix_decode_calls"] == 1
+    assert counts["sd35_suffix_vjp_calls"] == counts["sd35_suffix_vjp_returned"] == 2
+    with pytest.raises(runtime.RuntimeStageError, match="captured zero RGB"):
+        runtime.source_suffix_vjps(pipe, capture, cotangents)
+
+
+@pytest.mark.parametrize("case", ["unknown_mode", "missing_reference", "legacy_replacement", "wrong_reference"])
+def test_suffix_basepoint_errors_cannot_silently_bypass_reference(case):
+    pipe = Source()
+    capture = runtime.capture_source(pipe, settings())
+    kwargs = {"basepoint_mode": "runtime_suffix"}
+    if case == "unknown_mode":
+        kwargs["basepoint_mode"] = "skip_check"
+    elif case == "legacy_replacement":
+        kwargs = {"reference_image": capture.image}
+    elif case == "wrong_reference":
+        kwargs["reference_image"] = Image.new("RGB", (2, 2), (0, 0, 0))
+    counts, diagnostics = {}, {}
+    with pytest.raises(runtime.RuntimeStageError) as caught:
+        runtime.source_suffix_vjps(pipe, capture, torch.ones(2, 1, 3, 2, 2),
+                                  counters=counts, diagnostics=diagnostics, **kwargs)
+    assert counts.get("sd35_suffix_vjp_calls", 0) == 0
+    assert counts.get("sd35_suffix_forward_calls", 0) == (case == "wrong_reference")
+    if case == "wrong_reference":
+        assert "image" in caught.value.partial
+        assert not diagnostics["basepoint_rgb_comparison"]["exact_equal"]
+
+
+@pytest.mark.parametrize("amplitude", [1e-10, 0.015])
+def test_suffix_write_matches_same_cast_full_replay_without_full_call_or_backward(monkeypatch, amplitude):
+    pipe = Source(torch.float16)
+    capture = runtime.capture_source(pipe, settings())
+    before = deepcopy(capture.before_state)
+    saved_scheduler = deepcopy(capture.scheduler_state)
+    request = torch.full_like(before["latents"], amplitude, dtype=torch.float32)
+    full = runtime.replay_write(pipe, settings(), capture, request)
+    transform = pipe.transformer.forward
+    calls = []
+
+    def forward(*args, **kwargs):
+        calls.append(torch.is_grad_enabled())
+        return transform(*args, **kwargs)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("suffix writer must not use full generation or backward")
+
+    monkeypatch.setattr(pipe.transformer, "forward", forward)
+    monkeypatch.setattr(Source, "__call__", forbidden)
+    monkeypatch.setattr(torch.autograd, "grad", forbidden)
+    counts, diagnostics = {}, {}
+    written = runtime.replay_suffix_write(pipe, capture, request, counters=counts, diagnostics=diagnostics)
+    assert calls == [False]
+    assert np.array_equal(np.asarray(written.image), np.asarray(full.image))
+    assert torch.equal(written.actual_delta, full.actual_delta)
+    assert torch.equal(written.after_latents, full.after_latents)
+    assert written.after_latents.dtype == torch.float16
+    assert written.actual_delta.dtype == torch.float64
+    assert written.before_state is capture.before_state
+    assert runtime._different_paths(before, capture.before_state) == []
+    assert runtime._different_paths(saved_scheduler, capture.scheduler_state) == []
+    assert pipe.scheduler.step_index == 20
+    assert written.remaining_steps == (19,)
+    assert counts["sd35_suffix_denoising_steps"] == 1
+    assert counts["sd35_suffix_write_calls"] == counts["sd35_suffix_write_returned"] == 1
+    assert counts.get("sd35_full_generation_calls", 0) == counts.get("sd35_suffix_vjp_calls", 0) == 0
+    assert diagnostics["write_path"] == "fixed_capture_suffix"
+    if amplitude == 1e-10:
+        assert written.injection_metrics["requested_l2"] > 0
+        assert written.injection_metrics["actual_l2"] == 0
+    else:
+        assert written.injection_metrics["actual_l2"] > 0
+
+
+def test_suffix_write_failure_retains_actual_cast_without_retry(monkeypatch):
+    pipe = Source(torch.float16)
+    capture = runtime.capture_source(pipe, settings())
+    request = torch.full_like(capture.before_state["latents"], 0.015, dtype=torch.float32)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("one failing transformer")
+
+    monkeypatch.setattr(pipe.transformer, "forward", broken)
+    counts = {}
+    with pytest.raises(runtime.RuntimeStageError, match="one failing transformer") as caught:
+        runtime.replay_suffix_write(pipe, capture, request, counters=counts)
+    assert caught.value.stage == "source_suffix_write"
+    partial = caught.value.partial
+    expected = (capture.before_state["latents"].float() + request).half()
+    assert torch.equal(partial["after_latents"], expected)
+    assert torch.equal(partial["actual_delta"], expected.double() - capture.before_state["latents"].double())
+    assert counts["sd35_suffix_write_calls"] == counts["sd35_suffix_forward_calls"] == 1
+    assert counts.get("sd35_suffix_write_returned", 0) == 0
+
+
 @pytest.mark.parametrize("mode", ["detached", "failure", "hook", "unfrozen"])
 def test_invalid_reconstruction_graph_fails_with_partial_and_physical_counts(mode):
     pipe, vae, counts = Reconstruction(detach=mode=="detached", fail_at=1 if mode=="failure" else None), VAE(), {}

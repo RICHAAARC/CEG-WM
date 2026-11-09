@@ -203,7 +203,8 @@ def _finalize_trials(summary, config):
     summary["method_summaries"] = aggregates
 
 
-def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, resume_from=None) -> dict[str, Any]:
+def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, resume_from=None,
+                        source_scope=None) -> dict[str, Any]:
     """Collect one create-only batch with a staged real or injected fake provider.
 
     Provider methods yield dictionaries, allowing each observation/failure to be
@@ -220,6 +221,13 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, 
         from cegwm.runtime.channel_precompensation_resume import load_resume_checkpoint
         checkpoint = load_resume_checkpoint(resume_from, config=config)
     plan = describe_plan(config, resume_checkpoint=checkpoint)
+    selected_sources = config["sources"]
+    if source_scope is not None:
+        if source_scope != "runtime_suffix_single":
+            raise ValueError("unknown explicit source scope")
+        from experiments.run_channel_precompensation_single_source_v1 import describe_single_plan
+        plan = describe_single_plan(config, checkpoint=checkpoint)
+        selected_sources = config["sources"][:1]
     output = Path(output)
     if checkpoint is not None and output.resolve().is_relative_to(checkpoint.batch_directory):
         raise ValueError("continuation output must not modify the original batch directory")
@@ -230,13 +238,16 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, 
              "zero": {"clean": None, "reconstruction": {str(seed): None for seed in seeds}},
              "writer": {"status": "not_attempted"},
              "trials": {method: {str(bit): _trial(method, bit, seeds) for bit in BITS} for method in METHODS}}
-            for source in config["sources"]]
+            for source in selected_sources]
     indexed = {row["source_id"]: row for row in rows}
     contexts = {identifier: {} for identifier in indexed}
     summary = {"mode": "measurement", "planned_budget": plan["planned_budget"],
                "fixed_denominators": plan["fixed_denominators"], "sources": rows, "actual_calls": {},
                "stages": {name: "not_started" for name in ("setup", "prepare", "solve", "generate", "reconstruct", "cleanup")},
                "claim": plan["claim"]}
+    if source_scope is not None:
+        summary.update(scope=source_scope, full_roster=plan["full_roster"],
+                       runtime_basepoint="new_suffix_zero", counts_terminal=False)
     if checkpoint is not None:
         summary.update(resume_from=str(checkpoint.batch_directory),
             prior_actual_calls=dict(checkpoint.prior_actual_calls), imported_counts=dict(checkpoint.reused_counts),
@@ -304,14 +315,18 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, 
         summary["stages"]["setup"] = "started"
         persist()
         if provider is None:
-            provider = (load_provider(config) if checkpoint is None else
-                        load_provider(config, resume_from=resume_from, resume_checkpoint=checkpoint))
+            if source_scope == "runtime_suffix_single":
+                from cegwm.runtime.channel_precompensation_single_source import RuntimeSuffixSingleSourceProvider
+                provider = RuntimeSuffixSingleSourceProvider(config, resume_checkpoint=checkpoint)
+            else:
+                provider = (load_provider(config) if checkpoint is None else
+                            load_provider(config, resume_from=resume_from, resume_checkpoint=checkpoint))
         summary["stages"]["setup"] = "complete"
         summary["stages"]["prepare"] = "started"
         persist()
         prepared_events = set()
         try:
-            for event in provider.prepare_sources(config["sources"]):
+            for event in provider.prepare_sources(selected_sources):
                 identifier, kind = event["source_id"], event["kind"]
                 if identifier not in indexed:
                     raise ValueError("provider emitted an unplanned source")
@@ -330,6 +345,10 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, 
                         torch.save({name: value for name, value in event.items() if name not in {"image", "feature"}},
                                    writer_dir / "baseline.pt")
                         row["status"] = "prepared_baseline"
+                        if event.get("diagnostics"):
+                            row["baseline_diagnostics"] = _jsonable(event["diagnostics"])
+                        if checkpoint is not None and event.get("capture_reused"):
+                            summary["reused_counts"]["source_captures"] += 1
                         if checkpoint is not None and event.get("reused") and row["zero"]["clean"]["status"] == "OBSERVED":
                             summary["reused_counts"]["source_captures"] += 1
                             summary["reused_counts"]["zero_generation_images"] += 1
@@ -540,6 +559,10 @@ def execute_measurement(config: dict[str, Any], output: Path, *, provider=None, 
         else:
             summary["stages"]["cleanup"] = "no_provider"
         _finalize_trials(summary, config)
+        if source_scope is not None:
+            terminal = "started" not in summary["stages"].values()
+            summary["counts_terminal"] = terminal
+            summary["new_counts_status"] = "terminal" if terminal else "interrupted"
         for row in rows:
             all_collected = all(row["trials"][method][str(bit)]["collection_complete"] for method in METHODS for bit in BITS)
             zero_collected = all(item and item.get("status") == "OBSERVED"

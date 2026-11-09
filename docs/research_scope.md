@@ -1,5 +1,17 @@
 # Research Scope
 
+## Single-source method validation (2026-11-09)
+
+The user adopted direct method validation after NG1=NG2=G matched internally but
+all differed from the historical zero image. Use the first existing source and
+its captured pre-write state. A fresh suffix zero, new clean/design RGB
+sensitivities, latent VJPs, and four marked suffix outputs share the same
+runtime map. Historical pixel mismatch is diagnostic only. Predicted versus
+observed readout changes are assessed on those actual writes without extra
+probes or retuning. This is a scoped execution of the existing candidate, not a
+new reader or new carrier. The other three sources remain unmeasured here.
+See `channel_precompensation_single_source_v1.md`.
+
 ## Adopted one-shot precompensation candidate (2026-11-08)
 
 After the real single-direction measurement showed reconstruction-direction
