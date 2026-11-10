@@ -1,5 +1,8 @@
 # Fixed continuation after the import-only failure — 2026-11-10
 
+The later early2 interruption uses the [isolated-worker/disk continuation](stage_protection_v2_isolated_resume.md),
+which retains this entry's completed early1 results and spent costs.
+
 Use [stage_protection_v2_compat_resume_colab.ipynb](../notebooks/stage_protection_v2_compat_resume_colab.ipynb)
 with Run all for the observed private-PyTorch-symbol failure. First cell only
 mounts Drive; source, output path and mode are fixed. No upload, manual path or

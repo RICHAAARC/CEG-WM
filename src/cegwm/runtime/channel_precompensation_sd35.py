@@ -229,7 +229,7 @@ def _nonempty_dense_nonoverlapping(value):
 
 
 @contextmanager
-def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
+def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False, disk_storage=None):
     """Offload activations and reuse copies of explicitly stable frozen weights.
 
     Only storages owned by the supplied frozen modules are eligible. Holding
@@ -299,7 +299,7 @@ def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
                     return "reference", cache[view], key, value._version
                 stats["layout_copy_fallbacks"] += 1
             if view not in cache:
-                cache[view] = value.detach().to("cpu", copy=True)
+                cache[view] = ("disk", disk_storage.pack(value)) if disk_storage else value.detach().to("cpu", copy=True)
                 stats["stable_parameter_cpu_copies"] += 1
                 stats["stable_parameter_cpu_copy_bytes"] += value.numel() * value.element_size()
             else:
@@ -308,7 +308,7 @@ def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
         else:
             # Independent copies also protect saved SDXL VAE tensors from its
             # temporary float32/float16 conversions before backward.
-            saved = value.detach().to("cpu", copy=True)
+            saved = ("disk", disk_storage.pack(value)) if disk_storage else value.detach().to("cpu", copy=True)
             stats["uncached_cpu_copies"] += 1
             stats["activation_cpu_copy_bytes"] += value.numel() * value.element_size()
         return value.device, saved
@@ -323,6 +323,8 @@ def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
                 raise RuntimeError("stable saved weight view was modified")
             return value
         device, value = saved
+        if isinstance(value, tuple) and value[0] == "disk":
+            return disk_storage.unpack(value[1])
         return value.to(device)
 
     try:
@@ -352,19 +354,23 @@ def _require_frozen(module, name):
 
 
 @contextmanager
-def _count_method(module, method, prefix, counters, *, input_diagnostics=None):
+def _count_method(module, method, prefix, counters, *, input_diagnostics=None, resource_observer=None):
     """Count actual calls, including failures, without changing their graph."""
     original = getattr(module, method)
     had_instance_attribute = method in module.__dict__
 
     def counted(*args, **kwargs):
         _count(counters, prefix + "_attempted")
+        if resource_observer is not None:
+            resource_observer("before_" + prefix)
         if input_diagnostics is not None:
             first = args[0] if args else kwargs.get("x")
             input_diagnostics.append({"tensor": _tensor_layout(first) if isinstance(first, torch.Tensor) else None,
                                       "execution": _execution_metadata()})
         result = original(*args, **kwargs)
         _count(counters, prefix + "_returned")
+        if resource_observer is not None:
+            resource_observer("after_" + prefix)
         return result
 
     setattr(module, method, counted)
@@ -448,7 +454,7 @@ def _actual_read(image, proxy_feature, vae, image_processor, vector, counters, *
     return actual, ordinary_score, diagnostics
 
 
-def rgb_reader_vjp(image, *, vae, image_processor, reader_vector, counters=None) -> RGBSensitivity:
+def rgb_reader_vjp(image, *, vae, image_processor, reader_vector, counters=None, disk_storage=None) -> RGBSensitivity:
     counters = _ledger(counters)
     partial = {"image": require_ordinary_rgb_image(image)}
     diagnostics = {"compatibility_version": RGB_PROXY_COMPATIBILITY_VERSION}
@@ -456,7 +462,7 @@ def rgb_reader_vjp(image, *, vae, image_processor, reader_vector, counters=None)
     try:
         device, _ = _vae_device_dtype(vae)
         rgb = image_tensor(image, device=device).requires_grad_(True)
-        with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(vae,)):
+        with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(vae,), disk_storage=disk_storage):
             feature = _reader_graph(rgb, vae, image_processor, counters, ordinary_image=image, diagnostics=diagnostics)
             actual, score, diagnostics = _actual_read(image, feature, vae, image_processor, reader_vector, counters,
                                                       partial=partial, diagnostics=diagnostics)
@@ -749,7 +755,7 @@ def replay_suffix_write(pipeline, capture: SourceCapture, delta=None, *, counter
 def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.Tensor,
                        *, counters=None, diagnostics=None, basepoint_mode="historical_capture",
                        reference_image=None, retain_stable_storage=False,
-                       resource_observer=None) -> torch.Tensor:
+                       resource_observer=None, disk_storage=None) -> torch.Tensor:
     """One captured official SD3 suffix forward, multiple independent VJPs.
 
     Cotangents are write-side auxiliaries; they are never supplied to the reader.
@@ -783,7 +789,7 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
         gradients = []
         with torch.enable_grad(), _cpu_saved_tensors(
                 stable_modules=(pipeline.transformer, pipeline.vae),
-                retain_stable_storage=retain_stable_storage) as saved_tensor_stats:
+                retain_stable_storage=retain_stable_storage, disk_storage=disk_storage) as saved_tensor_stats:
             diagnostics["saved_tensors"] = saved_tensor_stats
             def observe(event, index=None):
                 if resource_observer is not None:
@@ -852,7 +858,7 @@ def trace_source_suffix(pipeline, capture: SourceCapture, *, grad_enabled: bool,
 
 def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings, seed: int,
                               *, observation_vae, observation_processor, reader_vector,
-                              counters=None) -> RGBSensitivity:
+                              counters=None, disk_storage=None, resource_observer=None) -> RGBSensitivity:
     """Official complete SDXL img2img graph; gradient is w.r.t. input RGB.
 
     The fresh generator controls BOTH posterior reparameterization and scheduler
@@ -886,13 +892,16 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
         def counted_step(pipe, index, timestep, kwargs):
             _count(counters, "sdxl_denoising_steps")
             actual_steps.append(float(torch.as_tensor(timestep)))
+            if resource_observer is not None:
+                resource_observer("after_sdxl_step", step=index,
+                                  saved_tensors=dict(disk_storage.stats) if disk_storage else None)
             return kwargs
 
-        with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(pipeline.unet, observation_vae)), \
+        with torch.enable_grad(), _cpu_saved_tensors(stable_modules=(pipeline.unet, observation_vae), disk_storage=disk_storage), \
              _canonical_pipeline_preprocess(pipeline.image_processor, rgb, image, diagnostics["sdxl_input_preprocess"]), \
              _count_method(pipeline.vae, "encode", "sdxl_input_vae_encode", counters,
-                           input_diagnostics=diagnostics.setdefault("sdxl_vae_encode_inputs", [])), \
-             _count_method(pipeline.vae, "decode", "sdxl_output_vae_decode", counters), \
+                           input_diagnostics=diagnostics.setdefault("sdxl_vae_encode_inputs", []), resource_observer=resource_observer), \
+             _count_method(pipeline.vae, "decode", "sdxl_output_vae_decode", counters, resource_observer=resource_observer), \
              _count_method(pipeline.unet, "forward", "sdxl_unet_forward", counters):
             _count(counters, "sdxl_reconstruction_forward_calls")
             diagnostics["sdxl_proxy_execution"] = _execution_metadata()
@@ -902,6 +911,8 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
                 output_type="pt", callback_on_step_end=counted_step,
                 callback_on_step_end_tensor_inputs=["latents"])
             _count(counters, "sdxl_reconstruction_forward_returned")
+            if resource_observer is not None:
+                resource_observer("sdxl_forward_returned", saved_tensors=dict(disk_storage.stats) if disk_storage else None)
             if not diagnostics["sdxl_input_preprocess"].get("values_equal", False):
                 raise ValueError("official SDXL did not preprocess the expected RGB input")
             pixels = result.images
@@ -920,7 +931,11 @@ def reconstruction_reader_vjp(pipeline, image, settings: ReconstructionSettings,
             partial.update(feature=actual, score=score)
             _count(counters, "sdxl_reconstruction_vjp_calls")
             _count(counters, "reader_vjp_calls")
+            if resource_observer is not None:
+                resource_observer("before_sdxl_backward", saved_tensors=dict(disk_storage.stats) if disk_storage else None)
             gradient, = torch.autograd.grad(_score(feature, reader_vector), rgb)
+            if resource_observer is not None:
+                resource_observer("after_sdxl_backward", saved_tensors=dict(disk_storage.stats) if disk_storage else None)
             partial.update(gradient_rgb=_cpu(gradient), diagnostics=diagnostics)
         _finite(gradient, "reconstruction RGB sensitivity")
         _count(counters, "sdxl_reconstruction_vjp_returned")

@@ -131,13 +131,15 @@ def at_latent(capture, latent, image):
 
 
 class StageProtectionProvider(PrecompensationProvider):
-    def __init__(self, config, *, counters, source_loader=None, **kwargs):
+    def __init__(self, config, *, counters, source_loader=None, disk_storage=None, resource_observer=None, **kwargs):
         # Existing two-argument loader injection remains supported. A supplied
         # source_loader has the public component-aware factory protocol above.
         self._source_loader = source_loader or (None if kwargs.get("loader") else load_v2_source)
         super().__init__(config, **kwargs)
         self._raw = counters
         self._source_kind = None
+        self._disk_storage = disk_storage
+        self._resource_observer = resource_observer
 
     def _release_source(self):
         super()._release_source()
@@ -168,7 +170,9 @@ class StageProtectionProvider(PrecompensationProvider):
 
     def _prepare_reader(self):
         if self._vae is None:
+            rt._count(self._raw, "reader_component_load_attempted")
             self._vae, self._processor = self.reader_loader(self.config)
+            rt._count(self._raw, "reader_component_load_returned")
         super()._prepare_reader()
 
     def _prepare_suffix(self):
@@ -234,7 +238,7 @@ class StageProtectionProvider(PrecompensationProvider):
         self._check_reader(ordinary_read["feature"])
         if design_image is None:
             result = rt.rgb_reader_vjp(image, vae=self._vae, image_processor=self._processor,
-                                       reader_vector=self._reader_vector, counters=self._raw)
+                                       reader_vector=self._reader_vector, counters=self._raw, disk_storage=self._disk_storage)
             expected, expected_read = image, ordinary_read
         else:
             if self._reconstruction is None:
@@ -242,7 +246,8 @@ class StageProtectionProvider(PrecompensationProvider):
             result = rt.reconstruction_reader_vjp(self._reconstruction, image,
                 self._reconstruction_settings, self.config["reconstruction"]["design_seed"],
                 observation_vae=self._vae, observation_processor=self._processor,
-                reader_vector=self._reader_vector, counters=self._raw)
+                reader_vector=self._reader_vector, counters=self._raw, disk_storage=self._disk_storage,
+                resource_observer=self._resource_observer)
             expected, expected_read = design_image, design_read
         if not np.array_equal(np.asarray(result.image), np.asarray(expected)):
             raise rt.RuntimeStageError("current_RGB_proxy_agreement",
@@ -263,7 +268,8 @@ class StageProtectionProvider(PrecompensationProvider):
             gradients = rt.source_suffix_vjps(self._source, capture,
                 torch.stack([s.gradient_rgb for s in sensitivities]), counters=self._raw,
                 diagnostics=diagnostics, basepoint_mode="runtime_suffix", reference_image=image,
-                retain_stable_storage=True, resource_observer=source_memory_event)
+                retain_stable_storage=True, resource_observer=self._resource_observer or source_memory_event,
+                disk_storage=self._disk_storage)
         return dict(gradients=gradients, diagnostics=diagnostics)
 
 

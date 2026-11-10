@@ -89,3 +89,11 @@ def test_unwritable_telemetry_neither_blocks_child_nor_masks_exit(tmp_path, monk
     log = (tmp_path / "runner.log").read_text()
     assert "child did run" in log and "original child error" in log
     assert "RESOURCE_RECORD_UNAVAILABLE" in log and "synthetic telemetry log denied" in log
+def test_cgroup_parent_escape_stays_unavailable(tmp_path):
+    from cegwm.runtime.stage_protection_resources import resolve_cgroup
+    proc = tmp_path / "self"
+    proc.mkdir()
+    (proc / "cgroup").write_text("0::/../../jupyter-children\n")
+    (proc / "mountinfo").write_text("1 0 0:1 / /sys/fs/cgroup rw - cgroup2 cgroup rw\n")
+    directory, error = resolve_cgroup(proc_root=tmp_path)
+    assert directory is None and "escapes visible namespace" in error

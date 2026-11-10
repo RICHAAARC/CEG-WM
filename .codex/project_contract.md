@@ -2,6 +2,13 @@
 
 ## Current authorization
 
+- The 2026-11-11 delivery addresses the later early2 RGB-VJP interruption using
+  per-operation model subprocesses and exact local-disk saved tensors. Reuse all
+  prior completed work and cumulative costs; only early2/rgb_vjp gets one fixed
+  independent attempt. CPU/mock implementation only, no real model execution,
+  parameter/compute expansion or P3/P4. Audit owns commit/push. See
+  `docs/stage_protection_v2_isolated_resume.md`.
+
 - The 2026-11-10 checkpoint-continuation delivery also covers mechanical recovery
   from its published private-symbol ImportError, through a separate fixed entry.
   It accepts only the exact target's first-repair FAILED import with one loader

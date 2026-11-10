@@ -23,16 +23,19 @@ def source_files():
         ROOT / "experiments/run_stage_protection_v2.py",
         ROOT / "experiments/run_stage_protection_v2_resume.py",
         ROOT / "experiments/run_stage_protection_v2_compat_resume.py",
+        ROOT / "experiments/run_stage_protection_v2_isolated_resume.py",
         ROOT / "experiments/run_reconstruction_channel_v1.py",
         ROOT / "configs/stage_protection_v2_colab.json",
         ROOT / "requirements-reconstruction-channel-colab.txt"])
 
 
-def build(*, continuation=False, compatibility=False):
-    continuation = continuation or compatibility
+def build(*, continuation=False, compatibility=False, isolated=False):
+    continuation = continuation or compatibility or isolated
     output = ROOT / "notebooks/stage_protection_v2_resume_colab.ipynb" if continuation else OUTPUT
     if compatibility:
         output = ROOT / "notebooks/stage_protection_v2_compat_resume_colab.ipynb"
+    if isolated:
+        output = ROOT / "notebooks/stage_protection_v2_isolated_resume_colab.ipynb"
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
         for path in source_files():
@@ -235,6 +238,33 @@ runner 在构造 provider / 加载模型前完成这些检查及原必要 checkp
         cells[10].source = cells[10].source.replace("'experiments.run_stage_protection_v2_resume'", "'experiments.run_stage_protection_v2_compat_resume'")
     mode = "embedded_source_run_all_P2_compatibility_repair" if compatibility else (
         "embedded_source_run_all_P2_one_repair" if continuation else "embedded_source_run_all_P2")
+    if isolated:
+        cells[1].source = """# CEG-WM V2：独立模型进程与本机磁盘续跑
+
+直接 **Run all**，无需上传、手填路径或切换开关。复用原 root、首次 repair 和 compat 已完成 checkpoints，
+包括已返回的 early1 VJP、action、render、clean、design_image、design_read。
+仅给本次 `source06_fur_knit/bit1/early2/rgb_vjp` 一次新尝试，然后继续原固定 P2。
+目标原 status 可为 STARTED/FAILED，或目录存在且累计计数证明已有消耗而 status 尚未同步；不会因此重做 early1。
+
+每个昂贵模型操作独立子进程执行；结果落盘、子进程退出后才继续。主进程不持有模型。
+保存张量按原复制语义逐张量写入 `/content/ceg_stage_protection_scratch` 本机磁盘，按需精确读取；
+不向 Drive 逐张量卸载，不使用内存盘、降精度、压缩或重算。空间逐次检查；空间不足明确停止。
+原种子、reader、dtype、预算、阈值与 holdout 冻结次序不变，不自动 P3/P4。
+
+新结果写入原 attempt01 的 `repairs/source06_bit1_early2_rgb_vjp_isolated_attempt01/`。
+累计从最新持久计数继续，旧失败及滞后报告差额保留。新尝试 RETURNED 复用，STARTED/FAILED 不自动循环。
+额外模型加载和磁盘 I/O 会增加耗时；CPU 机制检查不代表真实 Colab/CUDA 已跑通。
+"""
+        cells[3].source = """## 准备内含源码
+首格仅挂载 Drive。保持一个活动 VM；不要并行运行其他入口。
+各模型 worker 的结果、退出码、计数和内存/I/O记录保存在新子目录 `workers/`，退出后清理其独占本机 scratch。
+"""
+        cells[5].source += "\n保存图不再保留整图 CPU tensor副本；仍需容纳模型、当前算子workspace和反传同时使用的张量。\n磁盘峰值与I/O、进程RSS、GPU allocated/reserved分别报告，不能互相替代。\n"
+        cells[6].source = cells[6].source.replace("source06_bit1_early1_latent_vjp_attempt01", "source06_bit1_early2_rgb_vjp_isolated_attempt01")
+        cells[10].source = cells[10].source.replace("'experiments.run_stage_protection_v2_resume'", "'experiments.run_stage_protection_v2_isolated_resume'")
+        cells[12].source = cells[12].source.replace("operations/source06_fur_knit/bit1/early1/latent_vjp/status.json", "operations/source06_fur_knit/bit1/early2/rgb_vjp/status.json")
+        cells[9].source += "\n`WORKER_MEMORY` 观察 SDXL encode、每步、decode、backward 前后；worker receipt保留exitcode及最新计数，SIGKILL后也会回收scratch。\n"
+        mode = "embedded_source_run_all_P2_isolated_early2_resume"
     notebook = nb.v4.new_notebook(cells=cells, metadata={
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
         "language_info": {"name": "python"}, "colab": {"name": output.name}, "accelerator": "GPU",

@@ -33,6 +33,8 @@ def resolve_cgroup(*, proc_root=Path("/proc")):
                 for encoded, literal in ((r"\040", " "), (r"\011", "\t"), (r"\134", "\\")):
                     root, mount = root.replace(encoded, literal), mount.replace(encoded, literal)
                 relative = Path(entry).relative_to(root)
+                if ".." in relative.parts:
+                    return None, "process cgroup path escapes visible namespace; unavailable"
                 return str(Path(mount) / relative), None
         return None, "unified cgroup2 mount unavailable"
     except (OSError, ValueError, StopIteration, IndexError) as error:

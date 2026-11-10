@@ -1,0 +1,107 @@
+{
+  "observations": [
+    {
+      "mode": "cpu",
+      "pid": 1493767,
+      "total_saved_bytes": 201326592,
+      "tensor_bytes": 16777216,
+      "steps": 12,
+      "before": {
+        "pid": 1493767,
+        "rss_bytes": 210313216,
+        "peak_rss_bytes": 209969152,
+        "gpu": {}
+      },
+      "forward_saved": {
+        "pid": 1493767,
+        "rss_bytes": 584441856,
+        "peak_rss_bytes": 584216576,
+        "gpu": {}
+      },
+      "forward_rss_increment_bytes": 374128640,
+      "after_backward": {
+        "pid": 1493767,
+        "rss_bytes": 535228416,
+        "peak_rss_bytes": 585003008,
+        "gpu": {}
+      },
+      "value": 67.0,
+      "gradient": 479001600.0,
+      "cpu_copy_counts": {
+        "stable_parameter_cpu_copies": 0,
+        "stable_parameter_cache_hits": 0,
+        "uncached_cpu_copies": 12,
+        "stable_parameter_reference_saves": 0,
+        "stable_parameter_reference_views": 0,
+        "layout_copy_fallbacks": 0,
+        "stable_parameter_cpu_copy_bytes": 0,
+        "activation_cpu_copy_bytes": 201326592,
+        "stable_parameter_cpu_bytes_avoided": 0
+      },
+      "disk_counts": null,
+      "scope": "CPU diagnostic; RSS excludes kernel file cache, does not prove CUDA feasibility"
+    },
+    {
+      "mode": "disk",
+      "pid": 1493782,
+      "total_saved_bytes": 201326592,
+      "tensor_bytes": 16777216,
+      "steps": 12,
+      "before": {
+        "pid": 1493782,
+        "rss_bytes": 210386944,
+        "peak_rss_bytes": 210059264,
+        "gpu": {}
+      },
+      "forward_saved": {
+        "pid": 1493782,
+        "rss_bytes": 249352192,
+        "peak_rss_bytes": 282537984,
+        "gpu": {}
+      },
+      "forward_rss_increment_bytes": 38965248,
+      "after_backward": {
+        "pid": 1493782,
+        "rss_bytes": 267489280,
+        "peak_rss_bytes": 282537984,
+        "gpu": {}
+      },
+      "value": 67.0,
+      "gradient": 479001600.0,
+      "cpu_copy_counts": {
+        "stable_parameter_cpu_copies": 0,
+        "stable_parameter_cache_hits": 0,
+        "uncached_cpu_copies": 12,
+        "stable_parameter_reference_saves": 0,
+        "stable_parameter_reference_views": 0,
+        "layout_copy_fallbacks": 0,
+        "stable_parameter_cpu_copy_bytes": 0,
+        "activation_cpu_copy_bytes": 201326592,
+        "stable_parameter_cpu_bytes_avoided": 0
+      },
+      "disk_counts": {
+        "saved_files": 12,
+        "unpack_calls": 12,
+        "saved_tensor_bytes": 201326592,
+        "written_file_bytes": 201340752,
+        "read_file_bytes": 201340752,
+        "scratch_peak_bytes": 201340752,
+        "scratch_current_bytes": 201340752,
+        "largest_cpu_copy_bytes": 16777216,
+        "write_seconds": 0.2938166999956593,
+        "read_seconds": 0.11518476391211152,
+        "initial_free_bytes": 449411112960,
+        "minimum_observed_free_bytes": 449226498048,
+        "retained_cpu_tensor_bytes": 0,
+        "cleaned": false,
+        "cache_advice_failures": 0,
+        "last_cache_advice_error": null,
+        "memory_scope": "one serial pack copy; unpack tensors belong to active consumers; excludes models/workspaces/allocator/kernel page cache"
+      },
+      "scope": "CPU diagnostic; RSS excludes kernel file cache, does not prove CUDA feasibility"
+    }
+  ],
+  "gradient_equal": true,
+  "value_equal": true,
+  "threshold_gate": false
+}
