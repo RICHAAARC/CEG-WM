@@ -18,9 +18,10 @@ from scripts.build_stage_protection_v2_notebook import OUTPUT, ROOT, source_file
 
 pytestmark = pytest.mark.unit
 RESUME_OUTPUT = ROOT / "notebooks/stage_protection_v2_resume_colab.ipynb"
+COMPAT_OUTPUT = ROOT / "notebooks/stage_protection_v2_compat_resume_colab.ipynb"
 
 
-@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT])
+@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT, COMPAT_OUTPUT])
 def test_embedded_notebook_matches_current_source_and_first_cell_only_mounts(notebook_path):
     notebook = nbformat.read(notebook_path, as_version=4)
     nbformat.validate(notebook)
@@ -49,7 +50,7 @@ def test_embedded_notebook_matches_current_source_and_first_cell_only_mounts(not
 
 
 @pytest.mark.parametrize("runner_exit", [0, 1])
-@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT])
+@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT, COMPAT_OUTPUT])
 def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkeypatch, runner_exit, capsys, notebook_path):
     # Execute the actual cells without a run switch. Stub external services and
     # CUDA admission; replace pip and model commands with small CPU subprocesses.
@@ -80,6 +81,8 @@ def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkey
         else:
             assert "--execute" in command
             expected = "experiments.run_stage_protection_v2_resume" if notebook_path == RESUME_OUTPUT else "experiments.run_stage_protection_v2"
+            if notebook_path == COMPAT_OUTPUT:
+                expected = "experiments.run_stage_protection_v2_compat_resume"
             assert expected in command
             code = "import sys; print('CPU runner stdout', flush=True); print('CPU runner stderr', file=sys.stderr, flush=True)"
             if runner_exit:
@@ -97,6 +100,8 @@ def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkey
     finally:
         sys.path[:] = old_path
     assert mounts == ["/content/drive"]
+    if notebook_path == COMPAT_OUTPUT:
+        assert scope["RESULTS"] == tmp_path / "output/repairs/source06_bit1_early1_latent_vjp_compat_attempt01"
     assert "RUN_P2" not in scope
     assert scope["returncode"] == runner_exit
     assert len(commands) == 2 and "--execute" in commands[-1]

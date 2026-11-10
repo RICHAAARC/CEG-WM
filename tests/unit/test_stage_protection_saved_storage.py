@@ -33,12 +33,18 @@ def test_reference_and_copy_forward_gradient_equal_without_weight_cpu_copy():
 
 @pytest.mark.parametrize("layout,reference", [
     ("whole", True), ("transpose", True), ("prefix", True),
-    ("slice_holes", False), ("offset", False), ("overlap", False)])
+    ("singleton_stride", True), ("singleton_zero_stride", True),
+    ("empty", False), ("slice_holes", False), ("offset", False),
+    ("overlap", False), ("positive_overlap", False)])
 def test_saved_view_layout_matches_original_copy_semantics(layout, reference):
     module = fixed()
     views = dict(whole=module.weight, transpose=module.weight.T, prefix=module.weight[:2],
                  slice_holes=module.weight[:, ::2], offset=module.weight[1:],
-                 overlap=module.weight.as_strided((4, 4), (0, 1)))
+                 overlap=module.weight.as_strided((4, 4), (0, 1)),
+                 positive_overlap=module.weight.as_strided((2, 2), (1, 1)),
+                 singleton_stride=module.weight.as_strided((1, 4), (99, 1)),
+                 singleton_zero_stride=module.weight.as_strided((1, 4), (0, 1)),
+                 empty=module.weight[:0])
     view = views[layout]
     observed = []
     class UseSaved(torch.autograd.Function):
@@ -62,6 +68,47 @@ def test_saved_view_layout_matches_original_copy_semantics(layout, reference):
     assert (observed[1][1] == view.untyped_storage().data_ptr()) is reference
     assert torch.equal(results[0][0], results[1][0]) and torch.equal(results[0][1], results[1][1])
     assert bool(results[1][2]["layout_copy_fallbacks"]) is not reference
+
+
+@pytest.mark.parametrize("layout", ["scalar", "all_singleton", "permuted_3d"])
+def test_scalar_singleton_and_permuted_views_preserve_forward_and_gradient(layout):
+    module = fixed()
+    module.weight[0, 0] = .5  # Scalar/singleton tests exercise nonzero gradients.
+    views = dict(scalar=module.weight.reshape(-1)[0],
+                 all_singleton=module.weight.as_strided((1, 1, 1), (0, 99, 0)),
+                 permuted_3d=module.weight.reshape(2, 2, 4).permute(2, 0, 1))
+    weight = views[layout]
+    observed, results = [], []
+    class UseSaved(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x, weight):
+            ctx.save_for_backward(weight)
+            return x * weight.sum()
+        @staticmethod
+        def backward(ctx, dy):
+            saved, = ctx.saved_tensors
+            observed.append((saved.stride(), saved.untyped_storage().data_ptr()))
+            return dy * saved.sum(), None
+    for reference in (False, True):
+        x = torch.ones(2, dtype=torch.float64, requires_grad=True)
+        with _cpu_saved_tensors(stable_modules=(module,), retain_stable_storage=reference) as stats:
+            y = UseSaved.apply(x, weight)
+            gradient, = torch.autograd.grad(y.sum(), x)
+        results.append((y.detach(), gradient, stats))
+    assert torch.equal(results[0][0], results[1][0])
+    assert torch.equal(results[0][1], results[1][1])
+    assert observed[0][0] == observed[1][0] == weight.to("cpu", copy=True).stride()
+    assert observed[1][1] == weight.untyped_storage().data_ptr()
+    assert results[1][2]["stable_parameter_reference_saves"] == 1
+    assert results[1][2]["stable_parameter_cpu_copies"] == 0
+
+
+def test_missing_private_torch_symbol_keeps_reference_savings_and_equal_gradients(monkeypatch):
+    # Reproduce the reported Colab import surface without changing this local
+    # PyTorch build or fetching/installing any packages.
+    import torch._prims_common as prims
+    monkeypatch.delattr(prims, "is_non_overlapping_and_dense", raising=False)
+    test_reference_and_copy_forward_gradient_equal_without_weight_cpu_copy()
 
 
 @pytest.mark.parametrize("mutation", ["inplace", "data_replace", "parameter_replace", "dtype"])

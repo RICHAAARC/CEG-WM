@@ -208,6 +208,26 @@ def _to_image(quantized_rgb):
     return Image.fromarray(pixels.to(torch.uint8).permute(1, 2, 0).numpy(), mode="RGB")
 
 
+def _nonempty_dense_nonoverlapping(value):
+    """Conservative dense-view check using only public tensor metadata.
+
+    Ignore size-one dimensions: their strides cannot alias distinct elements.
+    Every other dimension must exactly extend a contiguous span, in increasing
+    stride order. This accepts permutations (including transposes) and scalars,
+    but rejects empty, holey and overlapping layouts. Storage offset is checked
+    separately by the saved-weight policy; no private PyTorch import is needed.
+    """
+    if value.layout != torch.strided or value.numel() == 0:
+        return False
+    expected_stride = 1
+    dimensions = sorted((stride, size) for size, stride in zip(value.shape, value.stride()) if size > 1)
+    for stride, size in dimensions:
+        if stride != expected_stride:
+            return False
+        expected_stride *= size
+    return True
+
+
 @contextmanager
 def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
     """Offload activations and reuse copies of explicitly stable frozen weights.
@@ -258,9 +278,6 @@ def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
                     or parameter.requires_grad):
                 raise RuntimeError("stable saved weight changed during guarded source VJP")
 
-    if retain_stable_storage:
-        from torch._prims_common import is_non_overlapping_and_dense
-
     def pack(value):
         key = storage_key(value)
         owners = references.get(key)
@@ -273,7 +290,7 @@ def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
                 # strides. Holey/overlapping/offset views conservatively use the
                 # old copy path; returning them directly can alter kernel layout.
                 if (value.layout == torch.strided and value.numel() > 0
-                        and value.storage_offset() == 0 and is_non_overlapping_and_dense(value)):
+                        and value.storage_offset() == 0 and _nonempty_dense_nonoverlapping(value)):
                     if view not in cache:
                         cache[view] = value.detach()
                         stats["stable_parameter_reference_views"] += 1

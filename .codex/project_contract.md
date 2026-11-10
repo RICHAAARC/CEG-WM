@@ -2,6 +2,14 @@
 
 ## Current authorization
 
+- The 2026-11-10 checkpoint-continuation delivery also covers mechanical recovery
+  from its published private-symbol ImportError, through a separate fixed entry.
+  It accepts only the exact target's first-repair FAILED import with one loader
+  attempt/return and zero other computation. Preserve both prior attempts and
+  costs; the new compatibility attempt is once-only, with no other retry/stage
+  expansion. CPU/static/mock implementation only; audit owns commit/push.
+  See `docs/stage_protection_v2_compat_resume.md`.
+
 - On 2026-11-10 the user authorized publishing the memory-optimized fixed
   checkpoint continuation notebook. Only the observed original STARTED
   `source06_fur_knit/bit1/early1/latent_vjp` receives one new attempt, in a fixed

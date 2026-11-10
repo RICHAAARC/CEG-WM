@@ -3,6 +3,8 @@ import pytest
 import torch
 
 from cegwm.runtime.stage_protection_resume import RepairStore, REQUIRED, TARGET
+from cegwm.runtime.stage_protection_resume import RepairStopped
+from cegwm.runtime.channel_precompensation_sd35 import RuntimeStageError
 from cegwm.runtime.stage_protection_store import atomic_json, atomic_torch
 from cegwm.runtime.stage_protection_v2 import StageProtectionProvider, at_latent
 from cegwm.stage_protection_v2 import cast_action, solve_intervals
@@ -13,7 +15,8 @@ from test_channel_precompensation_runtime import VAE, Processor
 pytestmark = pytest.mark.integration
 
 
-def test_actual_adapter_checkpoints_resume_vjp_without_source_regeneration(tmp_path, monkeypatch):
+@pytest.mark.parametrize("compatibility", [False, True])
+def test_actual_adapter_checkpoints_resume_vjp_without_source_regeneration(tmp_path, monkeypatch, compatibility):
     import requests
     monkeypatch.setattr(requests.sessions.Session, "request",
         lambda *a, **k: pytest.fail("CPU recovery test must never request the network"))
@@ -65,7 +68,17 @@ def test_actual_adapter_checkpoints_resume_vjp_without_source_regeneration(tmp_p
     target = tmp_path / "operations" / TARGET
     target.mkdir(parents=True)
     atomic_json(target / "status.json", dict(status="STARTED", key=TARGET, counts_before=dict(raw)))
-    store = RepairStore(tmp_path, c)
+    if compatibility:
+        previous = RepairStore(tmp_path, c)
+        def import_failure():
+            previous.counters["source_pipeline_load_attempted"] += 1
+            previous.counters["source_pipeline_load_returned"] += 1
+            raise RuntimeStageError("source_suffix_vjp", ImportError(
+                "cannot import name 'is_non_overlapping_and_dense' from 'torch._prims_common'"),
+                {"before_state": captured[8].before_state}, previous.counters)
+        with pytest.raises(RepairStopped):
+            previous.call(TARGET, import_failure)
+    store = RepairStore(tmp_path, c, compatibility=compatibility)
     loader = Loader()
     provider = StageProtectionProvider(c, counters=store.counters, loader=loader,
                                        reader_loader=lambda _: (VAE(), Processor()))

@@ -1,5 +1,13 @@
 # Fixed V2 checkpoint continuation — 2026-11-10
 
+The subsequent [Colab private-interface compatibility fix](stage_protection_v2_memory.md#subsequent-colab-compatibility-repair)
+updates both notebook snapshots but preserves the already consumed FAILED repair.
+It does not grant a second attempt or make the failed directory runnable again.
+The original delivery request is now completed through a [separate compatibility
+continuation](stage_protection_v2_compat_resume.md), limited to the observed exact
+import-only failure. That new entry preserves this first repair and its costs;
+the original entry described below keeps its failure policy.
+
 This separate entry implements the user's authorization to continue the existing
 attempt and retry its interrupted `source06_fur_knit/bit1/early1/latent_vjp` once.
 It includes the [memory preparation patch](stage_protection_v2_memory.md). It is

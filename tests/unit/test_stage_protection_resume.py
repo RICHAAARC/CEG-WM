@@ -5,7 +5,7 @@ from PIL import Image
 import pytest
 import torch
 
-from cegwm.runtime.channel_precompensation_sd35 import SourceCapture, RGBSensitivity
+from cegwm.runtime.channel_precompensation_sd35 import SourceCapture, RGBSensitivity, RuntimeStageError
 from cegwm.runtime.stage_protection_resume import (
     REPAIR, REQUIRED, TARGET, RepairStore, RepairStopped, PreflightBlocked, preflight,
 )
@@ -29,6 +29,7 @@ def checkpoint_run(tmp_path):
             tuple(range(step + 1, 20)))
     atomic_json(tmp_path / "config.json", config)
     counts = dict(sd35_transformer_attempted=46, sd35_transformer_returned=45,
+                  source_pipeline_load_attempted=6, source_pipeline_load_returned=6,
                   sd35_suffix_forward_calls=7, sd35_suffix_forward_returned=6,
                   sd35_full_generation_calls=1, sd35_full_generation_returned=1)
     atomic_json(tmp_path / "physical_counts.json", counts)
@@ -170,8 +171,19 @@ def test_corrupt_returned_retry_is_blocked_without_recompute(checkpoint_run):
         RepairStore(root, config)
 
 
-def test_continuation_runner_freezes_before_holdout_and_completed_rerun_no_provider(checkpoint_run, monkeypatch):
+@pytest.mark.parametrize("compatibility", [False, True])
+def test_continuation_runner_freezes_before_holdout_and_completed_rerun_no_provider(checkpoint_run, monkeypatch, compatibility):
     root, config = checkpoint_run
+    if compatibility:
+        previous = RepairStore(root, config)
+        def import_failure():
+            previous.counters["source_pipeline_load_attempted"] += 1
+            previous.counters["source_pipeline_load_returned"] += 1
+            raise RuntimeStageError("source_suffix_vjp", ImportError(
+                "cannot import name 'is_non_overlapping_and_dense' from 'torch._prims_common'"),
+                {"before_state": {}}, previous.counters)
+        with pytest.raises(RepairStopped):
+            previous.call(TARGET, import_failure)
     events = []
     class SmallCanary:
         # Orchestration test only. Fixed numerical runner has separate tests.
@@ -197,10 +209,11 @@ def test_continuation_runner_freezes_before_holdout_and_completed_rerun_no_provi
             events.append("provider")
         def close(self):
             events.append("closed")
-    summary = runner.execute(config, root, provider_factory=Provider)
+    summary = runner.execute(config, root, provider_factory=Provider, compatibility=compatibility)
     assert events == ["provider", "retry", "holdout_after_freeze", "closed"]
     assert summary["continuation"]["retry_status"] == "RETURNED"
-    resumed = runner.execute(config, root, provider_factory=lambda *a, **k: pytest.fail("cached summary loads no provider"))
+    resumed = runner.execute(config, root, compatibility=compatibility,
+        provider_factory=lambda *a, **k: pytest.fail("cached summary loads no provider"))
     assert resumed == summary
     assert not (root / "summary.json").exists()  # Original evidence untouched.
 

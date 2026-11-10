@@ -3,6 +3,36 @@
 Subsequent explicit authorization adds a separate [one-target continuation](stage_protection_v2_resume.md).
 The no-retry description below records this memory patch's original scope.
 
+## Subsequent Colab compatibility repair
+
+The source audit relayed a user-run failure of published commit `2262713`:
+`source_suffix_vjp` could not import `is_non_overlapping_and_dense` from
+`torch._prims_common` in the Python 3.13 Colab environment. The authorized repair
+is FAILED. Reported new counts are source-pipeline load 1/1 and zero other model
+operations; cumulative transformer counts remain 46/45 and full generation 1.
+This is an import compatibility failure, not new evidence about memory feasibility.
+
+The saved-weight eligibility check now uses public tensor layout, shape, stride
+and numel metadata. Non-singleton dimensions sorted by stride must exactly
+extend a contiguous span; singleton strides do not introduce overlap. Scalars
+and dense permutations/transposes remain eligible. Empty, holey, overlapping and
+nonzero-offset views keep the old copy fallback. Version/lifetime/storage guards,
+activation copies, model calls and method semantics are unchanged.
+
+CPU regression simulates the missing private symbol and compares exact forward
+values, gradients, saved strides and retained storage against the old copy path.
+The complete targeted suite passed **118 tests in 51.27s**, including both
+notebook bundles/Run-all substitutes and unchanged one-retry failure handling.
+`compileall` and `git diff --check` passed. This is local Python 3.12 / CPU torch
+2.5.1 validation, not a real Python 3.13 Colab or CUDA run.
+Both original notebooks are rebuilt with this fix and still block the consumed
+FAILED retry. The subsequently clarified delivery adds a [separate fixed
+compatibility continuation](stage_protection_v2_compat_resume.md) only for this
+exact import-only failure, retaining all previous cost/status and allowing one
+new attempt of the same target. No real model was run for this implementation.
+
+## Original memory patch
+
 Local engineering follow-up on clean base `fd0f048453147c09f9a6726e6949f8205ce3fba1`.
 No real models were run and no commit/push was made by this implementation chat.
 No candidate, reader, seed, position, budget, threshold, physical model-call

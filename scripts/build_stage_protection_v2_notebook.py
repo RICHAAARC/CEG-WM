@@ -22,13 +22,17 @@ def source_files():
     return sorted([*ROOT.glob("src/cegwm/**/*.py"),
         ROOT / "experiments/run_stage_protection_v2.py",
         ROOT / "experiments/run_stage_protection_v2_resume.py",
+        ROOT / "experiments/run_stage_protection_v2_compat_resume.py",
         ROOT / "experiments/run_reconstruction_channel_v1.py",
         ROOT / "configs/stage_protection_v2_colab.json",
         ROOT / "requirements-reconstruction-channel-colab.txt"])
 
 
-def build(*, continuation=False):
+def build(*, continuation=False, compatibility=False):
+    continuation = continuation or compatibility
     output = ROOT / "notebooks/stage_protection_v2_resume_colab.ipynb" if continuation else OUTPUT
+    if compatibility:
+        output = ROOT / "notebooks/stage_protection_v2_compat_resume_colab.ipynb"
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
         for path in source_files():
@@ -207,10 +211,34 @@ for label, path in (
     if path.exists():
         print(label, json.dumps(json.loads(path.read_text()), ensure_ascii=False, indent=2))
 """
+    if compatibility:
+        cells[1].source = """# CEG-WM V2：兼容性修复后继续 checkpoints
+
+直接 **Run all**，无需上传、开关或手填路径。仅继续原固定 P2 的同一个中断目标。
+本入口只接受首次 repair 的 `source06_fur_knit/bit1/early1/latent_vjp` 为 FAILED，且错误精确为
+`source_suffix_vjp: ImportError: cannot import name 'is_non_overlapping_and_dense' from 'torch._prims_common'`。
+首次 repair 增量必须只有 source pipeline 加载 attempted/returned 各 1，其他计算全为 0，且没有后来操作或冻结结果。
+runner 在构造 provider / 加载模型前完成这些检查及原必要 checkpoints 的逐项校验；不匹配即停止。
+
+保留原中断和首次兼容性失败的状态、partial、计数；从首次 repair 的最终累计计数继续，不清零加载成本。
+新结果在原 `attempt01` 的固定 `repairs/source06_bit1_early1_latent_vjp_compat_attempt01/` 子目录。
+此新尝试只执行一次；RETURNED 复用，STARTED/FAILED 不再自动重试。
+成功后继续剩余固定 P2，已完成结果、基点、种子、reader、预算与 holdout 冻结次序保持不变，不自动 P3/P4。
+私有接口依赖已移除；CPU 检查不代表真实 GPU 内存或科学结果已通过。
+"""
+        cells[3].source = """## 准备内含源码
+首格仅挂载 Drive。源码已内含；使用一个活动 VM，不并行运行其他首轮或续跑 notebook。
+精确的导入故障及零计算边界是本次机械修复的条件；没有一般失败重试开关。
+"""
+        cells[5].source += "\n首次 repair 的加载消耗也单列保留；新累计从该次最终 counts 开始。\n"
+        cells[6].source = cells[6].source.replace("source06_bit1_early1_latent_vjp_attempt01", "source06_bit1_early1_latent_vjp_compat_attempt01")
+        cells[10].source = cells[10].source.replace("'experiments.run_stage_protection_v2_resume'", "'experiments.run_stage_protection_v2_compat_resume'")
+    mode = "embedded_source_run_all_P2_compatibility_repair" if compatibility else (
+        "embedded_source_run_all_P2_one_repair" if continuation else "embedded_source_run_all_P2")
     notebook = nb.v4.new_notebook(cells=cells, metadata={
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
         "language_info": {"name": "python"}, "colab": {"name": output.name}, "accelerator": "GPU",
-        "stage_protection_delivery": {"mode": "embedded_source_run_all_P2_one_repair" if continuation else "embedded_source_run_all_P2", "scientific_results": False}})
+        "stage_protection_delivery": {"mode": mode, "scientific_results": False}})
     nb.validate(notebook)
     nb.write(notebook, output)
     print(f"Wrote {output}; {len(source_files())} source files; no model execution")

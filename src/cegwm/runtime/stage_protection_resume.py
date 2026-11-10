@@ -9,6 +9,7 @@ from dataclasses import fields, is_dataclass
 import json
 import math
 from pathlib import Path
+import re
 
 import numpy as np
 from PIL import Image
@@ -21,6 +22,12 @@ from .stage_protection_v2 import physical_counts
 SOURCE = "source06_fur_knit"
 TARGET = SOURCE + "/bit1/early1/latent_vjp"
 REPAIR = Path("repairs/source06_bit1_early1_latent_vjp_attempt01")
+COMPAT_REPAIR = Path("repairs/source06_bit1_early1_latent_vjp_compat_attempt01")
+AGGREGATES = ("selection_frozen.pt", "selection_frozen.json", "evaluated.pt", "summary.json")
+COMPAT_ERROR = (
+    r"RuntimeStageError: source_suffix_vjp: ImportError: cannot import name "
+    r"'is_non_overlapping_and_dense' from 'torch\._prims_common'(?: \([^\r\n]*\))?"
+)
 REQUIRED = tuple(SOURCE + "/" + key for key in (
     "source", "canonical_early_zero", "unmarked/clean", "unmarked/design_image", "unmarked/design_read",
     *["bit0/E/" + x for x in ("render", "clean", "design_image", "design_read")],
@@ -164,7 +171,48 @@ def load_returned(operations, key):
     return value
 
 
-def preflight(output, config):
+def _compatibility_predecessor(output, config, checked):
+    """Accept only the observed import failure before any new model computation.
+
+    The failed attempt's partial.pt is evidence, not a completed VJP result.
+    Read its final counters/status; never overwrite or reuse its partial payload.
+    """
+    previous = output / REPAIR
+    if _json(previous / "config.json") != config:
+        raise ValueError("previous repair configuration differs")
+    reservation = _json(previous / "reservation.json")
+    if (reservation.get("target") != TARGET or reservation.get("maximum_new_attempts") != 1
+            or reservation.get("original_counts") != checked["original_counts"]
+            or reservation.get("original_target_status") != checked["original_target_status"]):
+        raise ValueError("previous repair reservation differs from original evidence")
+    if any((previous / (name + suffix)).exists() for name in AGGREGATES for suffix in ("", ".tmp")):
+        raise ValueError("previous repair has frozen/evaluated results; not the import-only failure")
+    operations = previous / "operations"
+    target = operations / TARGET
+    # Reject later operations, including payloads left without a status file.
+    if any(path.is_file() and path.parent != target for path in operations.rglob("*")):
+        raise ValueError("previous repair contains another operation")
+    status = _json(target / "status.json")
+    if (status.get("key") != TARGET or status.get("status") != "FAILED"
+            or not isinstance(status.get("error"), str)
+            or re.fullmatch(COMPAT_ERROR, status["error"]) is None):
+        raise ValueError("previous repair is not the exact source_suffix_vjp private-symbol ImportError")
+    if any((target / name).exists() for name in ("result.pt", "result.pt.tmp")):
+        raise ValueError("failed import target has a completed result")
+    before = _counts(_json(previous / "retry_counts_before.json"))
+    if before != checked["original_counts"]:
+        raise ValueError("previous repair did work before the fixed target")
+    final = _counts(_json(previous / "physical_counts.json"))
+    if _counts(status.get("counts_after")) != final:
+        raise ValueError("previous repair final/status counters disagree")
+    delta = difference(final, checked["original_counts"])
+    allowed = dict(source_pipeline_load_attempted=1, source_pipeline_load_returned=1)
+    if any(delta.get(key, 0) != allowed.get(key, 0) for key in delta.keys() | allowed.keys()):
+        raise ValueError("previous repair is not load-only: exactly one loader attempt/return and zero computation required")
+    return dict(starting_counts=final, previous_repair_status=status)
+
+
+def preflight(output, config, *, compatibility=False):
     """Read-only preflight; never falls back to generation or creates a run."""
     output = Path(output)
     try:
@@ -177,7 +225,7 @@ def preflight(output, config):
             raise ValueError("this repair applies only to the observed STARTED target")
         if (target / "result.pt").exists() or (target / "partial.pt").exists():
             raise ValueError("original target now has result/partial; inspect before changing recovery")
-        if any((output / name).exists() for name in ("selection_frozen.pt", "selection_frozen.json", "evaluated.pt", "summary.json")):
+        if any((output / name).exists() for name in AGGREGATES):
             raise ValueError("original run acquired aggregate results; inspect changed run before recovery")
         old_operations = output / "operations"
         keys = set(REQUIRED) | {str(p.parent.relative_to(old_operations))
@@ -185,16 +233,23 @@ def preflight(output, config):
         for key in sorted(keys - {TARGET}):
             value = load_returned(old_operations, key)
             del value
-        directory = output / REPAIR
+        checked = dict(original_counts=initial, original_target_status=original,
+                       checked_original_operations=len(keys) - 1)
+        if compatibility:
+            checked.update(_compatibility_predecessor(output, config, checked))
+        baseline = checked.get("starting_counts", initial)
+        directory = output / (COMPAT_REPAIR if compatibility else REPAIR)
         reservation = directory / "reservation.json"
         if reservation.exists():
             saved = _json(reservation)
             if saved["target"] != TARGET or saved["original_counts"] != initial or saved["original_target_status"] != original:
                 raise ValueError("original counters/status changed after repair reservation")
+            if compatibility and any(saved.get(key) != checked[key] for key in ("starting_counts", "previous_repair_status")):
+                raise ValueError("previous compatibility failure changed after reservation")
             counter_file = directory / "physical_counts.json"
             if counter_file.exists():
                 current = _counts(_json(counter_file))
-                if any(v < 0 for v in difference(current, initial).values()):
+                if any(v < 0 for v in difference(current, baseline).values()):
                     raise ValueError("cumulative counters lost earlier work")
             elif any((directory / "operations").rglob("status.json")):
                 raise ValueError("continuation counters missing after operations started")
@@ -216,23 +271,24 @@ def preflight(output, config):
                     del value
         elif directory.exists() and any(directory.iterdir()):
             raise ValueError("repair artifacts without durable reservation")
-        return dict(original_counts=initial, original_target_status=original,
-                    checked_original_operations=len(keys) - 1)
+        return checked
     except Exception as error:
         raise PreflightBlocked(f"CHECKPOINT_PREFLIGHT_BLOCKED: {error}") from error
 
 
 class RepairStore(OperationStore):
     """Reuse the original cache, write only into one fixed continuation overlay."""
-    def __init__(self, output, config):
+    def __init__(self, output, config, *, compatibility=False):
         self.original = Path(output)
-        checked = preflight(output, config)
-        directory = self.original / REPAIR
+        self.compatibility = compatibility
+        checked = preflight(output, config, compatibility=compatibility)
+        directory = self.original / (COMPAT_REPAIR if compatibility else REPAIR)
         directory.mkdir(parents=True, exist_ok=True)
         reservation = directory / "reservation.json"
         if not reservation.exists():
             atomic_json(reservation, dict(target=TARGET, maximum_new_attempts=1, **checked))
-        self.initial = checked["original_counts"]
+        self.root_counts = checked["original_counts"]
+        self.initial = checked.get("starting_counts", self.root_counts)
         if not (directory / "physical_counts.json").exists():
             atomic_json(directory / "physical_counts.json", self.initial)
         super().__init__(directory, config)
@@ -267,14 +323,22 @@ class RepairStore(OperationStore):
         status = _json(status_path) if status_path.exists() else {"status": "NOT_STARTED"}
         before = self.directory / "retry_counts_before.json"
         retry = difference(status.get("counts_after", cumulative), _json(before)) if before.exists() else {}
-        return dict(target=TARGET, retry_status=status["status"], original_raw_counts=self.initial,
+        report = dict(target=TARGET, retry_status=status["status"], original_raw_counts=self.root_counts,
+                    starting_raw_counts=self.initial,
                     new_raw_counts=new, retry_raw_counts=retry,
                     later_continuation_raw_counts=difference(new, retry), cumulative_raw_counts=cumulative,
-                    original_physical_counts=physical_counts(self.initial),
+                    original_physical_counts=physical_counts(self.root_counts),
                     new_physical_counts=physical_counts(new), retry_physical_counts=physical_counts(retry),
                     cumulative_physical_counts=physical_counts(cumulative),
                     original_maxima_apply_to_cumulative=False,
                     cost_note="Cumulative includes the original interrupted work and the one authorized retry; original 40/258 cap is not claimed.")
+        if self.compatibility:
+            previous_delta = difference(self.initial, self.root_counts)
+            report.update(previous_failed_repair_raw_counts=previous_delta,
+                          previous_failed_repair_physical_counts=physical_counts(previous_delta),
+                          previous_repair_cumulative_raw_counts=self.initial,
+                          cost_note="Cumulative retains original interrupted work, the failed import's loader cost, and this one compatibility attempt plus subsequent P2 work; original 40/258 cap is not claimed.")
+        return report
 
     def persist_accounting(self):
         atomic_json(self.directory / "continuation_counts.json", self.accounting())
@@ -282,4 +346,8 @@ class RepairStore(OperationStore):
     def inventory(self):
         old = [dict(_json(path), checkpoint_origin="original")
                for path in sorted((self.original / "operations").rglob("status.json"))]
-        return old + [dict(row, checkpoint_origin="continuation") for row in super().inventory()]
+        if self.compatibility:
+            old += [dict(_json(path), checkpoint_origin="previous_failed_repair")
+                    for path in sorted((self.original / REPAIR / "operations").rglob("status.json"))]
+        origin = "compatibility_continuation" if self.compatibility else "continuation"
+        return old + [dict(row, checkpoint_origin=origin) for row in super().inventory()]
