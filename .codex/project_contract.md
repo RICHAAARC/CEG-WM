@@ -2,6 +2,24 @@
 
 ## Current authorization
 
+- On 2026-11-10 the user authorized publishing the memory-optimized fixed
+  checkpoint continuation notebook. Only the observed original STARTED
+  `source06_fur_knit/bit1/early1/latent_vjp` receives one new attempt, in a fixed
+  repair subdirectory. Reuse completed work and continue the remaining fixed
+  P2; retain original artifacts and spent cost. Missing/corrupt prerequisites
+  block before models, and a STARTED/FAILED repair cannot retry again. This
+  narrow authorization supersedes the preceding no-retry restriction only for
+  that target. Implementation performs local CPU checks; the source audit chat
+  owns final review/commit/push. No model execution here, P3/P4 or merge.
+  See `docs/stage_protection_v2_resume.md`.
+
+- On 2026-11-10 the source audit requested local V2 memory/call optimization:
+  suffix-only SD3 component loading, explicit source-only stable-weight storage
+  reuse, and minimal read-only memory evidence. CPU/static/fake checks and
+  notebook regeneration are in scope; no real-model run, commit/push, method
+  changes, extra model computations, or retry of STARTED/FAILED work. See
+  `docs/stage_protection_v2_memory.md`. This is preparation, not OOM resolution.
+
 - On 2026-11-09 the user subsequently authorized committing/pushing V2 and a
   validation notebook that executes the fixed P2 with Run all, without a run
   checkbox, source upload or file edits. GPU metadata, fixed output, credential

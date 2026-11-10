@@ -1,5 +1,14 @@
 # V2 local implementation delivery — 2026-11-09
 
+2026-11-10 authorized recovery: see [fixed one-target continuation](stage_protection_v2_resume.md)
+and its separate Run-all notebook. The original delivery history below remains
+unchanged; the new entry preserves original checkpoints and cumulative spent work.
+
+2026-11-10 follow-up: see [local memory preparation](stage_protection_v2_memory.md)
+for the subsequent suffix-loading/storage/telemetry patch. The original delivery
+and validation history below is retained; notebook rebuilding does not authorize
+retrying interrupted work.
+
 P1 is implemented and locally reviewable. This is an engineering delivery,
 not a real-model P2 result, scientific PASS or innovation verdict. No model
 weights were loaded, no GPU/Colab experiment was started, and nothing was

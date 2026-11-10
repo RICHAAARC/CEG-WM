@@ -1,5 +1,9 @@
 # Cross-generation-stage evidence protection V2
 
+The 2026-11-10 [memory preparation](stage_protection_v2_memory.md) changes only
+component/storage ownership and read-only resource evidence. It does not change
+the protocol or authorize retry of STARTED/FAILED work.
+
 Status: local P1 implementation and engineering validation; no real-model P2
 result. The user authorized implementation on 2026-11-09 after the four-party
 plan audit. The earlier plan-file phrase “audit only” describes its creation

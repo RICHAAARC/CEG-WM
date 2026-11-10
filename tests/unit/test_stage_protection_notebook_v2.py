@@ -17,10 +17,12 @@ from cegwm.runtime import stage_protection_colab as colab_helpers
 from scripts.build_stage_protection_v2_notebook import OUTPUT, ROOT, source_files
 
 pytestmark = pytest.mark.unit
+RESUME_OUTPUT = ROOT / "notebooks/stage_protection_v2_resume_colab.ipynb"
 
 
-def test_embedded_notebook_matches_current_source_and_first_cell_only_mounts():
-    notebook = nbformat.read(OUTPUT, as_version=4)
+@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT])
+def test_embedded_notebook_matches_current_source_and_first_cell_only_mounts(notebook_path):
+    notebook = nbformat.read(notebook_path, as_version=4)
     nbformat.validate(notebook)
     assert notebook.cells[0].cell_type == "code"
     assert notebook.cells[0].source == "from google.colab import drive\ndrive.mount('/content/drive')"
@@ -40,14 +42,15 @@ def test_embedded_notebook_matches_current_source_and_first_cell_only_mounts():
             data = archive.extractfile(str(path.relative_to(ROOT))).read()
             assert data == path.read_bytes()
             assert not re.search(rb"\bhf_[A-Za-z0-9]{20,}\b|-----BEGIN (?:RSA |OPENSSH )?PRIVATE KEY-----", data)
-    assert not re.search(r"\bhf_[A-Za-z0-9]{20,}\b", OUTPUT.read_text())
+    assert not re.search(r"\bhf_[A-Za-z0-9]{20,}\b", notebook_path.read_text())
     assert all(not cell.get("outputs") and cell.get("execution_count") is None
                for cell in notebook.cells if cell.cell_type == "code")
     assert not any("governance" in str(p) for p in source_files())
 
 
 @pytest.mark.parametrize("runner_exit", [0, 1])
-def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkeypatch, runner_exit, capsys):
+@pytest.mark.parametrize("notebook_path", [OUTPUT, RESUME_OUTPUT])
+def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkeypatch, runner_exit, capsys, notebook_path):
     # Execute the actual cells without a run switch. Stub external services and
     # CUDA admission; replace pip and model commands with small CPU subprocesses.
     # The real logging helper and notebook control flow still execute.
@@ -68,12 +71,16 @@ def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkey
     monkeypatch.setattr(torch, "__version__", "2.6.0")
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     actual_logged = colab_helpers.run_logged
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/runner.log").write_text("Original interrupted run EXIT -9\n")
     def cpu_substitute(command, **kwargs):
         commands.append(command)
         if "pip" in command:
             code = "print('CPU dependency-install substitute')"
         else:
             assert "--execute" in command
+            expected = "experiments.run_stage_protection_v2_resume" if notebook_path == RESUME_OUTPUT else "experiments.run_stage_protection_v2"
+            assert expected in command
             code = "import sys; print('CPU runner stdout', flush=True); print('CPU runner stderr', file=sys.stderr, flush=True)"
             if runner_exit:
                 code += "; raise RuntimeError('CPU synthetic runner traceback')"
@@ -81,9 +88,9 @@ def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkey
     monkeypatch.setattr(colab_helpers, "run_logged", cpu_substitute)
     scope, old_path = {"__name__": "__notebook__"}, list(sys.path)
     try:
-        for cell in nbformat.read(OUTPUT, as_version=4).cells:
+        for cell in nbformat.read(notebook_path, as_version=4).cells:
             if cell.cell_type == "code":
-                exec(compile(cell.source, str(OUTPUT), "exec"), scope)
+                exec(compile(cell.source, str(notebook_path), "exec"), scope)
                 if cell.source.startswith("# 固定输出目录"):
                     assert scope["OUTPUT"] == '/content/drive/MyDrive/CEG-WM_Result/stage-protection-v2-20261109/attempt01'
                     scope["OUTPUT"] = str(tmp_path / "output")  # Redirect only filesystem destination.
@@ -96,6 +103,7 @@ def test_default_run_all_enters_execute_and_logs_cpu_substitute(tmp_path, monkey
     assert len(permission_checks) == 2
     log = (tmp_path / "output/runner.log").read_text()
     assert "CPU runner stdout" in log and "CPU runner stderr" in log
+    assert log.startswith("Original interrupted run EXIT -9\n")
     if runner_exit:
         assert "Traceback" in log and "CPU synthetic runner traceback" in log
     assert (tmp_path / "output/setup.log").exists()

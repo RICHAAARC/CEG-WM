@@ -21,12 +21,14 @@ def source_files():
     # Include the research package, not .codex/governance, tests or results.
     return sorted([*ROOT.glob("src/cegwm/**/*.py"),
         ROOT / "experiments/run_stage_protection_v2.py",
+        ROOT / "experiments/run_stage_protection_v2_resume.py",
         ROOT / "experiments/run_reconstruction_channel_v1.py",
         ROOT / "configs/stage_protection_v2_colab.json",
         ROOT / "requirements-reconstruction-channel-colab.txt"])
 
 
-def build():
+def build(*, continuation=False):
+    output = ROOT / "notebooks/stage_protection_v2_resume_colab.ipynb" if continuation else OUTPUT
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode="w") as tar:
         for path in source_files():
@@ -46,6 +48,8 @@ early 在 step8 后，late 在 step18 后；reader、目标 cell、种子、位�
 A/B/C 的任务验收统一使用 clean/design 固定 inner 与预算；C 私有保护区间单列诊断。
 所有 proposal 与选择保存后才访问 holdout。P3/P4 不会自动执行。
 11 步 early 反传的 GPU 显存、主机 RAM 与耗时 **未知**，没有 L4 可运行保证。
+内存优化减少 suffix 的无用文本组件和稳定权重副本，但不保证解决 11 步激活累积。
+本修订不授权重跑已 STARTED/FAILED 的操作；同目录仍保留其失败/中断状态，不自动重试。
 """)]
     cells += [nb.v4.new_code_cell("""# 固定输出目录；再次 Run all 在同一目录恢复。
 OUTPUT = '/content/drive/MyDrive/CEG-WM_Result/stage-protection-v2-20261109/attempt01'
@@ -100,6 +104,9 @@ with record_setup_errors(OUTPUT):
 结果直接写入上述 Drive 目录。每个操作开始前写 STARTED；发生中断不会覆盖为成功。
 失败保持四试次分母；不扩来源、换 seed、换 cell、加预算或改变门槛。
 runner 的 stdout/stderr 直接追加到 `runner.log`，环境准备错误保存在 `setup.log`；页面关闭不会删除已写入的日志。
+`runner_resources.jsonl` 尽力记录父进程可见的 cgroup 内存事件、限制、峰值及退出差值；
+`runner.log` 的 SOURCE_MEMORY 行记录长链步边界 RSS 与累计 CPU 保存字节。
+缺失数据为 unknown/null，遥测写失败不阻止运行；cgroup 是共享范围，不能单凭 -9 或计数变化认定本进程 OOM。
 """)]
     cells += [nb.v4.new_code_cell("""environment = os.environ.copy()
 environment['PYTHONPATH'] = os.pathsep.join([str(WORK / 'src'), str(WORK)])
@@ -162,13 +169,51 @@ else:
         fig.suptitle(trial['source_id'] + ' / bit' + str(trial['bit']))
         plt.tight_layout(); plt.show()
 """)]
+    if continuation:
+        cells[1].source = """# CEG-WM V2：从已有 checkpoints 继续
+
+直接 **Run all**，无需上传、开关或手填路径。沿用 `attempt01` 的固定 P2。
+仅对 `source06_fur_knit/bit1/early1/latent_vjp` 的原 STARTED 中断授权 **一次**新尝试。
+其余已完成操作直接读取，随后继续 source06 剩余工作、source07 与冻结后的 holdout。
+reader、基点、种子、预算、阈值、四试次分母与 holdout 冻结次序均不变，不自动执行 P3/P4。
+
+runner 在加载模型前逐个校验必要 checkpoints；缺失或损坏即停止，不会重生成 source06。
+原始状态、结果、计数不改写。新结果位于原目录的固定 `repairs/source06_bit1_early1_latent_vjp_attempt01/` 子目录。
+新尝试 RETURNED 后再次 Run all 直接复用；新尝试 STARTED/FAILED 后不会再次自动重试。
+内存优化未经真实 GPU 验证，11 步反传的 RAM、显存与耗时仍未知；CPU 检查不是科学结果。
+"""
+        cells[3].source = """## 准备内含源码
+首格只挂载 Drive；源码随 notebook 提供。只使用一个活动 VM，不要同时运行原首轮 notebook。
+续跑检查固定必要完成集并逐个释放加载值；原始中断记录保留，新尝试在物理计算前写入 STARTED。
+"""
+        cells[5].source = """## 固定方法与累计成本
+原 P2 的 40 次 SD3 forward / 258 步等上限描述不间断原计划，**不再作为累计续跑成本上限**。
+`continuation_counts.json` 分列原始消耗、本次新消耗、目标重试、之后续跑和累计计数。
+旧中断已消耗的 attempted/returned 差额保留；不会清零或把重试当免费。
+"""
+        cells[6].source += "\nRESULTS = Path(OUTPUT) / 'repairs/source06_bit1_early1_latent_vjp_attempt01'\nprint('续跑结果:', RESULTS)\n"
+        cells[9].source = cells[9].source.replace("## 运行或恢复固定首轮", "## 运行固定的一次修复与续跑")
+        cells[10].source = cells[10].source.replace("'experiments.run_stage_protection_v2'", "'experiments.run_stage_protection_v2_resume'")
+        for index in (12, 13):
+            cells[index].source = cells[index].source.replace("Path(OUTPUT)", "RESULTS")
+        cells[12].source += """
+if (RESULTS / 'continuation_counts.json').exists():
+    print('最近一次派生计数报告（SIGKILL 时可能滞后）：')
+    print(json.dumps(json.loads((RESULTS / 'continuation_counts.json').read_text()), ensure_ascii=False, indent=2))
+for label, path in (
+    ('当前持久累计计数', RESULTS / 'physical_counts.json'),
+    ('当前一次重试状态', RESULTS / 'operations/source06_fur_knit/bit1/early1/latent_vjp/status.json'),
+):
+    if path.exists():
+        print(label, json.dumps(json.loads(path.read_text()), ensure_ascii=False, indent=2))
+"""
     notebook = nb.v4.new_notebook(cells=cells, metadata={
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-        "language_info": {"name": "python"}, "colab": {"name": OUTPUT.name}, "accelerator": "GPU",
-        "stage_protection_delivery": {"mode": "embedded_source_run_all_P2", "scientific_results": False}})
+        "language_info": {"name": "python"}, "colab": {"name": output.name}, "accelerator": "GPU",
+        "stage_protection_delivery": {"mode": "embedded_source_run_all_P2_one_repair" if continuation else "embedded_source_run_all_P2", "scientific_results": False}})
     nb.validate(notebook)
-    nb.write(notebook, OUTPUT)
-    print(f"Wrote {OUTPUT}; {len(source_files())} source files; no model execution")
+    nb.write(notebook, output)
+    print(f"Wrote {output}; {len(source_files())} source files; no model execution")
 
 
 if __name__ == "__main__":

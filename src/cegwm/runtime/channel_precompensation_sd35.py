@@ -209,7 +209,7 @@ def _to_image(quantized_rgb):
 
 
 @contextmanager
-def _cpu_saved_tensors(*, stable_modules=()):
+def _cpu_saved_tensors(*, stable_modules=(), retain_stable_storage=False):
     """Offload activations and reuse copies of explicitly stable frozen weights.
 
     Only storages owned by the supplied frozen modules are eligible. Holding
@@ -217,11 +217,20 @@ def _cpu_saved_tensors(*, stable_modules=()):
     metadata and version counters distinguish saved views and in-place updates.
     Activations are never memoized by address. Modules which temporarily change
     dtype (the official SDXL VAE) must not be listed in ``stable_modules``.
+    V2 source-only opt-in may reference dense, zero-offset stable weight views
+    instead of copying them. Version/identity/storage/layout/lifetime guards
+    cover the fixed synchronous runtime, not unsupported raw-storage/.data
+    writes that bypass PyTorch version tracking. No global dispatch is changed.
     """
     references = {}
     cache = {}
     stats = {"stable_parameter_cpu_copies": 0, "stable_parameter_cache_hits": 0,
-             "uncached_cpu_copies": 0}
+             "uncached_cpu_copies": 0, "stable_parameter_reference_saves": 0,
+             "stable_parameter_reference_views": 0, "layout_copy_fallbacks": 0,
+             "stable_parameter_cpu_copy_bytes": 0, "activation_cpu_copy_bytes": 0,
+             "stable_parameter_cpu_bytes_avoided": 0}
+    owners_by_storage = {}
+    active = True
 
     def storage_key(value):
         storage = value.untyped_storage()
@@ -234,6 +243,23 @@ def _cpu_saved_tensors(*, stable_modules=()):
             # replaces parameter.data. Such replacements are not cache entries.
             reference = parameter.detach()
             references.setdefault(storage_key(reference), []).append(reference)
+        if retain_stable_storage:
+            for child in module.modules():
+                for name, parameter in child.named_parameters(recurse=False):
+                    owners_by_storage.setdefault(storage_key(parameter), []).append(
+                        (child, name, parameter, parameter._version, tuple(parameter.shape),
+                         tuple(parameter.stride()), parameter.storage_offset()))
+
+    def check_owners(key):
+        for child, name, parameter, version, shape, stride, offset in owners_by_storage[key]:
+            if (child._parameters.get(name) is not parameter or parameter._version != version
+                    or storage_key(parameter) != key or tuple(parameter.shape) != shape
+                    or tuple(parameter.stride()) != stride or parameter.storage_offset() != offset
+                    or parameter.requires_grad):
+                raise RuntimeError("stable saved weight changed during guarded source VJP")
+
+    if retain_stable_storage:
+        from torch._prims_common import is_non_overlapping_and_dense
 
     def pack(value):
         key = storage_key(value)
@@ -241,9 +267,24 @@ def _cpu_saved_tensors(*, stable_modules=()):
         if owners is not None:
             view = (key, tuple(value.shape), tuple(value.stride()), value.storage_offset(),
                     value._version, tuple(owner._version for owner in owners))
+            if retain_stable_storage:
+                check_owners(key)
+                # preserve_format copies retain dense (including transposed)
+                # strides. Holey/overlapping/offset views conservatively use the
+                # old copy path; returning them directly can alter kernel layout.
+                if (value.layout == torch.strided and value.numel() > 0
+                        and value.storage_offset() == 0 and is_non_overlapping_and_dense(value)):
+                    if view not in cache:
+                        cache[view] = value.detach()
+                        stats["stable_parameter_reference_views"] += 1
+                        stats["stable_parameter_cpu_bytes_avoided"] += value.numel() * value.element_size()
+                    stats["stable_parameter_reference_saves"] += 1
+                    return "reference", cache[view], key, value._version
+                stats["layout_copy_fallbacks"] += 1
             if view not in cache:
                 cache[view] = value.detach().to("cpu", copy=True)
                 stats["stable_parameter_cpu_copies"] += 1
+                stats["stable_parameter_cpu_copy_bytes"] += value.numel() * value.element_size()
             else:
                 stats["stable_parameter_cache_hits"] += 1
             saved = cache[view]
@@ -252,14 +293,34 @@ def _cpu_saved_tensors(*, stable_modules=()):
             # temporary float32/float16 conversions before backward.
             saved = value.detach().to("cpu", copy=True)
             stats["uncached_cpu_copies"] += 1
+            stats["activation_cpu_copy_bytes"] += value.numel() * value.element_size()
         return value.device, saved
 
     def unpack(saved):
+        if len(saved) == 4:
+            _, value, key, version = saved
+            if not active:
+                raise RuntimeError("stable weight reference outlived its guarded source VJP context")
+            check_owners(key)
+            if value._version != version:
+                raise RuntimeError("stable saved weight view was modified")
+            return value
         device, value = saved
         return value.to(device)
 
-    with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-        yield stats
+    try:
+        # Fixed official eval/frozen modules never mutate raw storage or use
+        # .data writes in this synchronous interval. Such version-bypassing
+        # external writes are unsupported; do not change aten dispatch to police
+        # arbitrary third-party code. Ordinary mutations/replacement/migration
+        # are checked on pack/unpack and before leaving the context.
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            yield stats
+            if retain_stable_storage:
+                for key in owners_by_storage:
+                    check_owners(key)
+    finally:
+        active = False
 
 
 def _require_frozen(module, name):
@@ -512,7 +573,7 @@ def _restore_source_schedule_devices(scheduler, state, diagnostics):
 
 
 def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial, delta=None,
-                           after_step=None):
+                           after_step=None, step_observer=None):
     """The production suffix, shared verbatim by VJP and forward-only tracing.
 
     The caller controls torch grad mode and the CPU saved-tensor context. The
@@ -566,6 +627,8 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial,
     _count(counters, "sd35_suffix_forward_calls")
     current = latent
     for index in capture.remaining_steps:
+        if step_observer is not None:
+            step_observer("before_step", index)
         t = scheduler.timesteps[index]
         inputs = torch.cat([current] * 2) if state["do_classifier_free_guidance"] else current
         _count(counters, "sd35_suffix_denoising_steps")
@@ -588,6 +651,8 @@ def _source_suffix_forward(pipeline, capture, *, counters, diagnostics, partial,
                              scheduler_output_requires_grad=current.requires_grad)
         if after_step is not None:
             after_step(index, current, scheduler)
+        if step_observer is not None:
+            step_observer("after_step", index)
     diagnostics["scheduler_step_index_after"] = scheduler.step_index
     _count(counters, "sd35_suffix_decode_calls")
     pre_vae = current / pipeline.vae.config.scaling_factor + pipeline.vae.config.shift_factor
@@ -666,7 +731,8 @@ def replay_suffix_write(pipeline, capture: SourceCapture, delta=None, *, counter
 
 def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.Tensor,
                        *, counters=None, diagnostics=None, basepoint_mode="historical_capture",
-                       reference_image=None) -> torch.Tensor:
+                       reference_image=None, retain_stable_storage=False,
+                       resource_observer=None) -> torch.Tensor:
     """One captured official SD3 suffix forward, multiple independent VJPs.
 
     Cotangents are write-side auxiliaries; they are never supplied to the reader.
@@ -699,10 +765,17 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
                                "internal floating-point backward casts can underflow or round."))
         gradients = []
         with torch.enable_grad(), _cpu_saved_tensors(
-                stable_modules=(pipeline.transformer, pipeline.vae)) as saved_tensor_stats:
+                stable_modules=(pipeline.transformer, pipeline.vae),
+                retain_stable_storage=retain_stable_storage) as saved_tensor_stats:
             diagnostics["saved_tensors"] = saved_tensor_stats
+            def observe(event, index=None):
+                if resource_observer is not None:
+                    resource_observer(event, step=index, saved_tensors=dict(saved_tensor_stats))
+            observe("forward_start")
             latent, proxy = _source_suffix_forward(pipeline, capture, counters=counters,
-                                                    diagnostics=diagnostics, partial=partial)
+                diagnostics=diagnostics, partial=partial,
+                step_observer=observe if resource_observer is not None else None)
+            observe("forward_returned")
             comparison = _rgb_comparison(partial["image"], reference)
             diagnostics["basepoint_rgb_comparison"] = comparison
             if not comparison["exact_equal"]:
@@ -711,6 +784,7 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
             if tuple(rgb_cotangents.shape[1:]) != tuple(proxy.shape):
                 raise ValueError("RGB cotangent shape differs from final RGB")
             for index, cotangent in enumerate(rgb_cotangents):
+                observe("before_backward", index)
                 _count(counters, "sd35_suffix_vjp_calls")
                 gradient, = torch.autograd.grad(proxy, latent, cotangent.to(proxy.device, proxy.dtype),
                                                 retain_graph=index + 1 < len(rgb_cotangents))
@@ -725,6 +799,7 @@ def source_suffix_vjps(pipeline, capture: SourceCapture, rgb_cotangents: torch.T
                     "l2_norm": float(torch.linalg.vector_norm(gradient.double())),
                 })
                 partial["completed_gradients"] = tuple(gradients)
+                observe("after_backward", index)
             diagnostics["saved_tensors"] = dict(saved_tensor_stats)
         return torch.stack(gradients)
     except Exception as error:

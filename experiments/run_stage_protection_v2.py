@@ -134,12 +134,12 @@ class Canary:
                 for arm in ("A", "B", "C"):
                     count = 1 if arm == "A" else 2
                     widths = [0.25] if count == 1 else [0.25, rP if arm == "C" else 0.25]
-                    solved = solve_intervals(gradients[:count], scores[:count], centers[:count], widths, radius)
+                    prefix = key + "/late/" + arm
+                    solved = self.op(prefix + "/solve", lambda: solve_intervals(
+                        gradients[:count], scores[:count], centers[:count], widths, radius))
                     proposal = dict(solve=solved, status=solved["status"], selected="E", accepted=False,
                                     protection_realized=None, late_relative=None)
                     row["arms"][arm] = proposal
-                    prefix = key + "/late/" + arm
-                    self.op(prefix + "/solve", lambda: solved)
                     if solved["delta"] is None:
                         continue
                     try:

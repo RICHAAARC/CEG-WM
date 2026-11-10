@@ -103,12 +103,20 @@ def run_logged(command, *, cwd, output, env=None, log_name="runner.log"):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / log_name
     process = None
+    before = None
+    if log_name == "runner.log":
+        from cegwm.runtime.stage_protection_resources import append_parent_record
+        resources = directory / "runner_resources.jsonl"
     with path.open("a", encoding="utf-8", buffering=1) as log:
         log.write(f"\nSTARTED {datetime.now(timezone.utc).isoformat()}\n")
         log.flush()
+        if log_name == "runner.log":
+            before = append_parent_record(resources, "before_launch", fallback_log=log)
         offset = log.tell()
         try:
             process = subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
+            if before is not None:
+                append_parent_record(resources, "child_start", before=before, pid=process.pid, fallback_log=log)
             with path.open(encoding="utf-8", errors="replace") as tail:
                 tail.seek(offset)
                 while True:
@@ -123,6 +131,9 @@ def run_logged(command, *, cwd, output, env=None, log_name="runner.log"):
             log.write(f"EXIT {returncode} {datetime.now(timezone.utc).isoformat()}\n")
             log.flush()
             os.fsync(log.fileno())
+            if before is not None:
+                append_parent_record(resources, "child_exit", before=before,
+                                     pid=process.pid, returncode=returncode, fallback_log=log)
             return returncode
         except BaseException:
             if process is not None and process.poll() is None:
@@ -135,4 +146,8 @@ def run_logged(command, *, cwd, output, env=None, log_name="runner.log"):
             traceback.print_exc(file=log)
             log.flush()
             os.fsync(log.fileno())
+            if before is not None:
+                append_parent_record(resources, "interrupted_or_launch_failed", before=before,
+                                     pid=process.pid if process else None,
+                                     returncode=process.returncode if process else None, fallback_log=log)
             raise

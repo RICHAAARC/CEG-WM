@@ -14,8 +14,30 @@ import torch
 
 from cegwm.channel_precompensation import make_reader
 from cegwm.runtime import channel_precompensation_sd35 as rt
-from cegwm.runtime.channel_precompensation_provider import PrecompensationProvider, _freeze
+from cegwm.runtime.channel_precompensation_provider import PrecompensationProvider, _freeze, _free_memory
 from cegwm.runtime.reconstruction_channel_sd35 import _snapshot
+
+
+TEXT_COMPONENTS = ("text_encoder", "text_encoder_2", "text_encoder_3",
+                   "tokenizer", "tokenizer_2", "tokenizer_3")
+
+
+def load_v2_source(config, *, suffix_only, vae=None):
+    """diffusers 0.39 public component overrides; no replacement VAE allocation.
+
+    Suffixes consume already captured embeddings, never prompt text. Full
+    generation deliberately retains all text components for each new source.
+    """
+    from diffusers import StableDiffusion3Pipeline
+
+    settings = config["generation"]
+    overrides = {name: None for name in TEXT_COMPONENTS} if suffix_only else {}
+    if vae is not None:
+        overrides["vae"] = vae
+    pipeline = StableDiffusion3Pipeline.from_pretrained(settings["model_id"],
+        revision=settings["revision"], torch_dtype=getattr(torch, settings["dtype"]), **overrides)
+    pipeline.set_progress_bar_config(disable=True)
+    return pipeline
 
 
 def schedule_snapshot(scheduler):
@@ -109,9 +131,40 @@ def at_latent(capture, latent, image):
 
 
 class StageProtectionProvider(PrecompensationProvider):
-    def __init__(self, config, *, counters, **kwargs):
+    def __init__(self, config, *, counters, source_loader=None, **kwargs):
+        # Existing two-argument loader injection remains supported. A supplied
+        # source_loader has the public component-aware factory protocol above.
+        self._source_loader = source_loader or (None if kwargs.get("loader") else load_v2_source)
         super().__init__(config, **kwargs)
         self._raw = counters
+        self._source_kind = None
+
+    def _release_source(self):
+        super()._release_source()
+        self._source_kind = None
+
+    def _load_source(self, *, suffix_only=False):
+        if self._reconstruction is not None:
+            raise RuntimeError("SDXL must be released before loading SD3")
+        if self._source is not None and not suffix_only and self._source_kind == "suffix":
+            self._release_source()  # A new source needs its text encoders again.
+        if self._source is None:
+            if suffix_only:
+                self._prepare_reader()  # Also supports resuming a saved capture.
+            rt._count(self._raw, "source_pipeline_load_attempted")
+            if self._source_loader is None:
+                pipeline = self.loader(self.config, "generation")
+            else:
+                pipeline = self._source_loader(self.config, suffix_only=suffix_only, vae=self._vae)
+            self._source = pipeline
+            pipeline.remove_all_hooks()
+            if self._vae is None:
+                self._vae, self._processor = pipeline.vae, pipeline.image_processor
+            else:
+                pipeline.vae = self._vae
+            self._source_kind = "suffix" if suffix_only else "full"
+            rt._count(self._raw, "source_pipeline_load_returned")
+        return self._source
 
     def _prepare_reader(self):
         if self._vae is None:
@@ -120,12 +173,18 @@ class StageProtectionProvider(PrecompensationProvider):
 
     def _prepare_suffix(self):
         self._release_reconstruction()
-        self._load_source()
+        self._load_source(suffix_only=True)
         self._source.remove_all_hooks()
-        for name in ("text_encoder", "text_encoder_2", "text_encoder_3"):
-            module = getattr(self._source, name, None)
-            if module is not None:
-                module.to("cpu")
+        # Drop full-generation text components as soon as captured conditions
+        # are used. Remove hooks first, so offload chains retain no modules.
+        if hasattr(self._source, "register_modules"):
+            self._source.register_modules(**{name: None for name in TEXT_COMPONENTS})
+        else:  # Legacy injected CPU fakes need not implement diffusers APIs.
+            for name in TEXT_COMPONENTS:
+                if hasattr(self._source, name):
+                    delattr(self._source, name)
+        self._source_kind = "suffix"
+        _free_memory()
         for module in (self._source.transformer, self._source.vae):
             module.to(self.config["generation"]["device"])
             _freeze(module)
@@ -196,12 +255,15 @@ class StageProtectionProvider(PrecompensationProvider):
         return result
 
     def latent_gradients(self, capture, image, sensitivities):
+        from cegwm.runtime.stage_protection_resources import source_memory_event
+
         self._prepare_suffix()
         diagnostics = {}
         with rt._count_method(self._source.transformer, "forward", "sd35_transformer", self._raw):
             gradients = rt.source_suffix_vjps(self._source, capture,
                 torch.stack([s.gradient_rgb for s in sensitivities]), counters=self._raw,
-                diagnostics=diagnostics, basepoint_mode="runtime_suffix", reference_image=image)
+                diagnostics=diagnostics, basepoint_mode="runtime_suffix", reference_image=image,
+                retain_stable_storage=True, resource_observer=source_memory_event)
         return dict(gradients=gradients, diagnostics=diagnostics)
 
 
@@ -224,5 +286,6 @@ def physical_counts(raw):
             ("reader_result_ordinary", "reader_aux_ordinary", "reader_proxy"))
         for dest, prefix in (("sd3_denoising_steps", "sd35_transformer"),
                              ("sdxl_denoising_steps", "sdxl_unet_forward")):
+            # Module instrumentation uses attempted/returned, not calls/returned.
             result[f"{dest}_{suffix_name}"] = raw.get(f"{prefix}_{suffix_name}", 0)
     return result
