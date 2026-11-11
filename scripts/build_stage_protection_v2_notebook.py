@@ -242,17 +242,19 @@ runner 在构造 provider / 加载模型前完成这些检查及原必要 checkp
         cells[1].source = """# CEG-WM V2：独立模型进程与本机磁盘续跑
 
 直接 **Run all**，无需上传、手填路径或切换开关。复用原 root、首次 repair 和 compat 已完成 checkpoints，
-包括已返回的 early1 VJP、action、render、clean、design_image、design_read。
+已确认 early1 VJP、action、render、clean 有结果；design_image 仅有 STARTED，design_read 目录为空。
+先扫描全部必需缓存并汇总缺口，优先恢复同一操作可读的 result/临时文件/完整 partial。
+只有这两个固定 design 依赖确实缺失时，按原图、原种子各补算一次，费用单列；不重做已有 VJP、render、clean。
 仅给本次 `source06_fur_knit/bit1/early2/rgb_vjp` 一次新尝试，然后继续原固定 P2。
-目标原 status 可为 STARTED/FAILED，或目录存在且累计计数证明已有消耗而 status 尚未同步；不会因此重做 early1。
+目标原 status 可为 STARTED/FAILED，或目录存在且累计计数证明已有消耗而 status 尚未同步。
 
 每个昂贵模型操作独立子进程执行；结果落盘、子进程退出后才继续。主进程不持有模型。
 保存张量按原复制语义逐张量写入 `/content/ceg_stage_protection_scratch` 本机磁盘，按需精确读取；
-不向 Drive 逐张量卸载，不使用内存盘、降精度、压缩或重算。空间逐次检查；空间不足明确停止。
+不向 Drive 逐张量卸载，不使用内存盘、降精度、压缩或图内重算。空间逐次检查；空间不足明确停止。
 原种子、reader、dtype、预算、阈值与 holdout 冻结次序不变，不自动 P3/P4。
 
 新结果写入原 attempt01 的 `repairs/source06_bit1_early2_rgb_vjp_isolated_attempt01/`。
-累计从最新持久计数继续，旧失败及滞后报告差额保留。新尝试 RETURNED 复用，STARTED/FAILED 不自动循环。
+累计从最新持久计数继续，旧失败及滞后报告差额保留。依赖补算及目标的新尝试 RETURNED 复用，STARTED/FAILED 立即停且不自动循环。
 额外模型加载和磁盘 I/O 会增加耗时；CPU 机制检查不代表真实 Colab/CUDA 已跑通。
 """
         cells[3].source = """## 准备内含源码

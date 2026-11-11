@@ -4,9 +4,14 @@
 
 - The 2026-11-11 delivery addresses the later early2 RGB-VJP interruption using
   per-operation model subprocesses and exact local-disk saved tensors. Reuse all
-  prior completed work and cumulative costs; only early2/rgb_vjp gets one fixed
-  independent attempt. CPU/mock implementation only, no real model execution,
-  parameter/compute expansion or P3/P4. Audit owns commit/push. See
+  prior completed work and cumulative costs; early2/rgb_vjp gets one fixed
+  independent attempt. The subsequent Drive check found early1/design_image
+  STARTED without a payload and early1/design_read empty. Reuse recoverable exact
+  operation payloads first; only these two missing dependencies may each be
+  recomputed once with the same image/seed, costs recorded separately. Preserve
+  existing VJP/action/render/clean, stop on any new recovery failure, and report
+  all cache gaps before loading models. CPU/mock implementation only, no real
+  model execution, parameter changes, other compute expansion or P3/P4. Audit owns commit/push. See
   `docs/stage_protection_v2_isolated_resume.md`.
 
 - The 2026-11-10 checkpoint-continuation delivery also covers mechanical recovery

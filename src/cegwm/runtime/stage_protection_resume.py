@@ -212,7 +212,7 @@ def _compatibility_predecessor(output, config, checked):
     return dict(starting_counts=final, previous_repair_status=status)
 
 
-def preflight(output, config, *, compatibility=False):
+def preflight(output, config, *, compatibility=False, compatibility_payload_loader=load_returned):
     """Read-only preflight; never falls back to generation or creates a run."""
     output = Path(output)
     try:
@@ -259,7 +259,7 @@ def preflight(output, config, *, compatibility=False):
                 if status.get("status") == "RETURNED":
                     if key == TARGET:
                         _counts(_json(directory / "retry_counts_before.json"))
-                    value = load_returned(directory / "operations", key)
+                    value = compatibility_payload_loader(directory / "operations", key)
                     del value
                 elif key == TARGET:
                     raise ValueError("authorized retry already " + str(status.get("status")) + "; no second retry")
