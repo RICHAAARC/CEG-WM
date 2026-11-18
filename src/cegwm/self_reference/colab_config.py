@@ -11,7 +11,7 @@ GENERATION = {
     "dtype": "bfloat16", "clean_dtype": "float32", "output_type": "latent",
     "all_three_text_encoders": True, "cpu_offload": True, "generation_process_sources": 640,
     "atomic_flush_each_source": True,
-    "diffusers": "0.35.1", "min_gpu_gib": 38, "min_ram_gib": 40,
+    "diffusers": "0.35.1", "capacity_policy": "report_only",
     "alexnet_url": "https://download.pytorch.org/models/alexnet-owt-7be5be79.pth",
     "alexnet_sha256_prefix": "7be5be79",
     "lpips_linear_url": "https://raw.githubusercontent.com/richzhang/PerceptualSimilarity/082bb24f84c091ea94de2867d34c4544f68e0963/lpips/weights/v0.1/alex.pth",

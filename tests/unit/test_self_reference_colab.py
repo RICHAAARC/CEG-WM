@@ -371,3 +371,34 @@ def test_notebook_without_ensurepip_repairs_partial_venv_and_targets_local_wheel
     assert sum("venv" in command and "--without-pip" in command for command in commands)==2
     assert all("--python" in command for command in commands if "install" in command)
     assert "Successfully installed" in (tmp_path/"bootstrap.log").read_text()
+
+
+@pytest.mark.parametrize("cuda_available,bf16_supported,error",[(True,True,None),(False,True,"CUDA required"),(True,False,"BF16")])
+def test_hardware_capacity_is_report_only_but_dependencies_still_required(tmp_path,monkeypatch,capsys,cuda_available,bf16_supported,error):
+    from cegwm.self_reference import colab_worker
+    fake_cuda=SimpleNamespace(is_available=lambda:cuda_available,is_bf16_supported=lambda:bf16_supported,
+        get_device_properties=lambda index:SimpleNamespace(name="Mock small GPU",total_memory=8*2**30),
+        get_device_capability=lambda index:(8,0))
+    fake_modules={"torch":SimpleNamespace(cuda=fake_cuda,version=SimpleNamespace(cuda="fixture")),
+        "torchvision":SimpleNamespace(),"psutil":SimpleNamespace(virtual_memory=lambda:SimpleNamespace(total=12*2**30)),
+        "diffusers":SimpleNamespace(StableDiffusion3Pipeline=object,AutoencoderKL=object),
+        "transformers":SimpleNamespace(T5EncoderModel=object,CLIPTextModel=object,CLIPTextModelWithProjection=object),
+        "sentencepiece":SimpleNamespace(),"lpips":SimpleNamespace()}
+    for name,value in fake_modules.items():
+        monkeypatch.setitem(sys.modules,name,value)
+    monkeypatch.setattr(colab_worker,"configure_torch",lambda device:None)
+    monkeypatch.setattr(colab_worker.importlib.metadata,"version",lambda name:GENERATION["diffusers"] if name=="diffusers" else "fixture")
+    assert GENERATION["capacity_policy"]=="report_only"
+    assert "min_gpu_gib" not in GENERATION and "min_ram_gib" not in GENERATION
+    if error:
+        with pytest.raises(ValueError,match=error):
+            colab_worker.hardware(tmp_path,{})
+        assert not (tmp_path/"runtime.json").exists()
+    else:
+        colab_worker.hardware(tmp_path,{})
+        report=read_json(tmp_path/"runtime.json")
+        assert report["gpu_gib"]==8 and report["ram_gib"]==12
+        assert report["capacity_policy"]=="report_only"
+        output=capsys.readouterr().out
+        assert '"gpu_gib": 8.0' in output and '"ram_gib": 12.0' in output
+        assert "not an admission gate" in output

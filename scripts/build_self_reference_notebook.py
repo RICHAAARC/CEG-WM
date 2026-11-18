@@ -23,8 +23,8 @@ def build(code_commit):
     `/content/drive/MyDrive/CEG-WM/self-reference-v1/`。
     冻结的三臂预算可能跨越多个 Colab 会话；不保证单个会话可以跑完。
 
-    **开始前：**选择 A100 40GB/80GB 和 high-RAM。程序要求 GPU≥38 GiB、RAM≥40 GiB，
-    这只是保守运行条件，未经真实 GPU 验证，不保证一定装得下，也不支持自动改成 T4/L4 小预算。
+    **开始前：**选择支持冻结 BF16 精度的 CUDA GPU。实际 VRAM/RAM 会显示并记录，
+    不因容量数值拒绝启动；实际运行仍可能内存不足，程序不会自动缩小模型或训练预算。
     **存储也需预留数十 GiB**：完整 SD3.5（含三个文本编码器）持久保存在 Drive，另留 8 GiB
     给 VAE 副本、缓存、断点和 LPIPS。下载前按 HF 官方文件大小计算缺失字节并检查可用空间，
     不足会先停止；普通 15GB Drive 通常不够。DriveFS 估计不能替代共享账号真实配额。
@@ -32,10 +32,11 @@ def build(code_commit):
     接受许可，并将有访问权限的 HF_TOKEN 放入 Colab Secrets；没有 Secret 时会隐藏输入。
     必要交互仅 Google Drive 授权和 HF 许可/token。Token 不写 Drive、不打印、不进入命令行。
 
-    **此 bootstrap 修复版尚未在真实 Colab 重跑。**此前首次运行在 venv ensurepip 阶段停止，
+    **此容量策略更新版尚未在真实 Colab 重跑。**此前首次运行在 venv ensurepip 阶段停止，
     未进入模型或训练。已做格式/编译、真实 CPU 无网络安装及 fake 控制流验证，
     不包含伪造实验输出。640 张图是采样单位，80 个主题 family 防跨 split 模板泄漏并用于
     bootstrap 聚类；不把这些图称为统计独立。三臂训练为正式初始预算，可能耗时较长。
+    本版执行代码更新会创建新的 Drive run identity；旧运行目录保留，不混用旧目录继续训练。
     """)
     md("### 1. 挂载 Drive，检出不可变代码\n打开链接所用分支可以更新；实际执行代码固定到下方 SHA。")
     code(f'''

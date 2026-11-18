@@ -8,7 +8,7 @@ an HF token. Tokens stay in memory/environment, never command arguments, Drive
 files or logs. Subprocess output is redacted before console/Drive tee; no login
 token is saved with `huggingface_hub.login`.
 
-**The bootstrap fix has not been rerun in real Colab.** The user's first Run all
+**The capacity-policy update has not been rerun in real Colab.** The user's first Run all
 stopped at venv's ensurepip invocation, before any model loading or training.
 Format, cell compilation and CPU/fake tests are engineering evidence only.
 Model access, full dependency installation on the user's
@@ -21,7 +21,7 @@ updates; reconnect and rerun all to resume verified artifacts.
 * Scientific config remains
   `6c74bd18231e18f56b4dd6e717804624e5f78929511645e108a4d8971c866495`.
 * Generator config hash:
-  `560e822c4eff4e20b6002216d14208bd677c3f495d59add840c63b9c80feada0`.
+  `5e882f0b0aeed62aa2cce06232e5018f5a0f4b602a3f4ae51c5f2cab17ee6b00`.
 * Execution profile hash:
   `c1497138ecccadf756f05231c32ec6437958fe283d45ae4e78e362ca0f1c56b7`.
 * Authored roster file SHA256:
@@ -71,9 +71,10 @@ latent/marker writes and visible progress. It exits before a separate clean
 subprocess loads the original VAE in float32 and decodes all pending clean RGB8.
 The clean marker binds the actual saved latent SHA256.
 
-Target runtime is A100 40GB/80GB and high-RAM. Preflight requires ≥38GiB GPU memory,
-≥40GiB RAM and BF16 support. These are conservative engineering prerequisites, not
-measured minimum requirements or an assurance of feasibility. No automatic smaller
+Preflight requires CUDA availability and the frozen BF16 support dependency.
+Actual GPU VRAM and host RAM are displayed and recorded as informational values;
+there is no capacity admission threshold or GPU-model-class requirement. Actual
+model stages can still exhaust memory. No automatic smaller model, precision,
 resolution, batch, data or update budget fallback is allowed.
 
 Drive root is `/content/drive/MyDrive/CEG-WM/self-reference-v1/`. Model snapshots
@@ -186,10 +187,10 @@ are not repaired or hidden in this delivery. No merge to main is authorized.
 
 ### Ensurepip bootstrap repair
 
-This repair changes only the notebook/builder, validation test and this document.
-The notebook still pins execution code
+The earlier bootstrap-only repair changed the notebook/builder, validation test
+and this document while retaining execution code
 `984955b1049af48f2f93bd32d91c0bd99c37736e`; scientific configuration, training,
-generator/profile hashes and Drive run identity are unchanged. All required
+generator/profile hashes and Drive run identity were unchanged in that repair. All required
 bootstrap helpers are embedded in the notebook rather than imported from new code
 missing in that fixed execution commit.
 
@@ -208,3 +209,19 @@ prefix/site and environment. No model, GPU or external package install occurs.
 Observed: **1 passed in 2.99s**. The prior immutable notebook link at `819ed99`
 does not update; open the newly delivered immutable link or the research-branch
 Colab link for this repair.
+
+### Capacity reporting update
+
+GPU/RAM capacity rejection was subsequently removed at the user's request. The
+generator policy is now `capacity_policy=report_only`; CUDA and BF16 checks,
+model access, disk/integrity checks and all scientific budgets remain intact.
+This execution-code change is committed first, then the notebook pins that new
+code SHA in a second commit. The code/generator identity therefore creates a new
+Drive run directory. Old directories are retained, not reset or mixed into the
+new run. The `--without-pip` plus host pip `--python` bootstrap remains embedded.
+
+CPU mocks verify an 8GiB GPU / 12GiB RAM passes hardware preflight and records both
+actual capacities when CUDA/BF16 are available. Missing CUDA or BF16 still raises
+the corresponding dependency error. No weights or real GPU are loaded. The three
+related test files passed **53 tests in 4.94s**, including the real offline tiny-wheel
+bootstrap recovery test and the existing scientific/observation checks.

@@ -41,11 +41,9 @@ def hardware(root, run):
     import sentencepiece
     import lpips
     if not torch.cuda.is_available():
-        raise ValueError("A100-class CUDA GPU required; no CPU fallback")
+        raise ValueError("CUDA required; no CPU fallback")
     gpu = torch.cuda.get_device_properties(0)
     gpu_gib, ram_gib = gpu.total_memory/2**30, psutil.virtual_memory().total/2**30
-    if gpu_gib < GENERATION["min_gpu_gib"] or ram_gib < GENERATION["min_ram_gib"]:
-        raise ValueError(f"needs >=38GiB GPU and >=40GiB RAM; observed {gpu_gib:.1f} / {ram_gib:.1f}GiB; no automatic budget reduction")
     if not torch.cuda.is_bf16_supported():
         raise ValueError("native BF16 GPU required")
     versions = {name: importlib.metadata.version(name) for name in (
@@ -59,8 +57,10 @@ def hardware(root, run):
     path = root/"runtime.json"
     if path.exists() and read_json(path)["identity"] != runtime:
         raise ValueError("runtime differs from this run's frozen environment; do not mix/resume")
-    atomic_json(path, {"identity": runtime, "gpu_gib": gpu_gib, "ram_gib": ram_gib})
-    announce(stage="hardware", **runtime, gpu_gib=gpu_gib, ram_gib=ram_gib)
+    capacity = {"gpu_gib": gpu_gib, "ram_gib": ram_gib, "capacity_policy": "report_only",
+                "capacity_note": "Capacity is informational, not an admission gate; actual stages may run out of memory."}
+    atomic_json(path, {"identity": runtime, **capacity})
+    announce(stage="hardware", **runtime, **capacity)
 
 
 def inventory(directory):

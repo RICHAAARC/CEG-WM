@@ -16,14 +16,13 @@
     "generation_process_sources": 640,
     "atomic_flush_each_source": true,
     "diffusers": "0.35.1",
-    "min_gpu_gib": 38,
-    "min_ram_gib": 40,
+    "capacity_policy": "report_only",
     "alexnet_url": "https://download.pytorch.org/models/alexnet-owt-7be5be79.pth",
     "alexnet_sha256_prefix": "7be5be79",
     "lpips_linear_url": "https://raw.githubusercontent.com/richzhang/PerceptualSimilarity/082bb24f84c091ea94de2867d34c4544f68e0963/lpips/weights/v0.1/alex.pth",
     "lpips_linear_git_blob": "1df9dfe62abb1fc89cc7f82b4e5fe886c979708e"
   },
-  "generation_hash": "560e822c4eff4e20b6002216d14208bd677c3f495d59add840c63b9c80feada0",
+  "generation_hash": "5e882f0b0aeed62aa2cce06232e5018f5a0f4b602a3f4ae51c5f2cab17ee6b00",
   "execution": {
     "name": "colab-float32-micro1-checkpoint-v1",
     "microbatch": 1,
