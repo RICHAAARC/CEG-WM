@@ -304,3 +304,70 @@ def test_notebook_stage_cells_run_in_order_and_safe_skip(tmp_path):
         exec(compile(cell.source,"notebook-stage","exec"),scope)
     assert not any(task in ("train","select","dev","test") for task,_ in backend.calls)
     assert read_json(tmp_path/"summary.json")["status"] == "incomplete"
+
+
+def test_notebook_without_ensurepip_repairs_partial_venv_and_targets_local_wheel(tmp_path,monkeypatch):
+    """Real CPU subprocesses; no index, downloads, build tools, weights or GPU."""
+    import base64
+    import hashlib
+    import os
+    import re
+    import subprocess
+    import uuid
+    import zipfile
+    monkeypatch.setenv("PIP_NO_INDEX","1")
+    monkeypatch.setenv("PIP_DISABLE_PIP_VERSION_CHECK","1")
+    monkeypatch.setenv("PIP_CONFIG_FILE",os.devnull)
+    spec=importlib.util.spec_from_file_location("bootstrap_notebook_builder",REPO/"scripts/build_self_reference_notebook.py")
+    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    notebook=module.build("984955b1049af48f2f93bd32d91c0bd99c37736e")
+    cells=[cell for cell in notebook.cells if cell.cell_type=="code"]
+    commands=[]
+    def logged(command,log):
+        commands.append(list(map(str,command)))
+        run_logged(command,log)
+    scope={"BOOT_OK":False,"Path":Path,"sys":sys,"json":json,"subprocess":subprocess,"re":re,"run_logged":logged}
+    # Actual delivered helper code; the rest of setup is safely skipped.
+    exec(compile(cells[1].source,"notebook-bootstrap","exec"),scope)
+    name="cegwm_bootstrap_probe_"+uuid.uuid4().hex
+    distribution=name+"-0.0.1.dist-info"
+    files={name+"/__init__.py":b"VALUE = 'target-only'\n",
+           distribution+"/METADATA":f"Metadata-Version: 2.1\nName: {name}\nVersion: 0.0.1\n".encode(),
+           distribution+"/WHEEL":b"Wheel-Version: 1.0\nGenerator: local-cpu-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+    records=[]
+    for path,payload in files.items():
+        digest=base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
+        records.append(f"{path},sha256={digest},{len(payload)}")
+    files[distribution+"/RECORD"]=("\n".join(records)+f"\n{distribution}/RECORD,,\n").encode()
+    wheel=tmp_path/(name+"-0.0.1-py3-none-any.whl")
+    with zipfile.ZipFile(wheel,"w") as archive:
+        for path,payload in files.items(): archive.writestr(path,payload)
+    venv=tmp_path/"interrupted-venv"
+    # Reproduce the important failed-bootstrap state: python exists, local pip does not.
+    subprocess.run([sys.executable,"-m","venv","--system-site-packages","--without-pip",str(venv)],check=True)
+    target=venv/"bin/python"
+    assert target.exists()
+    sentinel=venv/"keep-existing-state.txt"; sentinel.write_text("not cleared")
+    package_probe="import importlib.metadata as m,json,sys; print(json.dumps({'prefix':sys.prefix,'packages':sorted((d.metadata.get('Name',''),d.version) for d in m.distributions())}))"
+    host_before=subprocess.check_output([sys.executable,"-c",package_probe],text=True)
+    environment_before=os.environ.copy()
+    target_probe=f"import sys,json,sysconfig,{name}; print(json.dumps({{'prefix':sys.prefix,'site':sysconfig.get_path('purelib'),'file':{name}.__file__,'value':{name}.VALUE}}))"
+    host_lookup=f"import importlib.util; print(importlib.util.find_spec({name!r}))"
+    assert subprocess.check_output([sys.executable,"-c",host_lookup],text=True).strip()=="None"
+    for repetition in range(2):
+        pip_command,host_identity=scope["prepare_target_venv"](venv,tmp_path/"bootstrap.log")
+        assert pip_command==[sys.executable,"-m","pip","--python",str(target)]
+        logged([*pip_command,"install","--no-user","--no-index","--no-deps","--force-reinstall",str(wheel)],tmp_path/"bootstrap.log")
+        actual=json.loads(subprocess.check_output([str(target),"-c",target_probe],text=True))
+        assert Path(actual["prefix"]).resolve()==venv.resolve()
+        assert Path(actual["site"]).resolve().is_relative_to(venv.resolve())
+        assert Path(actual["file"]).resolve().is_relative_to(Path(actual["site"]).resolve())
+        assert actual["value"]=="target-only" and sentinel.read_text()=="not cleared"
+        assert not (Path(actual["site"])/"pip").exists()
+        assert scope["python_environment"](sys.executable)==host_identity
+        assert subprocess.check_output([sys.executable,"-c",host_lookup],text=True).strip()=="None"
+    assert subprocess.check_output([sys.executable,"-c",package_probe],text=True)==host_before
+    assert os.environ==environment_before
+    assert sum("venv" in command and "--without-pip" in command for command in commands)==2
+    assert all("--python" in command for command in commands if "install" in command)
+    assert "Successfully installed" in (tmp_path/"bootstrap.log").read_text()

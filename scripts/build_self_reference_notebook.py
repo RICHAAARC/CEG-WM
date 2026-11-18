@@ -32,7 +32,8 @@ def build(code_commit):
     接受许可，并将有访问权限的 HF_TOKEN 放入 Colab Secrets；没有 Secret 时会隐藏输入。
     必要交互仅 Google Drive 授权和 HF 许可/token。Token 不写 Drive、不打印、不进入命令行。
 
-    **此 Notebook 未在真实 Colab/GPU 上执行。**已做格式/编译及 CPU/fake 控制流验证，
+    **此 bootstrap 修复版尚未在真实 Colab 重跑。**此前首次运行在 venv ensurepip 阶段停止，
+    未进入模型或训练。已做格式/编译、真实 CPU 无网络安装及 fake 控制流验证，
     不包含伪造实验输出。640 张图是采样单位，80 个主题 family 防跨 split 模板泄漏并用于
     bootstrap 聚类；不把这些图称为统计独立。三臂训练为正式初始预算，可能耗时较长。
     """)
@@ -86,21 +87,47 @@ def build(code_commit):
     md("""
     ### 2. 独立环境与访问凭据
     复用 Colab 自带 torch/torchvision；安装命令全部 `--no-deps`，不会间接替换它们。
+    每次用 `--without-pip` 安全补全 venv，由宿主 pip≥22.3 的 `--python` 定向安装；
+    不依赖 Colab 的 ensurepip，也不会因半成品目录里已有 python 就跳过修复。
     pip 日志可见并保存在 Drive。安装后子进程实际导入 pipeline、三个编码器接口、VAE、
     sentencepiece 和 LPIPS；不加载权重。不兼容会明确停止，不做静默降级。
     """)
     code('''
+    def python_environment(executable):
+        probe = "import sys,sysconfig,json; print(json.dumps({'prefix':sys.prefix,'base_prefix':sys.base_prefix,'purelib':sysconfig.get_path('purelib'),'platlib':sysconfig.get_path('platlib')}))"
+        return json.loads(subprocess.check_output([str(executable), "-c", probe], text=True))
+
+    def prepare_target_venv(venv, log):
+        venv = Path(venv).resolve()
+        host_before = python_environment(sys.executable)
+        pip_version = subprocess.check_output([sys.executable, "-c", "import importlib.metadata; print(importlib.metadata.version('pip'))"], text=True).strip()
+        match = re.match(r"^(\\d+)\\.(\\d+)", pip_version)
+        if match is None or tuple(map(int, match.groups())) < (22, 3):
+            raise RuntimeError("Host pip >=22.3 is required for --python; no system-install fallback")
+        run_logged([sys.executable, "-m", "venv", "--system-site-packages", "--without-pip", str(venv)], log)
+        target = venv / "bin/python"
+        target_environment = python_environment(target)
+        if Path(target_environment["prefix"]).resolve() != venv or Path(host_before["prefix"]).resolve() == venv:
+            raise RuntimeError("Target interpreter prefix is not the isolated VENV")
+        for key in ("purelib", "platlib"):
+            if not Path(target_environment[key]).resolve().is_relative_to(venv):
+                raise RuntimeError("Target site-packages escapes VENV: " + key)
+        if python_environment(sys.executable) != host_before:
+            raise RuntimeError("Host Python environment changed during venv creation")
+        return [sys.executable, "-m", "pip", "--python", str(target)], host_before
+
     if BOOT_OK:
         try:
             bootstrap_log = BASE / "bootstrap.log"
-            if not PYTHON.exists():
-                run_logged([sys.executable, "-m", "venv", "--system-site-packages", str(VENV)], bootstrap_log)
+            target_pip, host_environment = prepare_target_venv(VENV, bootstrap_log)
             version_probe = "import importlib.metadata as m,json; print(json.dumps({k:m.version(k) for k in ['torch','torchvision']}))"
             system_versions = json.loads(subprocess.check_output([sys.executable, "-c", version_probe], text=True))
             constraints = VENV / "system-torch-constraints.txt"
             constraints.write_text("\\n".join(k + "==" + v for k,v in system_versions.items()) + "\\n")
-            run_logged([PYTHON, "-m", "pip", "install", "--no-deps", "--only-binary=:all:", "-c", constraints, *DEPENDENCIES], bootstrap_log)
-            run_logged([PYTHON, "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", REPO], bootstrap_log)
+            run_logged([*target_pip, "install", "--no-user", "--no-deps", "--only-binary=:all:", "-c", constraints, *DEPENDENCIES], bootstrap_log)
+            run_logged([*target_pip, "install", "--no-user", "--no-deps", "--no-build-isolation", "-e", REPO], bootstrap_log)
+            if python_environment(sys.executable) != host_environment:
+                raise RuntimeError("Host Python environment changed during targeted installation")
             actual_versions = json.loads(subprocess.check_output([str(PYTHON), "-c", version_probe], text=True))
             if actual_versions != system_versions:
                 raise RuntimeError("torch/torchvision changed unexpectedly")

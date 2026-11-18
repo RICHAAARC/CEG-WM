@@ -8,8 +8,10 @@ an HF token. Tokens stay in memory/environment, never command arguments, Drive
 files or logs. Subprocess output is redacted before console/Drive tee; no login
 token is saved with `huggingface_hub.login`.
 
-**Not executed on real Colab/GPU.** Format, cell compilation and CPU/fake tests
-are engineering evidence only. Model access, package installation on the user's
+**The bootstrap fix has not been rerun in real Colab.** The user's first Run all
+stopped at venv's ensurepip invocation, before any model loading or training.
+Format, cell compilation and CPU/fake tests are engineering evidence only.
+Model access, full dependency installation on the user's
 current Colab image, true-model numerics, GPU memory/time and scientific results
 remain unverified. A single Colab session may not complete the frozen 3×10000
 updates; reconnect and rerun all to resume verified artifacts.
@@ -131,8 +133,13 @@ from scientific status; missing or failed quality never means research PASS.
 
 ## Dependencies and LPIPS
 
-The isolated venv uses `--system-site-packages` to reuse Colab torch/torchvision.
-Every pip install uses `--no-deps`, system torch version constraints and binary-only
+The isolated venv uses `--system-site-packages --without-pip` to reuse Colab
+torch/torchvision without invoking unavailable/broken ensurepip. Every rerun safely
+recreates/completes the venv even when a failed prior attempt left its Python
+executable. Host pip>=22.3 installs through `host-python -m pip --python target-python`;
+the notebook checks target sys.prefix and purelib/platlib belong to the venv and
+the host prefix/site identity stays unchanged. There is no system-install fallback.
+Every pip install uses `--no-user --no-deps`, system torch version constraints and binary-only
 dependency wheels; the repository is installed editable with `--no-deps` and no
 build isolation. Dependencies include sentencepiece≥0.2.1 (no forced old source
 build). No torch upgrade is attempted. After pip, a child process imports actual
@@ -176,3 +183,28 @@ hardware, access and storage to validate those runtime outcomes.
 The original repository's two golden-hash failures and global collection/import
 limitations documented in `self_reference_v1_delivery.md` remain unchanged. They
 are not repaired or hidden in this delivery. No merge to main is authorized.
+
+### Ensurepip bootstrap repair
+
+This repair changes only the notebook/builder, validation test and this document.
+The notebook still pins execution code
+`984955b1049af48f2f93bd32d91c0bd99c37736e`; scientific configuration, training,
+generator/profile hashes and Drive run identity are unchanged. All required
+bootstrap helpers are embedded in the notebook rather than imported from new code
+missing in that fixed execution commit.
+
+The real CPU subprocess test constructs a standard tiny wheel with Python's
+`zipfile`, with no network/build dependencies. It starts with an existing
+`--without-pip` venv, invokes the notebook's actual helper, installs via host pip's
+`--python`, and repeats environment creation and installation. Both passes verify
+the target prefix/site and installed module path, no local pip bootstrap, preserved
+existing state, host `find_spec` returning None, and unchanged host package list,
+prefix/site and environment. No model, GPU or external package install occurs.
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_self_reference_colab.py::test_notebook_without_ensurepip_repairs_partial_venv_and_targets_local_wheel -q
+```
+
+Observed: **1 passed in 2.99s**. The prior immutable notebook link at `819ed99`
+does not update; open the newly delivered immutable link or the research-branch
+Colab link for this repair.
