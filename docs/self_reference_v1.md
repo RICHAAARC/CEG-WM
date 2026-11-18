@@ -219,9 +219,11 @@ nonexistence. Incomplete units block continuation. Wilson 95% intervals accompan
 fixed-denominator unit rates; within-source dependence limits their interpretation.
 
 B executes only after the **dev** A gate passes; test never opens or adjusts gates.
-The primary B unit is a source group: all predeclared writing keys and all four
-directions must have strict correct-key top1. Report directional rates, paired
-rescue/harm and 2000 source-cluster bootstrap draws (seed fixed). C must improve
+The primary B unit is `source_id` (one source image): all predeclared writing keys
+and all four directions must have strict correct-key top1. Report directional rates,
+paired image-level rescue/harm and 2000 `source_group` cluster-bootstrap draws
+(seed fixed). Repeated images from a thematic family are resampled together, not
+conjoined into a new family-level all-images success criterion. C must improve
 >=10pp over **both** baselines for the pilot investment target. That is not a
 statistical significance criterion. Failed/no-evidence/low-energy units remain in
 the denominator; per-unit engineering exceptions are explicit, not skipped.
@@ -268,3 +270,8 @@ arbitrary crop, large-angle, SyncSeal compatibility or official-baseline claim.
 Lightweight checks: `python -m pytest tests/unit/test_self_reference_v1.py -q`.
 The tests use a deliberately small fake VAE/config and do not download models,
 instantiate SD3.5, run real generation or validate the proposed carrier.
+
+The separately versioned Colab execution/generation delivery is documented in
+`docs/self_reference_v1_colab.md`. It adds microbatch accumulation and explicit
+nonreentrant VAE checkpointing without changing this scientific config hash,
+effective batch or update/selection budgets.

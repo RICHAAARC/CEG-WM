@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from .adapter import pil_image, rgb8
 from .config import ARMS, SHIFTS
 from .data import file_hash, json_write
+from .execution import legacy_profile, configure_torch
 from .networks import Reader, Writer, parameter_counts
 from .protocol import (bootstrap_sources, digest, interior, key_bits, reference,
                        reference_target, schedule, shift_rgb, stage_a,
@@ -54,6 +55,8 @@ def load_checkpoint(path, cache, config, arm, device):
     for k, v in {**identity(cache, config), "arm": arm}.items():
         if state.get(k) != v:
             raise ValueError("checkpoint identity mismatch: " + k)
+    if cache.raw.get("execution_hash") is not None and state.get("execution_hash") != cache.raw["execution_hash"]:
+        raise ValueError("checkpoint execution profile differs from frozen manifest")
     if type(state.get("update")) is not int or not 1 <= state["update"] <= config.updates:
         raise ValueError("checkpoint update outside frozen budget")
     if state.get("torch_version") != str(torch.__version__):
@@ -90,23 +93,29 @@ def training_batch(cache, rows, config, step, device):
             torch.stack(bits).to(device), torch.stack(ps).to(device), attacks, chosen)
 
 
-def train(cache, config, adapter, arm, output, *, device="cpu", resume=None, stop_after=None):
+def train(cache, config, adapter, arm, output, *, device="cpu", resume=None, stop_after=None, execution=None, progress=None):
     """stop_after is an interruption boundary, never changes frozen update budget."""
     if torch.device(device).type == "cuda" and os.environ.get("CUBLAS_WORKSPACE_CONFIG") != ":4096:8":
         raise ValueError("set CUBLAS_WORKSPACE_CONFIG=:4096:8 before starting Python for deterministic CUDA training")
+    execution = execution or legacy_profile(config)
+    execution.validate(config)
+    if cache.raw.get("execution_hash") not in (None, execution.digest):
+        raise ValueError("training execution profile differs from frozen manifest")
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     rows = cache.split("train")
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
     random.seed(config.seed)
-    torch.use_deterministic_algorithms(True)
+    configure_torch(device)
     writer, reader = Writer(arm, config).to(device), Reader(arm, config).to(device)
     optimizer = torch.optim.AdamW([*writer.parameters(), *reader.parameters()],
                                  lr=config.lr, weight_decay=config.weight_decay)
     start, elapsed_prior = 0, 0.0
     if resume:
         state = load_checkpoint(resume, cache, config, arm, device)
+        if state.get("execution_hash", legacy_profile(config).digest) != execution.digest:
+            raise ValueError("resume execution profile mismatch")
         writer.load_state_dict(state["writer"])
         reader.load_state_dict(state["reader"])
         optimizer.load_state_dict(state["optimizer"])
@@ -130,49 +139,64 @@ def train(cache, config, adapter, arm, output, *, device="cpu", resume=None, sto
                 check_clean(adapter, z[slot:slot+1], clean[slot:slot+1])
                 checked.add(source)
         optimizer.zero_grad(set_to_none=True)
-        zw = writer(z, bits, None if arm == "B0" else p)
-        decoded = adapter.decode(zw)
-        quantized = adapter.quantize_ste(decoded)
-        attacked = torch.cat([shift_rgb(quantized[i:i+1], *attack) for i, attack in enumerate(attacks)])
-        read = reader(adapter.encode_proxy(attacked))
-        evidence = read["evidence"]
-        bit_loss = (1 - bits * evidence).mean() if arm == "C" else \
-            F.binary_cross_entropy_with_logits(evidence, (bits+1)/2)
-        reference_loss = z.new_zeros(())
-        if arm != "B0":
-            targets = torch.cat([reference_target(p[i:i+1], *a, config.downsample) for i, a in enumerate(attacks)])
-            reference_loss = F.mse_loss(interior(read["p"], config.mask_border), interior(targets, config.mask_border))
-        rgb_loss = F.mse_loss(quantized, clean.float()/255)
-        residual_loss = F.mse_loss(zw, z)
-        loss = bit_loss + config.reference_weight * reference_loss + config.rgb_weight * rgb_loss \
-            + config.residual_weight * residual_loss
-        if not bool(torch.isfinite(loss)):
-            json_write(output / "failure.json", {"update": step, "status": "engineering_error", "reason": "nonfinite_loss"})
-            raise ValueError("nonfinite training loss")
-        loss.backward()
+        losses = dict.fromkeys(("total", "bit", "reference", "rgb", "residual"), 0.0)
+        from torch.utils.checkpoint import checkpoint
+        for offset in range(0, config.batch_size, execution.microbatch):
+            sl = slice(offset, offset+execution.microbatch)
+            zm, bm, pm = z[sl], bits[sl], p[sl]
+            zw = writer(zm, bm, None if arm == "B0" else pm)
+            decoded = checkpoint(adapter.decode, zw, use_reentrant=False) if execution.checkpoint_vae else adapter.decode(zw)
+            quantized = adapter.quantize_ste(decoded)
+            attacked = torch.cat([shift_rgb(quantized[i:i+1], *a) for i, a in enumerate(attacks[sl])])
+            observation = checkpoint(adapter.encode_proxy, attacked, use_reentrant=False) if execution.checkpoint_vae else adapter.encode_proxy(attacked)
+            read = reader(observation)
+            evidence = read["evidence"]
+            bit_loss = (1-bm*evidence).mean() if arm == "C" else F.binary_cross_entropy_with_logits(evidence, (bm+1)/2)
+            reference_loss = zm.new_zeros(())
+            if arm != "B0":
+                targets = torch.cat([reference_target(pm[i:i+1], *a, config.downsample) for i,a in enumerate(attacks[sl])])
+                reference_loss = F.mse_loss(interior(read["p"], config.mask_border), interior(targets, config.mask_border))
+            rgb_loss = F.mse_loss(quantized, clean[sl].float()/255)
+            residual_loss = F.mse_loss(zw, zm)
+            loss = bit_loss + config.reference_weight*reference_loss + config.rgb_weight*rgb_loss + config.residual_weight*residual_loss
+            if not bool(torch.isfinite(loss)):
+                json_write(output/"failure.json", {"update": step, "status": "engineering_error", "reason": "nonfinite_loss"})
+                raise ValueError("nonfinite training loss")
+            weight = execution.microbatch/config.batch_size
+            (loss*weight).backward()
+            for name, value in zip(losses, (loss, bit_loss, reference_loss, rgb_loss, residual_loss)):
+                losses[name] += float(value.detach())*weight
+            # Do not retain the last microbatch's graph across optimizer updates.
+            del zw, decoded, quantized, attacked, observation, read, evidence, loss
         if any(p.grad is not None and not bool(torch.isfinite(p.grad).all()) for p in [*writer.parameters(), *reader.parameters()]):
             raise ValueError("nonfinite training gradient")
         optimizer.step()
         update = step + 1
-        if update % config.checkpoint_every == 0 or update == end:
+        if progress:
+            progress({"arm": arm, "update": update, "budget": config.updates, "loss": losses})
+        if update % config.checkpoint_every == 0 or update % execution.recovery_every == 0 or update == end:
+            from dataclasses import asdict
             state = {**identity(cache, config), "arm": arm, "update": update,
+                     "execution_hash": execution.digest, "execution": asdict(execution),
                      "writer": writer.state_dict(), "reader": reader.state_dict(),
                      "optimizer": optimizer.state_dict(), "rng": rng_state(),
                      "elapsed_seconds": elapsed_prior + time.perf_counter()-began,
                      "next_input_signature": tensor_signature(schedule(config.seed, update, len(rows), config.batch_size)),
                      "last_input_signature": tensor_signature(chosen), "torch_version": str(torch.__version__),
-                     "device": str(device), "loss": {"total": float(loss.detach()), "bit": float(bit_loss.detach()),
-                        "reference": float(reference_loss.detach()), "rgb": float(rgb_loss.detach()),
-                        "residual": float(residual_loss.detach())}}
-            last_path = output / f"update_{update:06d}.pt"
+                     "device": str(device), "loss": losses}
+            prefix = "update" if update % config.checkpoint_every == 0 or execution.name == "batch-v1" else "recovery"
+            last_path = output / f"{prefix}_{update:06d}.pt"
             if last_path.exists():
                 raise ValueError("refusing to overwrite checkpoint")
             temporary = last_path.with_suffix(".tmp")
-            torch.save(state, temporary)
+            with open(temporary, "wb") as stream:
+                torch.save(state, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
             temporary.replace(last_path)
             json_write(last_path.with_suffix(".json"), {k: state[k] for k in (
                 "manifest_hash", "config_hash", "arm", "update", "elapsed_seconds", "last_input_signature",
-                "next_input_signature", "loss", "torch_version", "device")} | {"sha256": file_hash(last_path)})
+                "next_input_signature", "loss", "torch_version", "device", "execution_hash")} | {"sha256": file_hash(last_path)})
     return last_path
 
 
@@ -192,7 +216,8 @@ def measure(cache, config, adapter, arm, checkpoint, split, shifts, *, device="c
     began = time.perf_counter()
     detection_seconds = 0.0
     for index, row in enumerate(rows):
-        common = {"unit_id": row["unit_id"], "source": row["source_group"], "arm": arm}
+        common = {"unit_id": row["unit_id"], "source": row["source_id"], "source_id": row["source_id"],
+                  "source_group": row["source_group"], "arm": arm}
         try:
             z, clean = cache.load(row)
             z, clean = z[None].to(device), clean[None].to(device)
@@ -240,11 +265,15 @@ def measure(cache, config, adapter, arm, checkpoint, split, shifts, *, device="c
                     record.update({"status": "engineering_error", "error": f"{type(error).__name__}: {error}",
                                    "top1": False, "bit_accuracy": 0.0, "exact": False})
                 records.append(record)
+                if os.environ.get("CEGWM_PROGRESS") == "1":
+                    print(f"measure arm={arm} split={split} unit={index+1}/{len(rows)} shift=({dx},{dy}) status={record['status']}", flush=True)
         except Exception as error:
             for dx, dy in shifts:
                 records.append({**common, "shift": [dx, dy], "status": "engineering_error",
                                 "error": f"{type(error).__name__}: {error}", "top1": False,
                                 "bit_accuracy": 0.0, "exact": False, "psnr": None, "lpips": None})
+            if os.environ.get("CEGWM_PROGRESS") == "1":
+                print(f"measure arm={arm} split={split} unit={index+1}/{len(rows)} engineering_error={type(error).__name__}", flush=True)
     synchronize(device)
     return {"records": records, "total_evaluation_seconds": time.perf_counter()-began,
             "detection_seconds": detection_seconds,
@@ -349,22 +378,30 @@ def quality_report(by_arm, config):
 
 def stage_b_report(by_arm, config):
     sources = sorted({r["source"] for r in by_arm["C"]})
-    vectors, result = {}, {"source_denominator": len(sources), "arms": {}, "paired": {}}
+    groups = {r["source"]: r.get("source_group", r["source"]) for r in by_arm["C"]}
+    clusters = sorted(set(groups.values()))
+    def cluster_ci(values):
+        rng = np.random.default_rng(config.seed)
+        blocks = [np.asarray([i for i,s in enumerate(sources) if groups[s] == group]) for group in clusters]
+        means = [float(values[np.concatenate([blocks[i] for i in rng.integers(len(blocks), size=len(blocks))])].mean())
+                 for _ in range(config.bootstrap_samples)]
+        return np.quantile(means, [.025, .975]).tolist()
+    vectors, result = {}, {"source_denominator": len(sources), "cluster_denominator": len(clusters), "arms": {}, "paired": {}}
     for arm, records in by_arm.items():
         vectors[arm] = np.asarray([all(r["top1"] for r in records if r["source"] == source) for source in sources], dtype=float)
         vector = vectors[arm]
         result["arms"][arm] = {"all_four_source_rate": float(vector.mean()), "all_four_source_count": int(vector.sum()),
-            "source_bootstrap95": bootstrap_sources(vector, config.seed, config.bootstrap_samples),
+            "source_bootstrap95": cluster_ci(vector),
             "directions": {str(s): summarize([r for r in records if r["shift"] == list(s)]) for s in SHIFTS[1:]}}
     gains = []
     for arm in ("B0", "B1"):
         diff = vectors["C"]-vectors[arm]
         gains.append(float(diff.mean()))
         result["paired"][arm] = {"gain": float(diff.mean()), "rescue_sources": int((diff > 0).sum()),
-            "harm_sources": int((diff < 0).sum()), "paired_source_bootstrap95": bootstrap_sources(diff, config.seed, config.bootstrap_samples)}
+            "harm_sources": int((diff < 0).sum()), "paired_source_bootstrap95": cluster_ci(diff)}
     result["complete"] = all(r["status"] != "engineering_error" for records in by_arm.values() for r in records)
     result["gain_target_met"] = all(g >= config.b_gain_target for g in gains) and result["complete"]
-    result["interpretation"] = "10pp is a pilot investment target, not statistical proof; all keys within source must succeed"
+    result["interpretation"] = "Image-level all-keys/four-shifts success; bootstrap resamples source_group clusters; 10pp is a pilot target, not proof"
     return result
 
 

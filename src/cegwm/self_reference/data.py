@@ -1,6 +1,7 @@
 """Cache manifest validation. No generation or model downloads occur here."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -24,7 +25,10 @@ def json_write(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(data, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    with open(temporary, "w") as stream:
+        stream.write(json.dumps(data, indent=2, sort_keys=True, allow_nan=False) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     temporary.replace(path)
 
 
