@@ -1,0 +1,113 @@
+{
+  "version": "self-reference-relation-v1",
+  "bits": 32,
+  "width": 64,
+  "latent_channels": 16,
+  "rgb_size": 512,
+  "downsample": 8,
+  "mask_border": 8,
+  "conv_layers": 3,
+  "residual_cap": 0.05,
+  "epsilon": 1e-08,
+  "updates": 10000,
+  "batch_size": 4,
+  "lr": 0.0001,
+  "weight_decay": 0.0001,
+  "seed": 20261118,
+  "reference_weight": 0.1,
+  "rgb_weight": 10.0,
+  "residual_weight": 0.01,
+  "checkpoint_every": 1000,
+  "bootstrap_samples": 2000,
+  "a_top1_min": 0.95,
+  "a_max_baseline_gap": 0.02,
+  "b_gain_target": 0.1,
+  "psnr_min": 30.0,
+  "lpips_max": 0.05,
+  "psnr_gap_min": -0.5,
+  "lpips_gap_max": 0.005,
+  "dct_order": [
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      3,
+      0
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      3,
+      2
+    ],
+    [
+      3,
+      3
+    ]
+  ],
+  "attacks_dx_dy": [
+    [
+      0,
+      0
+    ],
+    [
+      -2,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      0,
+      -2
+    ],
+    [
+      0,
+      2
+    ]
+  ]
+}
