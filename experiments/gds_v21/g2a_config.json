@@ -1,0 +1,22 @@
+{
+  "stage": "G2A_CLEAN_EXISTING_G1",
+  "release": "gds-v21-g2a-20261128",
+  "seed": 281128201,
+  "split_domain": "GDS-v2.1-G2A-source-split-v1:",
+  "train_source_count": 4,
+  "dev_source_count": 2,
+  "heldout_source_count": 2,
+  "train_arms": ["N", "B0"],
+  "max_steps": 2000,
+  "batch_size": 4,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "max_run_seconds": 5400,
+  "checkpoint_every": 100,
+  "dev_every": 200,
+  "new_generations": 0,
+  "training_attempts": 1,
+  "quality_is_gate": false,
+  "augmentation": "none; clean RGB only",
+  "automatic_expansion": false
+}
