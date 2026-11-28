@@ -114,11 +114,17 @@ def plot_results(out):
     ax.legend();fig.tight_layout();fig.savefig(out/'token_vs_group.png',dpi=140);plt.close(fig)
     g=pd.read_csv(out/'clean_geometry.csv')
     g=g[(g.arm=='P') & (g.split=='heldout')].groupby(['unit','method']).margin.min().unstack()
-    ax=g[['ideal_tokens','native_vq','saved_unet']].plot.bar(figsize=(8,4),rot=0)
+    fig,ax=plt.subplots(figsize=(9,4))
+    x=np.arange(len(g));names=['ideal_tokens','native_vq','saved_unet']
+    for j,name in enumerate(names):ax.bar(x+(j-1)*.24,g[name],.24,label=name)
+    ax.set_xticks(x,g.index)
     ax.axhline(0,color='grey');ax.set_ylabel('Minimum identity margin')
     ax.set_title('Clean identity vs 8 wrong hypotheses (no RGB attack)')
     ax.legend(loc='upper left',bbox_to_anchor=(1.01,1),fontsize=8)
-    ax.figure.tight_layout();ax.figure.savefig(out/'clean_identity.png',dpi=140);plt.close(ax.figure)
+    from matplotlib.ticker import FormatStrFormatter
+    ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+    fig.subplots_adjust(left=.14,right=.78,bottom=.16,top=.85)
+    fig.savefig(out/'clean_identity.png',dpi=140);plt.close(fig)
 
 
 def run(source, reference, output):
