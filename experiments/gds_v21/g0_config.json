@@ -1,0 +1,19 @@
+{
+  "stage": "G0",
+  "model_id": "microsoft/vq-diffusion-ithq",
+  "model_revision": "3f796fb49ee559370dc638dea1d8116af131d993",
+  "diffusers_version": "0.39.0",
+  "transformers_version": "4.57.6",
+  "num_inference_steps": 100,
+  "guidance_scale": 5.0,
+  "truncation_rate": 1.0,
+  "prompt": "A green watering can on a stone step beside a terracotta flower pot.",
+  "seed": 281128000,
+  "max_generation_attempts": 2,
+  "max_source_seconds": 900,
+  "intervention_window_to_inspect": [60, 11],
+  "actual_intervention": false,
+  "G1_authorized_limit": {"new_sources": 8, "generation_attempts": 48},
+  "G1_execution_in_this_delivery": false,
+  "reader_training": false
+}
