@@ -1,0 +1,17 @@
+{
+  "G0_commit": "64edc32ec7155b44a183b5168a1af8a490deae8d",
+  "payload_sha256": "f7c5236c9ff2e0c2e537c64016ff9fbfb59de1a671e51c2f6355fb48ae354c1a",
+  "files": {
+    "core.py": "d3b1c4dfa7e342863629a33490dbc990c562dc889f6f51c144bb19cb84404b36",
+    "geometry.py": "af5ba5a2f104678ef3af00df39cbfa6ca767569f0e434839f069dd7011487d6a",
+    "compat.py": "f9275d44d64d4da62a4ccf67dd417ca80d82eceb4952a035e634ebb78f654640",
+    "observe.py": "43e7953508afb0973442658fa364fd67922780cdb82838b2a8b7ac2e04733a43",
+    "test_g0.py": "1cfcbcfb17d6c3fb9161c3409262ccb2c690064b32b08ef815a6ddb10522fece",
+    "g0_cpu.py": "780d83ca7e07154570951a75fbf383de37e6203070abdde09a92290daf5b82f3",
+    "g0_gpu.py": "4f937b0a2a92ff69d1d92e16e836c762f751d2252da330e377554240294b7562",
+    "g0_config.json": "54c7f9cdb1b8678a2558195b527a8a2e92df4706bcb6b0d201c97169ea6f066e",
+    "README.txt": "4a6386f9efbb9df8c3b0cd1981975bf50e5827a4ba0aa488dfd199f403f1b9b4"
+  },
+  "user_supplied_run": "g0-20261128T073448Z-bde6b4",
+  "review": "User log reports G0_REAL_MODEL passed; notebook verifies original Drive report before G1."
+}

@@ -73,12 +73,24 @@ def select_set(initial, current_mask, mask_probability, timestep,
     for _ in range(limit):
         before = value(selected)
         best = None
+        # Reuse the current sufficient statistics; the swap score is O(|H|),
+        # not O(|H| * number of selected positions). Exact same objective.
+        if objective in ('P', 'P-E'):
+            current = (ledger if objective == 'P' else np.zeros_like(ledger)) + contribution[:,selected].sum(1)
+        elif objective == 'B2':
+            current = visible_counts + np.bincount(address[selected],weights=target_probability[selected],minlength=16)
         # Numeric index tie-breaking, independent of hash pool ordering.
         for i in sorted(outgoing):
             for j in sorted(incoming):
-                candidate = selected.copy()
-                candidate[i], candidate[j] = False, True
-                after = value(candidate)
+                if objective in ('P','P-E'):
+                    after = float(np.min(current - contribution[:,i] + contribution[:,j]))
+                elif objective == 'B1':
+                    after = float(before - target_probability[i] + target_probability[j])
+                else:
+                    counts = current.copy()
+                    counts[address[i]] -= target_probability[i]
+                    counts[address[j]] += target_probability[j]
+                    after = float(np.log1p(counts).sum())
                 tolerance = 1e-10 * max(1., abs(before), abs(after))
                 if after - before > tolerance and (best is None or after > best[0]):
                     best = (after, i, j)

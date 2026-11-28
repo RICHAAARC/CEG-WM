@@ -1,0 +1,29 @@
+{
+  "stage": "G1",
+  "release": "gds-v21-g1-20261128",
+  "model_id": "microsoft/vq-diffusion-ithq",
+  "model_revision": "3f796fb49ee559370dc638dea1d8116af131d993",
+  "diffusers_version": "0.39.0",
+  "transformers_version": "4.57.6",
+  "num_inference_steps": 100,
+  "guidance_scale": 5.0,
+  "truncation_rate": 1.0,
+  "source_count": 8,
+  "max_generation_attempts": 48,
+  "arms": ["N", "B0", "B1", "B2", "P", "P-E"],
+  "max_source_seconds": 900,
+  "max_run_seconds": 14400,
+  "G0_report_relative": "g0-20261128T073448Z-bde6b4/gpu/report.json",
+  "reader_training": false,
+  "automatic_expansion": false,
+  "sources": [
+    {"source_id":"g1-000","seed":281128101,"prompt":"A copper alarm clock and a folded map on a navy blue suitcase."},
+    {"source_id":"g1-001","seed":281128102,"prompt":"A stone archway opening onto a courtyard with a single orange tree."},
+    {"source_id":"g1-002","seed":281128103,"prompt":"Two white geese standing beside a red barn door on a cloudy day."},
+    {"source_id":"g1-003","seed":281128104,"prompt":"A glass jar of paintbrushes beside a turquoise ceramic palette in an artist studio."},
+    {"source_id":"g1-004","seed":281128105,"prompt":"A yellow canoe pulled onto a pebble shore below misty pine-covered hills."},
+    {"source_id":"g1-005","seed":281128106,"prompt":"A vintage red telephone on a cream desk beneath a framed botanical print."},
+    {"source_id":"g1-006","seed":281128107,"prompt":"A striped awning above a bakery window displaying round loaves and croissants."},
+    {"source_id":"g1-007","seed":281128108,"prompt":"A silver watering trough beside a wooden gate in a sunlit pasture."}
+  ]
+}
